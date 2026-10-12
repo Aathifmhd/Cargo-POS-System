@@ -1,0 +1,16 @@
+{
+  "name": "cargo-pos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cargo POS - wholesale POS for goods imported from India and sold in Sri Lanka",
+  "scripts": {
+    "setup": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix backend start",
+    "seed": "npm --prefix backend run seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

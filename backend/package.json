@@ -1,0 +1,19 @@
+{
+  "name": "cargo-pos-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cargo POS API - wholesale import (India -> Sri Lanka) POS backend",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js --port=4000",
+    "seed": "node src/seed.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  }
+}

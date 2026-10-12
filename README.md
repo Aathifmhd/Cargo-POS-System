@@ -41,7 +41,15 @@ There are no service bindings, because the browser calls `/api` directly and the
 
 The live INR rate refreshes when the dashboard asks for it and the stored rate is older than 5 minutes, because background timers don't run reliably on serverless hosting.
 
-Test locally with `vercel dev`, then deploy by importing the GitHub repo at vercel.com/new. No environment variables are needed.
+Logins are signed tokens that any running copy can check, so you stay signed in even when Vercel spreads requests across several copies. Set one environment variable in Vercel → Settings → Environment Variables:
+
+| Name | Value |
+|---|---|
+| `SESSION_SECRET` | any long random text (keep it private) |
+
+Without it, a built-in demo secret is used. That works, but anyone who reads this code could forge a login, so set it.
+
+Test locally with `vercel dev`, then deploy by importing the GitHub repo at vercel.com/new.
 
 ## Logins and admin approval
 

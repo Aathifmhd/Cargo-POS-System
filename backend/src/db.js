@@ -261,6 +261,7 @@ addColumn('products', 'opening_pcs', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('products', 'opening_cost_per_pcs', 'REAL NOT NULL DEFAULT 0');
 addColumn('sale_items', 'disc', 'REAL NOT NULL DEFAULT 0');      // line discount amount (Rs)
 addColumn('sale_items', 'disc_pct', 'REAL NOT NULL DEFAULT 0');
+addColumn('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');   // +1 on password change → older logins end
 
 const DEFAULT_SETTINGS = {
   fx_mode: 'auto',

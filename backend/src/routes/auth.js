@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { all, get, run, fail, num } from '../db.js';
 import {
-  checkCredentials, createSession, createApproval, requireAuth, adminOnly, audit,
+  checkCredentials, createSession, createApproval, requireAuth, adminOnly, audit, endSession,
   hashPassword, verifyPassword, publicUser, RANK, rankOf, ROLE_NAME,
 } from '../auth.js';
 
@@ -26,7 +26,7 @@ r.post('/auth/login', (req, res) => {
 r.get('/auth/me', requireAuth, (req, res) => res.json({ user: publicUser(req.user) }));
 
 r.post('/auth/logout', requireAuth, (req, res) => {
-  run('DELETE FROM sessions WHERE token = ?', req.token);
+  endSession(req.token);
   audit(req.user, 'Logged out');
   res.json({ ok: true });
 });
@@ -46,10 +46,10 @@ r.post('/auth/password', requireAuth, (req, res) => {
   const { current, next } = req.body || {};
   if (!verifyPassword(current, req.user.password_hash)) fail('Your current password is wrong');
   if (String(next || '').length < 6) fail('New password must be at least 6 characters');
-  run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(next), req.user.id);
-  run('DELETE FROM sessions WHERE user_id = ? AND token <> ?', req.user.id, req.token);
+  run('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?', hashPassword(next), req.user.id);
   audit(req.user, 'Changed own password');
-  res.json({ ok: true });
+  // the new password ends every older login; hand this device a fresh one so it stays signed in
+  res.json({ ok: true, token: createSession(get('SELECT * FROM users WHERE id = ?', req.user.id)) });
 });
 
 /* ---------------- users (admin only) ---------------- */
@@ -82,10 +82,8 @@ r.put('/users/:id', requireAuth, adminOnly, (req, res) => {
   run('UPDATE users SET name = ?, role = ?, active = ? WHERE id = ?', String(req.body.name || u.name).trim(), role, active, id);
   if (req.body.password) {
     if (String(req.body.password).length < 6) fail('Password must be at least 6 characters');
-    run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(req.body.password), id);
-    run('DELETE FROM sessions WHERE user_id = ?', id);
+    run('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?', hashPassword(req.body.password), id);   // ends their logins
   }
-  if (!active) run('DELETE FROM sessions WHERE user_id = ?', id);
   audit(req.user, `Updated user ${u.username}${req.body.password ? ' (password reset)' : ''}`);
   res.json(get('SELECT id, username, name, role, active FROM users WHERE id = ?', id));
 });

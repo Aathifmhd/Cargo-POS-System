@@ -18,8 +18,6 @@ export function verifyPassword(password, stored) {
   return real.length === test.length && crypto.timingSafeEqual(real, test);
 }
 
-const isoIn = (ms) => new Date(Date.now() + ms).toISOString();
-const nowIso = () => new Date().toISOString();
 export const publicUser = (u) => u && { id: u.id, username: u.username, name: u.name, role: u.role };
 
 /** cashier < admin < superadmin */
@@ -62,30 +60,77 @@ export function checkCredentials(username, password) {
   return u;
 }
 
+/* ---------------- signed tokens ----------------
+ * Login sessions and admin approvals are self-contained signed tokens (payload + HMAC), so ANY copy of
+ * the backend can check them without looking anything up. This matters on Vercel, where several copies
+ * run at once and each has its own database: a login made on one copy must work on the next one.
+ * - The user is named by username (the same on every copy), not by database id.
+ * - Each user has a login version (users.token_version, the same on every copy); changing a password
+ *   bumps it, which ends older logins.
+ * - SESSION_SECRET (env) signs the tokens. Locally a random secret is kept in the database.
+ */
+function loadSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  if (process.env.VERCEL) {
+    console.warn('SESSION_SECRET is not set — using the built-in demo secret. Set it in Vercel → Settings → Environment Variables.');
+    return 'cargo-pos-demo-secret--set-SESSION_SECRET-on-vercel';
+  }
+  let s = get(`SELECT value FROM settings WHERE key = 'session_secret'`)?.value;
+  if (!s) {
+    s = crypto.randomBytes(32).toString('hex');
+    run(`INSERT INTO settings (key, value) VALUES ('session_secret', ?)`, s);
+  }
+  return s;
+}
+const SECRET = loadSecret();
+const b64 = (buf) => Buffer.from(buf).toString('base64url');
+const mac = (data) => crypto.createHmac('sha256', SECRET).update(data).digest('base64url');
+
+function sign(payload) {
+  const body = b64(JSON.stringify(payload));
+  return `${body}.${mac(body)}`;
+}
+function verify(token) {
+  const [body, sig] = String(token || '').split('.');
+  if (!body || !sig) return null;
+  const good = Buffer.from(mac(body));
+  const given = Buffer.from(sig);
+  if (good.length !== given.length || !crypto.timingSafeEqual(good, given)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(body, 'base64url').toString());
+    return p.exp > Date.now() ? p : null;
+  } catch { return null; }
+}
+const activeUser = (username) => get('SELECT * FROM users WHERE username = ? AND active = 1', username);
+
+// Logged-out tokens (kept on this copy until they would have expired anyway).
+const loggedOut = new Map();
+export function endSession(token) {
+  const p = verify(token);
+  if (p) loggedOut.set(token, p.exp);
+  for (const [t, exp] of loggedOut) if (exp < Date.now()) loggedOut.delete(t);
+}
+
 export function createSession(user) {
-  const token = crypto.randomBytes(32).toString('hex');
-  run('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)', token, user.id, isoIn(SESSION_HOURS * 3600_000));
   run('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', user.id);
-  run('DELETE FROM sessions WHERE expires_at < ?', nowIso());
-  return token;
+  return sign({ t: 's', u: user.username, v: (user.token_version ?? 0), exp: Date.now() + SESSION_HOURS * 3600_000 });
 }
 
 export function createApproval(approver, user, action) {
-  const token = crypto.randomBytes(24).toString('hex');
-  run('INSERT INTO approvals (token, approver_id, user_id, action, expires_at) VALUES (?, ?, ?, ?, ?)',
-    token, approver.id, user.id, action || null, isoIn(APPROVAL_MINUTES * 60_000));
-  return token;
+  return sign({
+    t: 'a', by: approver.username, v: (approver.token_version ?? 0), for: user.username, action: action || null,
+    n: crypto.randomBytes(9).toString('base64url'), exp: Date.now() + APPROVAL_MINUTES * 60_000,
+  });
 }
 
 /* ---------------- middleware ---------------- */
 export function requireAuth(req, res, next) {
   const header = req.get('Authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  const row = token && get(
-    `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ? AND u.active = 1`,
-    token, nowIso());
-  if (!row) return res.status(401).json({ error: 'Please log in again' });
-  req.user = row;
+  const p = token && !loggedOut.has(token) ? verify(token) : null;
+  const user = p && p.t === 's' ? activeUser(p.u) : null;
+  if (!user || (user.token_version ?? 0) !== p.v) return res.status(401).json({ error: 'Please log in again' });
+  req.user = user;
   req.token = token;
   next();
 }
@@ -111,13 +156,12 @@ export function guard(req, action, level = 'admin') {
     audit(req.user, action);
     return;
   }
-  const tok = req.get('X-Approval');
-  const a = tok && get(
-    `SELECT a.*, u.username AS approver, u.role AS approver_role FROM approvals a JOIN users u ON u.id = a.approver_id
-      WHERE a.token = ? AND a.used = 0 AND a.user_id = ? AND a.expires_at > ?`, tok, req.user.id, nowIso());
-  if (!a || (RANK[a.approver_role] ?? 0) < RANK[level]) {
-    throw new HttpError(403, `${ROLE_NAME[level]} approval needed: ${action}`, { needApproval: true, action, level });
-  }
-  run('UPDATE approvals SET used = 1 WHERE token = ?', tok);
-  audit(req.user, action, a.approver);
+  const p = verify(req.get('X-Approval'));
+  const approver = p && p.t === 'a' && p.for === req.user.username ? activeUser(p.by) : null;
+  const ok = approver && (approver.token_version ?? 0) === p.v && rankOf(approver) >= RANK[level] && !usedApprovals.has(p.n);
+  if (!ok) throw new HttpError(403, `${ROLE_NAME[level]} approval needed: ${action}`, { needApproval: true, action, level });
+  usedApprovals.set(p.n, p.exp);   // one use only
+  for (const [n, exp] of usedApprovals) if (exp < Date.now()) usedApprovals.delete(n);
+  audit(req.user, action, approver.username);
 }
+const usedApprovals = new Map();

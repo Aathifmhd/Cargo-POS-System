@@ -151,7 +151,11 @@ export function ChangePasswordModal({ onClose }) {
   const save = async (e) => {
     e.preventDefault();
     if (f.next !== f.again) return toast('The new passwords do not match', 'error');
-    try { await api.post('/auth/password', { current: f.current, next: f.next }); toast('Password changed'); onClose(); }
+    try {
+      const res = await api.post('/auth/password', { current: f.current, next: f.next });
+      if (res.token) setToken(res.token);   // older logins end; this device keeps working
+      toast('Password changed'); onClose();
+    }
     catch (err) { toast(err.message, 'error'); }
   };
   return (

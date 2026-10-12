@@ -107,6 +107,19 @@ export function fxStatus() {
   };
 }
 
+/**
+ * Refresh when the stored rate is older than the refresh interval. Used on reads, because on
+ * serverless hosting (Vercel) a background timer only runs while an instance happens to be alive.
+ */
+let inFlight = null;
+export async function ensureFreshRate() {
+  const s = getSettings();
+  const age = s.fx_updated_at ? Date.now() - new Date(s.fx_updated_at).getTime() : Infinity;
+  if (s.fx_mode === 'manual' || age < REFRESH_MS) return fxStatus();
+  inFlight ??= refreshRate().finally(() => { inFlight = null; });
+  return inFlight;
+}
+
 export function startFxTimer() {
   const tick = () => refreshRate().catch((e) => console.error('FX refresh failed:', e.message));
   tick();

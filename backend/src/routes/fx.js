@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { fail, num } from '../db.js';
 import { guard } from '../auth.js';
-import { fxStatus, refreshRate, setManualRate, setAutoMode } from '../fx.js';
+import { ensureFreshRate, refreshRate, setManualRate, setAutoMode } from '../fx.js';
 
 const r = Router();
 
-r.get('/', (req, res) => res.json(fxStatus()));
+r.get('/', async (req, res) => res.json(await ensureFreshRate()));
 r.post('/refresh', async (req, res) => res.json(await refreshRate()));
 
 /** Edit the rate: { mode: 'manual', rate } or { mode: 'auto' } */

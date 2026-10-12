@@ -70,7 +70,10 @@ export function Login({ onLoggedIn }) {
             {busy ? <><span className="spinner light" /> Signing in…</> : <>Sign in <Icon name="arrowRight" size={18} /></>}
           </button>
         </form>
-        <p className="login-foot">© {new Date().getFullYear()} Cargo POS</p>
+        <div className="login-foot">
+          <span className="maker"><span className="maker-mark">Z</span> by <b>Zenatiq Solutions</b></span>
+          <span className="maker-copy">© {new Date().getFullYear()} Cargo POS · All rights reserved</span>
+        </div>
       </div>
     </div>
   );

@@ -26,6 +26,23 @@ Other computers on the shop network can open `http://<this-pc-ip>:4000`.
 
 The data lives in `backend/data/cargo-pos.db`. To back it up, copy that file, or go to **Settings → Download backup**.
 
+## Deploying to Vercel (demo)
+
+`vercel.json` deploys the app as one Vercel project with two services:
+
+| Service | Folder | Public path |
+|---|---|---|
+| `frontend` | `frontend/` (Vite) | `/` and every page, e.g. `/pos` (falls back to `index.html`) |
+| `backend` | `backend/` (Express, `src/server.js`) | `/api/*`, which the backend receives unchanged |
+
+There are no service bindings, because the browser calls `/api` directly and the services never call each other.
+
+> **Demo only. Data is not kept on Vercel.** The backend uses a SQLite file, and on Vercel the only writable place is `/tmp`, which is wiped whenever a new instance starts and isn't shared between instances. Each new instance therefore loads the demo data again. Bills, stock and payments made on the demo can vanish, and you may occasionally be logged out. For real shop use, move the data to a hosted database such as Turso/libSQL, or run the backend on a server with a disk.
+
+The live INR rate refreshes when the dashboard asks for it and the stored rate is older than 5 minutes, because background timers don't run reliably on serverless hosting.
+
+Test locally with `vercel dev`, then deploy by importing the GitHub repo at vercel.com/new. No environment variables are needed.
+
 ## Logins and admin approval
 
 - The default admin is **admin / admin123**, created on first start. Change it under *Users & Security*, or from the user menu at the bottom left.

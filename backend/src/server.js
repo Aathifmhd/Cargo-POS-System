@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
-import './db.js';
+import { get } from './db.js';
 import suppliers from './routes/suppliers.js';
 import customers from './routes/customers.js';
 import products from './routes/products.js';
@@ -14,6 +14,12 @@ import { requireAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
 import { setOnRateChange, startFxTimer } from './fx.js';
 import { revalueGrns, todayRate } from './services.js';
+
+// Demo deployment on Vercel: each new instance starts with an empty /tmp database,
+// so fill it with the demo data (suppliers, stock, bills) instead of an empty shop.
+if (process.env.VERCEL && get('SELECT COUNT(*) AS n FROM products').n === 0) {
+  await import('./seed.js');
+}
 
 const app = express();
 app.use(cors());

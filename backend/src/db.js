@@ -2,7 +2,11 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const dataDir = path.resolve(process.env.DATA_DIR || path.join(import.meta.dirname, '..', 'data'));
+// On Vercel the deployment is read-only and only /tmp can be written — and /tmp is wiped between
+// instances, so data there does NOT last. Set DATA_DIR (or move to a hosted database) for real use.
+const dataDir = path.resolve(
+  process.env.DATA_DIR || (process.env.VERCEL ? '/tmp/cargo-pos' : path.join(import.meta.dirname, '..', 'data'))
+);
 fs.mkdirSync(dataDir, { recursive: true });
 
 export const DB_FILE = path.join(dataDir, 'cargo-pos.db');

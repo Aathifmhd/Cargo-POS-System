@@ -873,15 +873,6 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
    ========================================================= */
 /* Plain light background, soft blurred colour shapes drifting slowly behind a centred card */
 .login { position: relative; height: 100vh; overflow: hidden; background: #f4f7f8; }
-.login-blobs { position: absolute; inset: 0; pointer-events: none; }
-.blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: .55; will-change: transform; }
-.b1 { width: 420px; height: 420px; background: #EBC173; top: -120px; left: -80px; animation: drift1 18s ease-in-out infinite; }
-.b2 { width: 360px; height: 360px; background: #93c5fd; bottom: -120px; right: -60px; animation: drift2 22s ease-in-out infinite; }
-.b3 { width: 280px; height: 280px; background: #fcd34d; top: 55%; left: 12%; opacity: .35; animation: drift3 20s ease-in-out infinite; }
-.b4 { width: 260px; height: 260px; background: #c4b5fd; top: 8%; right: 14%; opacity: .4; animation: drift1 24s ease-in-out infinite reverse; }
-@keyframes drift1 { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(120px, 80px) scale(1.15); } }
-@keyframes drift2 { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(-140px, -90px) scale(1.1); } }
-@keyframes drift3 { 0%, 100% { transform: translate(0, 0) scale(1); } 33% { transform: translate(90px, -70px) scale(1.2); } 66% { transform: translate(-60px, 40px) scale(.9); } }
 
 .login-center { position: relative; z-index: 1; height: 100%; overflow-y: auto; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 32px 16px; gap: 22px; }
 .login-brand { text-align: center; animation: fadeUp .6s both; }
@@ -909,35 +900,34 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .login-foot .maker-mark { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 10.5px; font-weight: 900; color: #0B0F19; background: linear-gradient(135deg, #f0c46a, #E0A73A); }
 .login-foot .maker-copy { font-size: 11px; opacity: .7; }
 .login.leaving .login-card { animation: zoomOut .5s forwards; }
-.login.leaving .login-brand, .login.leaving .login-blobs { animation: fadeOut .5s forwards; }
+.login.leaving .login-brand { animation: fadeOut .5s forwards; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } }
 @keyframes zoomOut { to { opacity: 0; transform: scale(.94) translateY(-10px); } }
 @keyframes fadeOut { to { opacity: 0; } }
-/* Login — always dark, whatever theme the rest of the system uses */
-.login { background: #080A10; color-scheme: dark; }
-.login .blob { opacity: .32; filter: blur(90px); }
-.login .b1 { background: #2C3E6B; }
-.login .b2 { background: #2563eb; }
-.login .b3 { background: #b45309; opacity: .22; }
-.login .b4 { background: #7c3aed; opacity: .26; }
+/* Login — a soft dark navy look, whatever theme the rest of the system uses */
+.login { background: linear-gradient(125deg, #050d24 0%, #0a1838 30%, #07122d 55%, #0d1f48 80%, #050c22 100%); background-size: 260% 260%; animation: loginFlow 22s ease-in-out infinite; color-scheme: dark; }
+/* a faint dot grid that drifts slowly behind the card */
+.login::before { content: ""; position: absolute; inset: -40px; pointer-events: none; background-image: radial-gradient(rgba(255, 255, 255, .13) 1px, transparent 1.4px); background-size: 28px 28px; mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 75%); -webkit-mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 75%); animation: gridDrift 40s linear infinite; }
+@keyframes loginFlow { 0%, 100% { background-position: 0% 40%; } 50% { background-position: 100% 60%; } }
+@keyframes gridDrift { from { transform: translate(0, 0); } to { transform: translate(28px, 28px); } }
 .login .login-brand h1 { color: #f1f5f9; }
-.login .login-brand p, .login .login-foot { color: #8a9bab; }
+.login .login-brand p, .login .login-foot { color: #b4bfd6; }
 .login .brand-logo.lg { box-shadow: 0 10px 30px rgba(224, 167, 58, .3); }
-.login .login-card { background: rgba(17, 27, 36, .78); border-color: rgba(255, 255, 255, .08); box-shadow: 0 24px 60px rgba(0, 0, 0, .5); }
+.login .login-card { background: rgba(16, 32, 74, .6); border: 1px solid rgba(255, 255, 255, .14); box-shadow: 0 24px 60px rgba(8, 12, 28, .45); }
 .login .login-card h2 { color: #f1f5f9; }
-.login .login-card .muted { color: #8a9bab; }
-.login .login-field { border-color: #2c3c4a; color: #7c8d9c; background: rgba(255, 255, 255, .03); }
+.login .login-card .muted { color: #b4bfd6; }
+.login .login-field { border-color: rgba(255, 255, 255, .2); color: #a3afc8; background: rgba(255, 255, 255, .08); }
 .login .login-field:focus-within { border-color: #E0A73A; color: #E0A73A; box-shadow: 0 0 0 4px rgba(224, 167, 58, .16); }
 .login .login-field input { color: #e8eef3; }
-.login .login-field input::placeholder { color: #6b7d8c; }
-.login .login-field .eye { color: #7c8d9c; }
+.login .login-field input::placeholder { color: #95a2bd; }
+.login .login-field .eye { color: #a3afc8; }
 .login .login-error { color: #f87171; }
 .login .login-btn { background: #E0A73A; border-color: #E0A73A; color: #0B0F19; }
-.login .login-btn:not(:disabled):hover { background: #E0A73A; border-color: #E0A73A; box-shadow: 0 10px 24px rgba(224, 167, 58, .3); }
+.login .login-btn:not(:disabled):hover { background: #ebb54f; border-color: #ebb54f; box-shadow: 0 10px 24px rgba(224, 167, 58, .3); }
 .login .spinner.light { border-color: rgba(255, 255, 255, .3); border-top-color: #ffffff; }
 
 @media (prefers-reduced-motion: reduce) {
-  .blob, .brand-logo.lg, .lock-badge { animation: none; }
+  .login, .login::before, .brand-logo.lg, .lock-badge { animation: none; }
 }
 
 /* =========================================================

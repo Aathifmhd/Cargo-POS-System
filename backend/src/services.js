@@ -7,6 +7,7 @@ import {
    LANDED COST
    (INR goods + INR cargo) x exchange rate + LKR expenses,
    spread over items by their share of the INR goods value.
+   A charge with a category (cargo is paid category by category) is spread over that category's items only.
    ========================================================= */
 export function computeLanding({ items, exchange_rate, cargo_charge_inr, expenses, goods_rate, cargo_rate }) {
   const baseRate = num(exchange_rate);
@@ -34,14 +35,30 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   const goods_inr = round2(lines.reduce((s, l) => s + l.line_inr, 0));
   const cargo_inr = num(cargo_charge_inr);
   const expenses_lkr = round2((expenses || []).reduce((s, e) => s + num(e.amount_lkr), 0));
-  const overhead_lkr = cargo_inr * cRate + expenses_lkr;
   const total_pcs = lines.reduce((s, l) => s + l.pcs, 0);
   const total_sets = lines.reduce((s, l) => s + Math.max(0, l.sets + l.extra_sets - l.short_sets), 0);
 
+  // each charge is shared by value over the items it covers: a category's cargo charge over that
+  // category's items only, any other charge over the whole shipment
+  const overheadOf = lines.map(() => 0);
+  const all = lines.map((_, i) => i);
+  const spread = (amount, idx) => {
+    if (!amount) return;
+    const val = idx.reduce((s, i) => s + lines[i].line_inr, 0);
+    const pcs = idx.reduce((s, i) => s + lines[i].pcs, 0);
+    if (!(val > 0 || pcs > 0)) { if (idx !== all) spread(amount, all); return; }
+    for (const i of idx) overheadOf[i] += amount * (val > 0 ? lines[i].line_inr / val : lines[i].pcs / pcs);
+  };
+  spread(cargo_inr * cRate, all);
+  for (const e of expenses || []) {
+    const cat = String(e.category || '').trim().toLowerCase();
+    const mine = cat ? all.filter((i) => String(lines[i].category || '').trim().toLowerCase() === cat) : [];
+    spread(num(e.amount_lkr), mine.length ? mine : all);
+  }
+
   // a line's landed cost is spread over every piece received, so free pieces lower the cost per piece
-  const out = lines.map((l) => {
-    const share = goods_inr > 0 ? l.line_inr / goods_inr : total_pcs > 0 ? l.pcs / total_pcs : 0;
-    const landed = l.line_inr * rate + share * overhead_lkr;
+  const out = lines.map((l, i) => {
+    const landed = l.line_inr * rate + overheadOf[i];
     const perPcs = l.pcs ? landed / l.pcs : 0;
     return { ...l, landed_lkr: round2(landed), landed_per_set_lkr: round2(perPcs * l.pcs_per_set), landed_per_pcs_lkr: round2(perPcs) };
   });
@@ -106,6 +123,9 @@ export async function revalueGrns() {
     for (const { g, settledAt, recost } of actions) {
       if (!recost) { await setById('grns', g.id, { settled_at: settledAt }); continue; }
       const items = await find('grn_items', { grn_id: g.id }, { sort: { id: 1 } });
+      // older lines don't keep their category: take it from the product
+      const cats = await productsById(items.filter((i) => !i.category).map((i) => i.product_id), { category: 1 });
+      for (const i of items) i.category ??= cats[i.product_id]?.category ?? null;
       const expenses = await find('grn_expenses', { grn_id: g.id });
       const calc = computeLanding({ items, expenses, exchange_rate: rate, cargo_charge_inr: g.cargo_charge_inr });
       for (let i = 0; i < calc.items.length; i++) {
@@ -256,7 +276,7 @@ async function saveGrn(body, editId = null) {
     }
     const newPcs = new Map(); // product id → pieces this GRN now brings in
 
-    for (const e of expenses) await insert('grn_expenses', { grn_id: grnId, label: e.label.trim(), amount_lkr: round2(e.amount_lkr) });
+    for (const e of expenses) await insert('grn_expenses', { grn_id: grnId, label: e.label.trim(), category: String(e.category || '').trim() || null, amount_lkr: round2(e.amount_lkr) });
 
     for (const it of calc.items) {
       let product = it.product_id ? await findOne('products', { id: num(it.product_id) }) : null;
@@ -284,7 +304,7 @@ async function saveGrn(body, editId = null) {
       });
 
       await insert('grn_items', {
-        grn_id: grnId, product_id: product.id, name: product.name, pcs_per_set: it.pcs_per_set, colors_count: Math.round(num(it.colors_count)),
+        grn_id: grnId, product_id: product.id, name: product.name, category: product.category || (it.category || '').trim() || null, pcs_per_set: it.pcs_per_set, colors_count: Math.round(num(it.colors_count)),
         color_names: it.color_names || null, sizes: it.sizes || null, sets: it.sets, cost_inr_per_set: it.cost_inr_per_set,
         line_inr: it.line_inr, landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr,
         mrp_per_set: round2(mrp), expected_per_set: round2(expected),
@@ -363,7 +383,7 @@ export async function getGrn(id) {
   const prods = await productsById(items.map((i) => i.product_id), { code: 1, category: 1, subtype: 1, pname: 1 });
   g.items = items.filter((i) => prods[i.product_id]).map((i) => {
     const p = prods[i.product_id];
-    return { ...i, code: p.code, category: p.category ?? null, subtype: p.subtype ?? null, pname: p.pname ?? null };
+    return { ...i, code: p.code, category: i.category ?? p.category ?? null, subtype: p.subtype ?? null, pname: p.pname ?? null };
   });
   g.expenses = expenses;
   g.payments = payments;

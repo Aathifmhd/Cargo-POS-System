@@ -84,8 +84,9 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
           <div className="grid grid-2">
             <Card title="Cargo charge (LKR)">
               {g.expenses.length === 0 ? <p className="muted">No extra expenses.</p> : g.expenses.map((e) => (
-                <div key={e.id} className="list-row"><span>{e.label}</span><b className="mono">{lkr(e.amount_lkr)}</b></div>
+                <div key={e.id} className="list-row"><span>{e.category ? <>Cargo charge – <b>{e.category}</b></> : e.label}</span><b className="mono">{lkr(e.amount_lkr)}</b></div>
               ))}
+              {g.expenses.length > 1 && <div className="list-row"><b>Total cargo charge</b><b className="mono">{lkr(g.expenses_lkr)}</b></div>}
             </Card>
             <Card title="Supplier payments">
               {g.payments.length === 0 ? <p className="muted">No payment linked to this GRN yet.</p> : g.payments.map((p) => (

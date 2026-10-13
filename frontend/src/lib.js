@@ -181,7 +181,7 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const short_pcs = q(it.short_pcs);
     const line_inr = r2(sets * cost + extra_pcs * (cost / pcsPerSet));
     return {
-      sets, pcs_per_set: pcsPerSet, line_inr, extra_sets, extra_pcs, short_sets, short_pcs,
+      category: it.category || '', sets, pcs_per_set: pcsPerSet, line_inr, extra_sets, extra_pcs, short_sets, short_pcs,
       set_pcs: sets * pcsPerSet,                       // pieces in the billed sets
       billed_pcs: sets * pcsPerSet + extra_pcs,        // pieces on the supplier's bill
       pcs: Math.max(0, (sets + extra_sets - short_sets) * pcsPerSet + extra_pcs - short_pcs), // pieces really received
@@ -192,13 +192,28 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   const goods_inr = r2(lines.reduce((s, l) => s + l.line_inr, 0));
   const cargo_inr = n(cargo_charge_inr);
   const expenses_lkr = r2((expenses || []).reduce((s, e) => s + n(e.amount_lkr), 0));
-  const overhead = cargo_inr * rate + expenses_lkr;
   const total_pcs = lines.reduce((s, l) => s + l.pcs, 0);
   const total_sets = lines.reduce((s, l) => s + Math.max(0, l.sets + l.extra_sets - l.short_sets), 0);
   // a line's landed cost is spread over every piece received (billed + free)
-  const out = lines.map((l) => {
-    const share = goods_inr > 0 ? l.line_inr / goods_inr : total_pcs > 0 ? l.pcs / total_pcs : 0;
-    const landed = l.line_inr * rate + share * overhead;
+  // each charge is shared by value over the items it covers: a category's cargo charge over that
+  // category's items only, any other charge over the whole shipment
+  const overheadOf = lines.map(() => 0);
+  const all = lines.map((_, i) => i);
+  const spread = (amount, idx) => {
+    if (!amount) return;
+    const val = idx.reduce((s, i) => s + lines[i].line_inr, 0);
+    const pcs = idx.reduce((s, i) => s + lines[i].pcs, 0);
+    if (!(val > 0 || pcs > 0)) { if (idx !== all) spread(amount, all); return; }
+    for (const i of idx) overheadOf[i] += amount * (val > 0 ? lines[i].line_inr / val : lines[i].pcs / pcs);
+  };
+  spread(cargo_inr * rate, all);
+  for (const e of expenses || []) {
+    const cat = String(e.category || '').trim().toLowerCase();
+    const mine = cat ? all.filter((i) => String(lines[i].category || '').trim().toLowerCase() === cat) : [];
+    spread(n(e.amount_lkr), mine.length ? mine : all);
+  }
+  const out = lines.map((l, i) => {
+    const landed = l.line_inr * rate + overheadOf[i];
     const perPcs = l.pcs ? landed / l.pcs : 0;
     return {
       ...l,

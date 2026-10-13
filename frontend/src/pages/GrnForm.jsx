@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, n, r2, lkr, inr, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
 import { PageHeader, Card, Icon, Field, NumInput, Combobox, Segmented, useToast, Loading } from '../components/ui.jsx';
@@ -6,7 +6,15 @@ import { SupplierForm } from '../components/forms.jsx';
 import SizePicker from '../components/SizePicker.jsx';
 import { useSettings } from '../App.jsx';
 
-const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR, as a line in the charges list
+const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR, as lines in the charges list (one per category)
+const catKey = (c) => String(c || '').trim().toLowerCase();
+// cargo is paid category by category: one charge line per category, spread over that category's items only
+const cargoLabel = (cat) => `Cargo charge – ${cat}`;
+// charges for categories no longer in the list are left out; a charge without a category (older GRNs) covers the whole shipment
+const liveCharges = (expenses, items) => {
+  const cats = new Set(items.map((i) => catKey(i.category)));
+  return (expenses || []).filter((e) => !catKey(e.category) || cats.has(catKey(e.category)));
+};
 let keySeq = 1;
 const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', mrp_per_pcs: '', expected_per_pcs: '' });
 // prices are entered per piece; products keep them per set, so convert on the way in and out
@@ -37,7 +45,7 @@ export default function GrnForm() {
   const [busy, setBusy] = useState(false);
 
   const initial = useMemo(() => {
-    if (editId) return { items: [], entry: blankItem(), editingKey: null, expenses: [{ label: 'Cargo charge', amount_lkr: '' }] };
+    if (editId) return { items: [], entry: blankItem(), editingKey: null, expenses: [] };
     try {
       const d = JSON.parse(localStorage.getItem(DRAFT));
       if (d && Array.isArray(d.items)) {
@@ -45,15 +53,15 @@ export default function GrnForm() {
         d.items = d.items.filter((i) => i.name || i.product_id).map((i) => withPcsPrices({ ...i, key: keySeq++ }));
         d.entry = withPcsPrices({ ...(d.entry || blankItem()), key: keySeq++ });
         d.editingKey = null;
-        const total = (d.expenses || []).reduce((t, e) => t + n(e.amount_lkr), 0);
-        d.expenses = [{ label: 'Cargo charge', amount_lkr: total || '' }];
+        // an older draft's single cargo charge stays as a charge for the whole shipment
+        d.expenses = (d.expenses || []).filter((e) => catKey(e.category) || n(e.amount_lkr) !== 0);
         return d;
       }
     } catch { /* ignore */ }
     return {
       date: today(), supplier_id: null, supplier_invoice_no: '', cargo_name: '',
       payment_type: 'credit', due_date: '', payment_method: 'Bank transfer', payment_reference: '', notes: '',
-      expenses: [{ label: 'Cargo charge', amount_lkr: '' }],   // the only charge: the cargo charge in LKR
+      expenses: [],   // the cargo charge in LKR, one line per category (set in the Goods Table)
       items: [], entry: blankItem(), editingKey: null,
     };
   }, []); // eslint-disable-line
@@ -71,7 +79,7 @@ export default function GrnForm() {
       setG({
         date: d.date, supplier_id: d.supplier_id, supplier_invoice_no: d.supplier_invoice_no || '', cargo_name: d.cargo_name || '',
         payment_type: d.payment_type, due_date: d.due_date || '', payment_method: d.payments?.[0]?.method || 'Bank transfer', payment_reference: '', notes: d.notes || '',
-        expenses: [{ label: 'Cargo charge', amount_lkr: d.expenses_lkr || '' }],
+        expenses: d.expenses.map((e) => ({ label: e.label, category: e.category || '', amount_lkr: e.amount_lkr })),
         items: d.items.map((i) => ({
           key: keySeq++, product_id: i.product_id, name: i.name, category: i.category || '', subtype: i.subtype || '', pname: i.pname || '',
           catOther: false, isNew: false, pcs_per_set: i.pcs_per_set, colors_count: i.colors_count || '', color_names: i.color_names || '', sizes: i.sizes || '',
@@ -106,17 +114,25 @@ export default function GrnForm() {
   // the bale's figures come from the added items only
   // every cost is worked out at the fixed costing rate (Settings → Exchange rate), never the live rate
   const rate = n(settings.costing_rate) || 3.5;
-  const calc = useMemo(() => computeLanding({ ...g, exchange_rate: rate }), [g, rate]);
+  const calc = useMemo(() => computeLanding({ ...g, exchange_rate: rate, expenses: liveCharges(g.expenses, g.items) }), [g, rate]);
   // the entry card's own figures: worked out as if it were already in the list (charges are shared by value)
   const entryIdx = g.editingKey ? g.items.findIndex((i) => i.key === g.editingKey) : g.items.length;
-  const preview = useMemo(() => computeLanding({
-    ...g, exchange_rate: rate, items: g.editingKey ? g.items.map((i) => (i.key === g.editingKey ? g.entry : i)) : [...g.items, g.entry],
-  }), [g, rate]);
+  const preview = useMemo(() => {
+    const items = g.editingKey ? g.items.map((i) => (i.key === g.editingKey ? g.entry : i)) : [...g.items, g.entry];
+    return computeLanding({ ...g, exchange_rate: rate, items, expenses: liveCharges(g.expenses, items) });
+  }, [g, rate]);
 
   // an item is either the entry card or a line in the list
   const mapItem = (x, key, fn) => (x.entry?.key === key ? { ...x, entry: fn(x.entry) } : { ...x, items: x.items.map((i) => (i.key === key ? fn(i) : i)) });
   const updItem = (key, patch) => setG((x) => mapItem(x, key, (i) => ({ ...i, ...patch })));
-  const setCargo = (v) => setG((x) => ({ ...x, expenses: [{ label: 'Cargo charge', amount_lkr: v }] }));
+  // the cargo charge of one category (no category: an older charge for the whole shipment)
+  const cargoOf = (cat) => (g.expenses.find((e) => catKey(e.category) === catKey(cat))?.amount_lkr ?? '');
+  const setCargo = (cat, v) => setG((x) => {
+    const has = x.expenses.some((e) => catKey(e.category) === catKey(cat));
+    const line = { label: cat ? cargoLabel(cat) : 'Cargo charge', category: cat || '', amount_lkr: v };
+    return { ...x, expenses: has ? x.expenses.map((e) => (catKey(e.category) === catKey(cat) ? line : e)) : [...x.expenses, line] };
+  });
+  const wholeCargo = g.expenses.find((e) => !catKey(e.category) && n(e.amount_lkr) !== 0);
 
   const catalog = useMemo(() => parseCatalog(settings), [settings]);
   const rules = useMemo(() => priceRules(settings), [settings]);
@@ -265,7 +281,7 @@ export default function GrnForm() {
     if (missing && !confirm(`"${missing.name}" has no cost. Save anyway?`)) return;
     setBusy(true);
     try {
-      const body = { ...g, items: filledItems.map(forSaving) };
+      const body = { ...g, items: filledItems.map(forSaving), expenses: liveCharges(g.expenses, filledItems).filter((e) => n(e.amount_lkr) !== 0) };
       const saved = editId ? await api.put(`/grns/${editId}`, body) : await api.post('/grns', body);
       if (!editId) localStorage.removeItem(DRAFT);
       toast(editId ? `${saved.grn_no} updated — stock adjusted` : `${saved.grn_no} saved — stock updated`);
@@ -362,6 +378,10 @@ export default function GrnForm() {
                       ))}
                     </tbody>
                   </table>
+                  <div className="item-group-cargo">
+                    <span>Cargo charge for <b>{cat}</b><span className="muted small"> · shared over {rows.length === 1 ? 'this item' : `these ${rows.length} items`} by value</span></span>
+                    <div className="input-affix cargo-input"><span>Rs</span><NumInput value={cargoOf(rows[0].it.category)} onChange={(v) => setCargo(rows[0].it.category, v)} placeholder="0.00" /></div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -576,14 +596,27 @@ export default function GrnForm() {
                 </div>
               );
             })()}
-
+            {wholeCargo && (
+              <div className="cargo-row cargo-row-old">
+                <div className="cargo-row-text">
+                  <b>Cargo charge for the whole shipment</b>
+                  <span className="muted small">Entered before cargo was split by category · shared over all items. Move it into the categories above, then clear it.</span>
+                </div>
+                <div className="input-affix cargo-input"><span>Rs</span><NumInput value={wholeCargo.amount_lkr} onChange={(v) => setCargo('', v)} placeholder="0.00" /></div>
+              </div>
+            )}
             <div className="cargo-row">
               <div className="cargo-row-text">
-                <b>Cargo charge</b>
-                <span className="muted small">Paid in LKR for this shipment · shared over the items above by their value</span>
+                <b>Total cargo charge</b>
+                <span className="muted small">
+                  {g.items.length
+                    ? [...groups.map(([cat, rows]) => `${cat} ${lkr(n(cargoOf(rows[0].it.category)))}`), ...(wholeCargo ? [`Whole shipment ${lkr(n(wholeCargo.amount_lkr))}`] : [])].join(' · ')
+                    : 'Add items, then enter the cargo charge for each category in the table above'}
+                </span>
               </div>
-              <div className="input-affix cargo-input"><span>Rs</span><NumInput value={g.expenses[0]?.amount_lkr ?? ''} onChange={setCargo} placeholder="0.00" /></div>
+              <b className="cargo-total mono">{lkr(calc.expenses_lkr)}</b>
             </div>
+
           </Card>
 
           {/* STEP 3 */}
@@ -619,6 +652,9 @@ export default function GrnForm() {
               <dt>× Costing rate</dt><dd>{rate.toFixed(2)}</dd>
               <dt>= Goods in LKR</dt><dd>{lkr(calc.goods_inr * rate)}</dd>
               <dt>+ Cargo charge</dt><dd>{lkr(calc.expenses_lkr)}</dd>
+              {groups.filter(([, rows]) => n(cargoOf(rows[0].it.category)) > 0).map(([cat, rows]) => (
+                <Fragment key={cat}><dt className="sub-kv">· {cat}</dt><dd className="sub-kv">{lkr(n(cargoOf(rows[0].it.category)))}</dd></Fragment>
+              ))}
               <dt className="total">Total cost</dt><dd className="total">{lkr(calc.total_lkr)}</dd>
             </dl>
             <div className="formula mt">

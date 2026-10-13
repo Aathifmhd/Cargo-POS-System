@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from 'react';
-import { api, useApi, ROLE_NAME, isSuper } from '../lib.js';
-import { PageHeader, Card, Icon, Loading, ErrorBox, Badge, Modal, Field, Segmented, Tabs, useToast } from '../components/ui.jsx';
+import { api, useApi, isSuper } from '../lib.js';
+import { PageHeader, Card, Icon, Loading, ErrorBox, Badge, RoleBadge, Modal, Field, Segmented, Tabs, useToast } from '../components/ui.jsx';
 import { useAuth } from '../App.jsx';
 
 const when = (s) => (s ? new Date(s.replace(' ', 'T') + (s.includes('Z') ? '' : 'Z')).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
@@ -20,12 +20,19 @@ export default function Users() {
 
 function UserList() {
   const { user: me } = useAuth();
+  const toast = useToast();
   const { data, error, reload } = useApi('/users');
   const [edit, setEdit] = useState(null); // user | 'new'
+  // deleting needs the Super Admin's password; the Super Admin can never be deleted
+  const remove = async (u) => {
+    if (!confirm(`Delete ${u.name} (${u.username})? They will no longer be able to log in. Their past bills and activity stay.`)) return;
+    try { await api.del(`/users/${u.id}`); toast(`${u.name} deleted`); reload(); } catch (err) { toast(err.message, 'error'); }
+  };
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!data) return <Loading />;
   return (
     <Card pad={false} title="People who can log in" actions={<button className="btn btn-primary btn-sm" onClick={() => setEdit('new')}><Icon name="plus" size={16} /> Add user</button>}>
+      <div className="alert alert-amber small users-note"><Icon name="crown" size={16} /> Adding, editing or deleting a user always needs the Super Admin's password. The Super Admin can't be deleted.</div>
       <div className="table-wrap">
         <table className="table">
           <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Last login</th><th>Status</th><th></th></tr></thead>
@@ -33,10 +40,13 @@ function UserList() {
             <tr key={u.id}>
               <td className="strong">{u.name} {u.id === me.id && <Badge tone="teal">You</Badge>}</td>
               <td>{u.username}</td>
-              <td><Badge tone={u.role === 'superadmin' ? 'amber' : u.role === 'admin' ? 'violet' : 'blue'}>{ROLE_NAME[u.role]}</Badge></td>
+              <td><RoleBadge role={u.role} /></td>
               <td>{when(u.last_login)}</td>
               <td>{u.active ? <Badge tone="green">Active</Badge> : <Badge>Switched off</Badge>}</td>
-              <td className="right">{(u.role !== 'superadmin' || isSuper(me)) && <button className="btn btn-sm" onClick={() => setEdit(u)}><Icon name="edit" size={15} /> Edit</button>}</td>
+              <td className="right nowrap">
+                <button className="btn btn-sm" onClick={() => setEdit(u)}><Icon name="edit" size={15} /> Edit</button>
+                {u.role !== 'superadmin' && u.id !== me.id && <button className="btn btn-sm btn-ghost btn-icon" title="Delete user" onClick={() => remove(u)}><Icon name="trash" size={15} /></button>}
+              </td>
             </tr>
           ))}</tbody>
         </table>
@@ -62,16 +72,17 @@ function UserForm({ user, onClose, onSaved }) {
   return (
     <Modal title={user ? `Edit ${user.name}` : 'Add a user'} onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="user-form">Save</button></>}>
-      <form id="user-form" className="grid grid-2" onSubmit={save}>
-        <Field label="Full name" required><input className="input" autoFocus value={f.name} onChange={set('name')} /></Field>
-        <Field label="Username" required>{user ? <input className="input" value={f.username} disabled /> : <input className="input" value={f.username} onChange={set('username')} autoComplete="off" />}</Field>
+      {/* autofill and password-manager pop-ups are kept off this form: it is for other people, not the person logged in */}
+      <form id="user-form" className="grid grid-2" onSubmit={save} autoComplete="off">
+        <Field label="Full name" required><input className="input" autoFocus value={f.name} onChange={set('name')} name="staff-full-name" autoComplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" /></Field>
+        <Field label="Username" required><input className="input" value={f.username} onChange={set('username')} name="staff-login" autoComplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" /></Field>
         <Field label={user ? 'New password' : 'Password'} hint={user ? 'Leave empty to keep the current password' : 'At least 6 characters'} required={!user}>
-          <input className="input" type="password" value={f.password} onChange={set('password')} autoComplete="new-password" />
+          <input className="input" type="password" value={f.password} onChange={set('password')} name="staff-new-password" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
         </Field>
         <Field label="Role">
           <Segmented value={f.role} onChange={set('role')} options={[
             { value: 'cashier', label: 'Cashier' }, { value: 'admin', label: 'Admin' },
-            ...(isSuper(me) ? [{ value: 'superadmin', label: 'Super Admin' }] : []),
+            ...(isSuper(me) || user?.role === 'superadmin' ? [{ value: 'superadmin', label: 'Super Admin' }] : []),
           ]} />
         </Field>
         <div className="span-2 muted small">
@@ -139,6 +150,9 @@ function Rules() {
       <dl className="info-list">{list.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}</dl>
       <div className="alert alert-amber mt"><Icon name="shield" />
         <span><b>Super Admin only:</b> setting or changing a customer's <b>credit limit</b> — including raising it on the till when a credit bill would go over the limit. Admins are asked for the Super Admin password too.</span>
+      </div>
+      <div className="alert alert-amber mt"><Icon name="crown" />
+        <span><b>Users:</b> adding, editing or deleting any user — even by the Super Admin — always asks for the <b>Super Admin password</b>. The Super Admin account can never be deleted.</span>
       </div>
       <p className="muted small mt-s">Credit bills are only for registered customers — never for walk-in customers.</p>
     </Card>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, setApprovalHandler, setToken } from '../lib.js';
-import { Icon, Modal, Field, useToast } from './ui.jsx';
+import { Icon, Modal, Field, RoleBadge, useToast } from './ui.jsx';
 
 /* ================= LOGIN ================= */
 export function Login({ onLoggedIn }) {
@@ -12,8 +12,19 @@ export function Login({ onLoggedIn }) {
   const [shake, setShake] = useState(0);
   const [leaving, setLeaving] = useState(false);
   const userRef = useRef();
+  const [role, setRole] = useState(null);   // the badge for the username typed: Super Admin / Admin / Cashier
 
   useEffect(() => { userRef.current?.focus(); }, []);
+  // look the role up a moment after typing stops
+  useEffect(() => {
+    const name = username.trim();
+    if (!name) { setRole(null); return; }
+    let live = true;
+    const t = setTimeout(() => {
+      api.get(`/auth/role?username=${encodeURIComponent(name)}`).then((r) => live && setRole(r.role)).catch(() => live && setRole(null));
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [username]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -51,6 +62,7 @@ export function Login({ onLoggedIn }) {
             <Icon name="users" size={18} />
             <input ref={userRef} placeholder="Username" autoComplete="username" value={username}
               onChange={(e) => { setUsername(e.target.value); setError(''); }} />
+            {role && <RoleBadge role={role} />}
           </label>
           <label className="login-field">
             <Icon name="lock" size={18} />
@@ -99,7 +111,7 @@ function ApprovalModal({ action, level = 'admin', onDone }) {
   const toast = useToast();
   const sup = level === 'superadmin';
   const who = sup ? 'Super Admin' : 'Admin';
-  const [username, setUsername] = useState(sup ? 'superadmin' : 'admin');
+  const [username, setUsername] = useState(sup ? '' : 'admin');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -109,7 +121,7 @@ function ApprovalModal({ action, level = 'admin', onDone }) {
     e.preventDefault();
     setBusy(true);
     try {
-      const res = await api.post('/auth/approve', { username, password, action, level });
+      const res = await api.post('/auth/approve', { username: sup ? '' : username, password, action, level });
       toast(`Approved by ${res.approver}`);
       onDone(res.approval);
     } catch (err) {
@@ -126,13 +138,13 @@ function ApprovalModal({ action, level = 'admin', onDone }) {
         <button className="btn btn-primary" form="approve-form" disabled={busy || !password}><Icon name="check" /> Approve</button></>}>
       <form id="approve-form" key={shake} className={`stack ${shake ? 'shake' : ''}`} onSubmit={approve}>
         <div className={`approve-head ${sup ? 'super' : ''}`}>
-          <div className="lock-badge"><Icon name={sup ? 'shield' : 'lock'} size={22} /></div>
+          <div className="lock-badge"><Icon name={sup ? 'crown' : 'lock'} size={22} /></div>
           <div>
-            <div className="strong">{sup ? 'Only the Super Admin can approve this' : 'This change needs an admin'}</div>
+            {sup ? <RoleBadge role="superadmin" /> : <div className="strong">This change needs an admin</div>}
             <div className="muted small">{action}</div>
           </div>
         </div>
-        <Field label={`${who} username`}><input className="input" value={username} onChange={(e) => setUsername(e.target.value)} /></Field>
+        {!sup && <Field label={`${who} username`}><input className="input" value={username} onChange={(e) => setUsername(e.target.value)} /></Field>}
         <Field label={`${who} password`}>
           <input className="input" type="password" autoFocus value={password} onChange={(e) => { setPassword(e.target.value); setError(''); }} />
         </Field>

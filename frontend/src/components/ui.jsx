@@ -40,6 +40,7 @@ const ICONS = {
   pause: <><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></>,
   keyboard: <><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M8 16h8" /></>,
   shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+  crown: <><path d="M2.5 7.5 7 11l5-7 5 7 4.5-3.5L19.5 18h-15z" /><path d="M5 21h14" /></>,
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
   moon: <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />,
   monitor: <><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></>,
@@ -140,6 +141,17 @@ const STATUS = {
   open: ['blue', 'Not due yet'],
   void: ['grey', 'Cancelled'],
 };
+/** A user's role as a badge: Super Admin (with a crown), Admin or Cashier. */
+export function RoleBadge({ role }) {
+  if (!role) return null;
+  const label = { superadmin: 'Super Admin', admin: 'Admin', cashier: 'Cashier' }[role] || role;
+  return (
+    <span className={`role-badge role-${role}`}>
+      <Icon name={role === 'superadmin' ? 'crown' : role === 'admin' ? 'shield' : 'users'} size={13} /> {label}
+    </span>
+  );
+}
+
 export function StatusBadge({ status }) {
   const [tone, label] = STATUS[status] || ['grey', status];
   return <Badge tone={tone}>{label}</Badge>;

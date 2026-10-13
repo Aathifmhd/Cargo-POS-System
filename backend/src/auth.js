@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { findOne, insert, updateOne, getSettings, setSetting, HttpError, stamp, inParallel } from './db.js';
+import { findOne, insert, updateOne, getSettings, setSetting, HttpError, stamp, inParallel, find } from './db.js';
 import { connect } from './db.js';
 
 const SESSION_HOURS = 12;
@@ -58,6 +58,20 @@ export function noteFailure(username) {
   failures.set(k, { count: f && Date.now() - f.at < 60_000 ? f.count + 1 : 1, at: Date.now() });
 }
 export const clearFailures = (username) => failures.delete(String(username).toLowerCase());
+
+/** The Super Admin approves with their password only: it is checked against every active Super Admin. */
+export async function checkSuperPassword(password) {
+  const key = '#superadmin-approval';
+  checkThrottle(key);
+  const supers = await find('users', { role: 'superadmin', active: 1 });
+  const u = supers.find((x) => verifyPassword(password, x.password_hash));
+  if (!u) {
+    noteFailure(key);
+    throw new HttpError(401, 'Wrong Super Admin password');
+  }
+  clearFailures(key);
+  return u;
+}
 
 /** Check username + password; returns the user or throws. */
 export async function checkCredentials(username, password) {
@@ -158,7 +172,7 @@ export const audit = (user, action, approvedBy = null) =>
 export async function guard(req, action, level = 'admin', { always = false } = {}) {
   if (!always && rankOf(req.user) >= RANK[level]) {
     await audit(req.user, action);
-    return;
+    return req.user;
   }
   const p = verify(req.get('X-Approval'));
   const approver = p && p.t === 'a' && p.for === req.user.username ? await userByName(p.by) : null;
@@ -167,4 +181,5 @@ export async function guard(req, action, level = 'admin', { always = false } = {
   if (!ok) throw new HttpError(403, `${ROLE_NAME[level]} approval needed: ${action}`, { needApproval: true, action, level });
   await updateOne('used_approvals', { _id: p.n }, { $set: { exp: new Date(p.exp) } }, { upsert: true });   // one use only
   await audit(req.user, action, approver.username);
+  return approver;
 }

@@ -59,7 +59,7 @@ const bales = [
   {
     date: addDays(today, -30), supplier_id: s1 || s2 || s3, supplier_invoice_no: 'SGT/2291', cargo_name: 'Lanka Speed Cargo',
     bale_no: 'B-101', lr_no: 'LR-558211', exchange_rate: 3.58, payment_type: 'credit',
-    expenses: [{ label: 'Cargo charge', amount_lkr: 28500 }, { label: 'Clearing charges', amount_lkr: 12000 }, { label: 'Transport', amount_lkr: 4500 }],
+    expenses: [{ label: 'Cargo charge', amount_lkr: 45000 }],
     items: only([
       item('Shirts', 'Kerala', 4, 'M, L, XL, 2XL', 25, 1400),
       item('Shirts', 'L/S', 4, 'M, L, XL, 2XL', 15, 1520),
@@ -70,7 +70,7 @@ const bales = [
   {
     date: addDays(today, -14), supplier_id: s2 || s1, supplier_invoice_no: 'TKE-778', cargo_name: 'Ceylon Express Cargo',
     bale_no: 'B-117, B-118', lr_no: 'LR-90114', exchange_rate: 3.61, payment_type: 'credit',
-    expenses: [{ label: 'Cargo charge', amount_lkr: 36800 }, { label: 'Clearing charges', amount_lkr: 15000 }, { label: 'Transport', amount_lkr: 6000 }, { label: 'Loading / Unloading', amount_lkr: 2000 }],
+    expenses: [{ label: 'Cargo charge', amount_lkr: 59800 }],
     items: only([
       item('T-shirts', 'Collar', 6, 'S, M, L, XL, 2XL, 3XL', 30, 720, { extra_pcs: 3 }),
       item('T-shirts', 'R/N Regular', 6, 'S, M, L, XL, 2XL, 3XL', 30, 690),
@@ -82,7 +82,7 @@ const bales = [
   {
     date: addDays(today, -4), supplier_id: s3 || s1, supplier_invoice_no: 'MFG/45', cargo_name: 'Lanka Speed Cargo',
     bale_no: 'B-125', lr_no: 'LR-561002', exchange_rate: 3.63, payment_type: 'paid', payment_method: 'Bank transfer',
-    expenses: [{ label: 'Cargo charge', amount_lkr: 17400 }, { label: 'Clearing charges', amount_lkr: 8000 }],
+    expenses: [{ label: 'Cargo charge', amount_lkr: 25400 }],
     items: only([
       item('Underwear', 'Boxer', 12, 'M, L, XL, 2XL', 15, 960),
       item('Underwear', 'V Cut', 12, 'M, L, XL, 2XL', 10, 900),
@@ -97,7 +97,7 @@ const grns = bales.map((b) => createGrn(b));
 // a part payment on the first bale, so the payables screens have something to show
 if (grns[0]) {
   run(`INSERT INTO supplier_payments (supplier_id, grn_id, date, amount_inr, exchange_rate, amount_lkr, method, reference)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, grns[0].supplier_id, grns[0].id, addDays(today, -15), 40000, 3.60, 144000, 'Bank transfer', 'TT-2231');
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, grns[0].supplier_id, grns[0].id, addDays(today, -15), 40000, 3.5, 140000, 'Bank transfer', 'TT-2231');
 }
 
 /* ---------- selling price & MRP from the cost, as Receive Goods does ---------- */

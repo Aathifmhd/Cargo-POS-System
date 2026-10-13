@@ -91,7 +91,7 @@ function ShipmentReport({ from, to }) {
       <div className="stats">
         <Stat icon="truck" label="Shipments" value={d.grns.length} />
         <Stat icon="layers" tone="blue" label="Goods bought" value={inr(t.goods)} />
-        <Stat icon="cash" tone="amber" label="Cargo & local charges" value={lkr(t.cargo + t.exp)} sub={t.total ? `${pct(((t.cargo + t.exp) / t.total) * 100)} of total cost` : ''} />
+        <Stat icon="cash" tone="amber" label="Cargo charges" value={lkr(t.cargo + t.exp)} sub={t.total ? `${pct(((t.cargo + t.exp) / t.total) * 100)} of total cost` : ''} />
         <Stat icon="box" tone="green" label="Total cost" value={lkr(t.total)} />
       </div>
       <Card title="By cargo company" pad={false}>

@@ -34,17 +34,13 @@ export default function GrnView() {
       <div className="stats mb">
         <div className="stat"><div className="stat-text"><div className="stat-label">Cargo</div><div className="stat-value" style={{ fontSize: 17 }}>{g.cargo_name || '—'}</div></div></div>
         <div className="stat"><div className="stat-text"><div className="stat-label">LR no</div><div className="stat-value" style={{ fontSize: 17 }}>{g.lr_no || '—'}</div></div></div>
-        <div className="stat"><div className="stat-text"><div className="stat-label">Rate at receipt</div><div className="stat-value" style={{ fontSize: 17 }}>1 ₹ = Rs {g.exchange_rate.toFixed(4)}</div></div></div>
+        <div className="stat"><div className="stat-text"><div className="stat-label">Costing rate</div><div className="stat-value" style={{ fontSize: 17 }}>1 ₹ = Rs {g.exchange_rate.toFixed(4)}</div></div></div>
       </div>
 
-      <div className={`alert ${g.settled_at ? 'alert-green' : 'alert-amber'} mb`}>
-        <Icon name={g.settled_at ? 'lock' : 'clock'} />
-        {g.settled_at ? (
-          <span><b>Cost fixed</b> — the supplier bill is paid, so these goods are costed at <b>Rs {(g.effective_rate ?? g.exchange_rate).toFixed(4)}</b> per rupee (the rates you actually paid).</span>
-        ) : (
-          <span><b>Cost follows the live rate</b> — {inr(g.paid_inr)} paid is fixed at the rates paid; the unpaid {inr(g.balance_inr)} uses today's rate.
-            Cost rate now: <b>Rs {(g.effective_rate ?? g.exchange_rate).toFixed(4)}</b> per rupee. It stops moving once the bill is paid.</span>
-        )}
+      <div className="alert alert-blue mb">
+        <Icon name="lock" />
+        <span>Costed at the fixed rate <b>Rs {g.exchange_rate.toFixed(2)} per ₹1</b> (Settings → Exchange rate). The live rate does not change it.
+          {g.balance_inr > 0 ? <> Still to pay the supplier: <b>{inr(g.balance_inr)}</b>.</> : <> The supplier bill is paid.</>}</span>
       </div>
 
       <div className="grn-layout">
@@ -79,14 +75,14 @@ export default function GrnView() {
             </div>
           </Card>
           <div className="grid grid-2">
-            <Card title="Cargo & local charges (LKR)">
+            <Card title="Cargo charge (LKR)">
               {g.expenses.length === 0 ? <p className="muted">No extra expenses.</p> : g.expenses.map((e) => (
                 <div key={e.id} className="list-row"><span>{e.label}</span><b className="mono">{lkr(e.amount_lkr)}</b></div>
               ))}
             </Card>
             <Card title="Supplier payments">
               {g.payments.length === 0 ? <p className="muted">No payment linked to this GRN yet.</p> : g.payments.map((p) => (
-                <div key={p.id} className="list-row"><div><div className="t">{p.method}</div><div className="s">{niceDate(p.date)} · rate {p.exchange_rate} {p.reference ? `· ${p.reference}` : ''}</div></div><div className="right"><b>{inr(p.amount_inr)}</b><div className="s">{lkr(p.amount_lkr)}</div></div></div>
+                <div key={p.id} className="list-row"><div><div className="t">{p.method}</div><div className="s">{niceDate(p.date)} {p.reference ? `· ${p.reference}` : ''}</div></div><div className="right"><b>{inr(p.amount_inr)}</b><div className="s">{lkr(p.amount_lkr)}</div></div></div>
               ))}
               <p className="muted small mt-s">Payments made without choosing a GRN are applied to the oldest bills first.</p>
             </Card>
@@ -99,9 +95,9 @@ export default function GrnView() {
             <dl className="kv">
               <dt>Goods</dt><dd>{inr(g.goods_inr)}</dd>
               {g.cargo_charge_inr > 0 && <><dt>Cargo charge (₹)</dt><dd>{inr(g.cargo_charge_inr)}</dd></>}
-              <dt>Goods in LKR (× {(g.effective_rate ?? g.exchange_rate).toFixed(4)})</dt><dd>{lkr(g.goods_inr * (g.effective_rate ?? g.exchange_rate))}</dd>
-              {g.cargo_charge_inr > 0 && <><dt>Cargo in LKR (× {(g.cargo_in_supplier_bill ? g.effective_rate ?? g.exchange_rate : g.exchange_rate).toFixed(4)})</dt><dd>{lkr(g.cargo_charge_inr * (g.cargo_in_supplier_bill ? g.effective_rate ?? g.exchange_rate : g.exchange_rate))}</dd></>}
-              <dt>Cargo & local charges</dt><dd>{lkr(g.expenses_lkr)}</dd>
+              <dt>Goods in LKR (× {g.exchange_rate.toFixed(2)})</dt><dd>{lkr(g.goods_inr * g.exchange_rate)}</dd>
+              {g.cargo_charge_inr > 0 && <><dt>Cargo in LKR (× {g.exchange_rate.toFixed(2)})</dt><dd>{lkr(g.cargo_charge_inr * g.exchange_rate)}</dd></>}
+              <dt>Cargo charge</dt><dd>{lkr(g.expenses_lkr)}</dd>
               <dt className="total">Total cost</dt><dd className="total">{lkr(g.total_lkr)}</dd>
               <dt>Expected sales value</dt><dd>{lkr(expectedValue)}</dd>
               <dt>Expected profit</dt><dd className="text-green">{lkr(expectedValue - g.total_lkr)}</dd>

@@ -73,23 +73,23 @@ Other keys: `` ` `` show or hide cost and profit · `F1` code box · `F4` custom
 
 Anywhere: `F2` dashboard · `F3` new sale · `F9` bills · `F7` take a payment.
 
-## Live INR rate and product cost
+## Costing rate and the live INR rate
 
 - The dashboard shows the **live INR→LKR rate**. It is fetched every 5 minutes, first from Yahoo Finance (intraday) and then from daily public rates if that fails. The page refreshes every minute.
 - Press **Edit** to set the rate by hand, for example to your bank's rate. Switch back to **Live** whenever you like.
-- New GRNs and supplier payments start from this rate, and you can still edit it on each one.
-- **Paid at receipt:** the goods are costed at the GRN's rate and the cost is fixed.
-- **On credit:** the unpaid part of the supplier bill is costed at **today's rate**, so the product cost moves day by day. Each payment fixes its share at the rate it was paid at. Once the bill is fully paid, the cost stops moving.
+- The live rate is **for reference only**. It never changes any cost.
+- Every cost uses one fixed **costing rate** (Settings → Exchange rate, **Rs 3.50 per ₹1** by default): GRNs, cost per piece, and supplier payments. Paid or on credit, the cost does not move.
+- Changing the costing rate in Settings re-costs every GRN and the stock in one go.
 - A product's cost is the FIFO cost of the stock still on hand, which comes from the newest receipts.
 
 ## What it does
 
 | Area | Features |
 |---|---|
-| **Receive Goods (GRN)** | Supplier, cargo name, LR no, supplier invoice no and the **exchange rate for the package**. Items are entered one at a time in a card (category → product from Settings, pieces per set, sets, **extra or short pieces**, sizes, billed per piece in INR) and added to a list grouped by category, where each can be edited. Cargo, clearing, transport and other LKR charges are **spread over items by value**, giving the **cost per piece in LKR**. **Selling price and MRP per piece** fill in automatically from Settings → Price & billing (cost + %, rounded) and can be changed. A draft is saved automatically. |
+| **Receive Goods (GRN)** | Supplier, cargo name, **cargo charge (LKR)**, LR no, supplier invoice no. Items are entered one at a time in a card (category → product from Settings, pieces per set, sets, **extra or short pieces**, sizes, billed per piece in INR) and added to a list grouped by category, where each can be edited. The cargo charge is **spread over items by value**, giving the **cost per piece in LKR**. **Selling price and MRP per piece** fill in automatically from Settings → Price & billing (cost + %, rounded) and can be changed. A draft is saved automatically. |
 | **New Sale (POS)** | Search or scan by code and sell **by the piece**, on a **Cash / Credit** bill. Each line shows **Cost, Expected price and MRP per piece**, and you can click one to use it. A **hide cost** key (`) keeps cost private when the customer can see the screen. Also: discounts (amount or %), change calculator, advance payment and due date for credit bills, credit-limit approval, quick-add customer, held bills, keyboard shortcuts and printing. |
 | **Stock** | Stock is kept and shown in pieces. Cost is the cost of the pieces still in stock (oldest sold first). There are low-stock alerts (re-order level), a full stock card per product, stock corrections (damaged, return, physical count) and purchase history by GRN. |
-| **Suppliers** | Contact, GST, bank details and credit days. You see every GRN with **paid, balance and due date**, record payments in INR with the exchange rate (Bank, Cash, Cheque, UPI…), and an "oldest first" automatic settlement. |
+| **Suppliers** | Contact, GST, bank details and credit days. You see every GRN with **paid, balance and due date**, record payments in INR at the costing rate (Bank, Cash, Cheque, UPI…), and an "oldest first" automatic settlement. |
 | **Customers** | Credit limit, credit days, opening balance, unpaid bills, collections and a WhatsApp payment reminder. |
 | **Payments Due** | One screen for *to collect* and *to pay*, grouped into **Overdue / Due in 7 days / Later**. |
 | **Reports** | Sales and profit by day, product and customer. Shipments by **cargo company** (cargo cost per piece) and by supplier. Stock value at cost, expected price and MRP. Slow-moving stock. |
@@ -99,10 +99,10 @@ Anywhere: `F2` dashboard · `F3` new sale · `F9` bills · `F7` take a payment.
 ## How cost is calculated
 
 ```
-INR total     = Σ(pieces billed × billed per piece) + cargo charge
-LKR total     = INR total × exchange rate + LKR expenses
+INR total     = Σ(pieces billed × billed per piece)
+LKR total     = INR total × costing rate (3.5) + cargo charge (LKR)
 item INR      = (sets × pieces per set + extra pieces) × billed per piece
-item cost     = item INR × rate + (item share of goods value) × (cargo & local charges in LKR)
+item cost     = item INR × costing rate + (item share of goods value) × (cargo charge in LKR)
 cost / piece  = item cost ÷ pieces actually received (sets × pieces per set + extra − short)
 ```
 

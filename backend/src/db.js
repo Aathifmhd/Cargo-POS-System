@@ -288,7 +288,8 @@ const DEFAULT_SETTINGS = {
   shop_name: 'My Wholesale Shop',
   shop_address: 'Colombo, Sri Lanka',
   shop_phone: '',
-  default_exchange_rate: '3.60',
+  default_exchange_rate: '3.60',      // the live INR rate (shown on the dashboard; does not change costs)
+  costing_rate: '3.5',                // the fixed rate every cost is worked out at (Settings → Exchange rate)
   default_markup_percent: '40',
   selling_markup_percent: '30',       // auto expected selling price = landed cost + this %
   mrp_markup_percent: '40',           // auto MRP = landed cost + this %

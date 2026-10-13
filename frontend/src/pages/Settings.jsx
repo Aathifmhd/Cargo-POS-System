@@ -19,7 +19,7 @@ const GROUPS = [
     items: [
       { id: 'catalog', icon: 'layers', label: 'Categories & products', desc: 'Everything here feeds the Category, Products and Sizes choices on Receive Goods.' },
       { id: 'price', icon: 'tag', label: 'Price & billing', desc: 'How Receive Goods works out the selling price and MRP from the cost.' },
-      { id: 'pricing', icon: 'chart', label: 'Exchange rate', desc: 'How the INR rate is kept up to date.' },
+      { id: 'pricing', icon: 'chart', label: 'Exchange rate', desc: 'The fixed rate all costs use, and the live INR rate for reference.' },
     ],
   },
   {
@@ -144,7 +144,11 @@ export default function Settings() {
 
             {section === 'pricing' && (
               <div className="stack set-form">
-                <div className="alert alert-blue small"><Icon name="info" size={16} /> The INR exchange rate is live and updates by itself. To set it by hand, use <b>Edit</b> on the rate bar at the top of the Dashboard.</div>
+                <Field label="Costing rate (Rs for ₹1)" hint="Every cost uses this rate: GRNs, cost per piece, supplier payments. Changing it re-costs all GRNs and stock.">
+                  <div className="input-affix"><span>Rs</span><NumInput value={f.costing_rate} onChange={set('costing_rate')} /></div>
+                </Field>
+                <div className="alert alert-blue small"><Icon name="info" size={16} /> The <b>live INR rate</b> on the Dashboard keeps updating by itself, for reference only. It never changes your costs.</div>
+                <SaveBar keys={['costing_rate']} />
               </div>
             )}
 

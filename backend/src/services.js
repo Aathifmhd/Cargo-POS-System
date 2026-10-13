@@ -105,29 +105,34 @@ export function grnSettlements(supplierId, todayRate) {
   });
 }
 
-/** Re-cost every GRN whose effective rate moved, then the products it holds. */
-export function revalueGrns(todayRate) {
-  if (!(todayRate > 0)) return 0;
+/** The one rate every cost is worked out at (Settings → Exchange rate, 3.5 by default). The live rate never changes costs. */
+export const costingRate = () => num(getSettings().costing_rate) || 3.5;
+
+/**
+ * Keeps every GRN costed at the costing rate: re-costs any GRN (and the products in it) whose rate differs,
+ * e.g. after the costing rate is changed in Settings. Also records when a supplier bill becomes fully paid.
+ */
+export function revalueGrns() {
+  const rate = costingRate();
   let changed = 0;
   tx(() => {
     const touched = new Set();
     for (const { supplier_id } of all('SELECT DISTINCT supplier_id FROM grns')) {
-      for (const st of grnSettlements(supplier_id, todayRate)) {
+      for (const st of grnSettlements(supplier_id, rate)) {
         const g = st.grn;
         const settledAt = st.settled ? g.settled_at || new Date().toISOString() : null;
-        if (g.effective_rate != null && Math.abs(g.effective_rate - st.effective_rate) < 0.00005 && (g.settled_at || null) === settledAt) continue;
+        const sameRate = Math.abs((g.exchange_rate || 0) - rate) < 0.00005 && Math.abs((g.effective_rate ?? 0) - rate) < 0.00005;
+        if (sameRate && (g.settled_at || null) === settledAt) continue;
+        if (sameRate) { run('UPDATE grns SET settled_at = ? WHERE id = ?', settledAt, g.id); continue; }
         const items = all('SELECT * FROM grn_items WHERE grn_id = ? ORDER BY id', g.id);
         const expenses = all('SELECT amount_lkr FROM grn_expenses WHERE grn_id = ?', g.id);
-        const calc = computeLanding({
-          items, expenses, exchange_rate: g.exchange_rate, cargo_charge_inr: g.cargo_charge_inr,
-          goods_rate: st.effective_rate, cargo_rate: g.cargo_in_supplier_bill ? st.effective_rate : g.exchange_rate,
-        });
+        const calc = computeLanding({ items, expenses, exchange_rate: rate, cargo_charge_inr: g.cargo_charge_inr });
         calc.items.forEach((it, i) => {
           run('UPDATE grn_items SET landed_lkr = ?, landed_per_set_lkr = ?, landed_per_pcs_lkr = ? WHERE id = ?',
             it.landed_lkr, it.landed_per_set_lkr, it.landed_per_pcs_lkr, items[i].id);
           touched.add(items[i].product_id);
         });
-        run('UPDATE grns SET effective_rate = ?, total_lkr = ?, settled_at = ? WHERE id = ?', st.effective_rate, calc.total_lkr, settledAt, g.id);
+        run('UPDATE grns SET exchange_rate = ?, effective_rate = ?, total_lkr = ?, settled_at = ? WHERE id = ?', rate, rate, calc.total_lkr, settledAt, g.id);
         changed++;
       }
     }
@@ -217,8 +222,7 @@ export function createGrn(body) {
   const reorderOf = (category) => Math.round(num(catalog.find((c) => c.name.toLowerCase() === String(category || '').trim().toLowerCase())?.reorder_sets));
   const supplier = get('SELECT * FROM suppliers WHERE id = ?', num(body.supplier_id));
   if (!supplier) fail('Please choose a supplier');
-  const rate = num(body.exchange_rate);
-  if (rate <= 0) fail('Exchange rate must be more than 0');
+  const rate = costingRate();   // fixed — the live rate does not change costs
   const rawItems = (body.items || []).filter((i) => (i.product_id || String(i.name || '').trim()) && (num(i.sets) > 0 || num(i.extra_pcs) > 0));
   if (!rawItems.length) fail('Add at least one item with a quantity');
   const expenses = (body.expenses || []).filter((e) => String(e.label || '').trim() && num(e.amount_lkr) !== 0);
@@ -294,12 +298,10 @@ export function createGrn(body) {
     }
     return grnId;
   });
-  // Paid now → cost fixed at this GRN's rate. On credit → the unpaid goods follow today's rate until paid.
-  revalueGrns(todayRate());
+  revalueGrns();
   return getGrn(id);
 }
 
-export const todayRate = () => num(getSettings().default_exchange_rate);
 
 export function getGrn(id) {
   const g = get(

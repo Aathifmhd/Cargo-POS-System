@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { all, get, run, fail, num, round2, todayStr } from '../db.js';
-import { supplierBills, supplierSummary, revalueGrns, todayRate } from '../services.js';
+import { supplierBills, supplierSummary, revalueGrns, costingRate } from '../services.js';
 import { guard } from '../auth.js';
 
 const r = Router();
@@ -79,16 +79,16 @@ r.post('/:id/payments', (req, res) => {
   if (!s) fail('Supplier not found', 404);
   const amount = round2(num(req.body.amount_inr));
   if (amount <= 0) fail('Enter the amount paid (INR)');
-  const rate = num(req.body.exchange_rate);
+  const rate = costingRate();   // payments are recorded at the same fixed rate as the costs
   const grnId = req.body.grn_id ? num(req.body.grn_id) : null;
   if (grnId && !get('SELECT id FROM grns WHERE id = ? AND supplier_id = ?', grnId, s.id)) fail('That GRN does not belong to this supplier');
-  const lkr = num(req.body.amount_lkr) || round2(amount * rate);
+  const lkr = round2(amount * rate);
   const { lastInsertRowid } = run(
     `INSERT INTO supplier_payments (supplier_id, grn_id, date, amount_inr, exchange_rate, amount_lkr, method, reference, notes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     s.id, grnId, req.body.date || todayStr(), amount, rate, round2(lkr), req.body.method || null,
     req.body.reference || null, req.body.notes || null);
-  revalueGrns(todayRate());   // the paid part of the bill is now fixed at this payment's rate
+  revalueGrns();   // notes when the bill becomes fully paid
   res.json(get('SELECT * FROM supplier_payments WHERE id = ?', lastInsertRowid));
 });
 
@@ -97,7 +97,7 @@ r.delete('/:id/payments/:pid', (req, res) => {
   if (!p) fail('Payment not found', 404);
   guard(req, `Delete supplier payment of ₹${p.amount_inr} (${p.date})`);
   run('DELETE FROM supplier_payments WHERE id = ? AND supplier_id = ?', num(req.params.pid), num(req.params.id));
-  revalueGrns(todayRate());
+  revalueGrns();
   res.json({ ok: true });
 });
 

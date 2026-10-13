@@ -4,8 +4,8 @@ import { all, get, run, getSettings, round2 } from './db.js';
  * Live INR → LKR rate.
  * - "auto" mode: fetched every few minutes from free public sources (first one that answers wins).
  * - "manual" mode: an admin typed the rate; it stays until switched back to auto.
- * The current rate is kept in settings.default_exchange_rate, so GRNs and supplier payments start from it,
- * and unpaid (credit) GRNs are revalued with it — see revalueGrns() in services.js.
+ * The current rate is kept in settings.default_exchange_rate and shown on the dashboard for reference.
+ * It does NOT change any costs: every cost uses the fixed costing rate (settings.costing_rate, 3.5 by default).
  */
 
 const REFRESH_MS = 5 * 60_000;

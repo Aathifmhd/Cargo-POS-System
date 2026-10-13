@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { all, get, run, fail, round2, todayStr, addDays, getSettings, DB_FILE } from '../db.js';
-import { supplierBills, customerBills } from '../services.js';
+import { supplierBills, customerBills, revalueGrns } from '../services.js';
 import { guard, audit } from '../auth.js';
 
 const r = Router();
@@ -48,6 +48,7 @@ r.put('/settings', (req, res) => {
   // the exchange rate has its own endpoint (/api/fx); never overwrite it from here
   for (const k of Object.keys(req.body || {})) if (k === 'default_exchange_rate' || k.startsWith('fx_')) delete req.body[k];
   if ('catalog' in (req.body || {})) req.body.catalog = cleanCatalog(req.body.catalog);
+  if ('costing_rate' in (req.body || {}) && !(Number(req.body.costing_rate) > 0)) fail('The costing rate must be more than 0');
   const changed = Object.keys(req.body || {}).filter((k) => String(req.body[k] ?? '') !== String(old[k] ?? ''));
   if (!changed.length) return res.json(old);
   guard(req, `Settings changed: ${changed.join(', ')}`);
@@ -64,6 +65,8 @@ r.put('/settings', (req, res) => {
       run('UPDATE products SET reorder_sets = ? WHERE LOWER(category) = LOWER(?)', c.reorder_sets, c.name);
     }
   }
+  // a new costing rate re-costs every GRN and product
+  if (changed.includes('costing_rate')) revalueGrns();
   res.json(getSettings());
 });
 

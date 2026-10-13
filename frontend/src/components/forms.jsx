@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, n, r2, today, lkr, inr, PAY_METHODS_CUSTOMER, PAY_METHODS_SUPPLIER, isAdmin, isSuper } from '../lib.js';
 import { Modal, Field, NumInput, useToast, Segmented, Icon } from './ui.jsx';
-import { useAuth, useFx, useSettings } from '../App.jsx';
+import { useAuth, useSettings } from '../App.jsx';
 
 function useForm(initial) {
   const [f, setF] = useState(initial);
@@ -86,23 +86,24 @@ export function SupplierForm({ supplier, initialName = '', onClose, onSaved }) {
 /* ================= PAY SUPPLIER ================= */
 export function SupplierPaymentModal({ supplier, bills = [], defaultGrnId, onClose, onSaved }) {
   const { settings } = useSettings();
-  const { fx } = useFx();
   const toast = useToast();
   const open = bills.filter((b) => b.balance > 0.009);
   const preset = open.find((b) => b.id === defaultGrnId);
   const total = r2(open.reduce((a, b) => a + b.balance, 0));
   const [f, set, setF] = useForm({
-    date: today(), grn_id: preset?.id ?? '', amount_inr: preset ? preset.balance : '', exchange_rate: fx?.rate ?? settings.default_exchange_rate,
+    date: today(), grn_id: preset?.id ?? '', amount_inr: preset ? preset.balance : '',
     method: 'Bank transfer', reference: '', notes: '',
   });
   const [busy, setBusy] = useState(false);
-  const lkrAmt = r2(n(f.amount_inr) * n(f.exchange_rate));
+  // recorded at the fixed costing rate, like every cost
+  const rate = n(settings.costing_rate) || 3.5;
+  const lkrAmt = r2(n(f.amount_inr) * rate);
 
   const save = async (e) => {
     e.preventDefault();
     setBusy(true);
     try {
-      await api.post(`/suppliers/${supplier.id}/payments`, { ...f, grn_id: f.grn_id || null, amount_lkr: lkrAmt });
+      await api.post(`/suppliers/${supplier.id}/payments`, { ...f, grn_id: f.grn_id || null });
       toast(`Payment of ${inr(f.amount_inr)} saved`);
       onSaved?.();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
@@ -121,10 +122,9 @@ export function SupplierPaymentModal({ supplier, bills = [], defaultGrnId, onClo
             {open.filter((b) => b.id).map((b) => <option key={b.id} value={b.id}>{b.grn_no} · balance {inr(b.balance)}</option>)}
           </select>
         </Field>
-        <Field label="Amount paid (₹ INR)" required>
+        <Field label="Amount paid (₹ INR)" required hint={n(f.amount_inr) > 0 ? `= ${lkr(lkrAmt)} at Rs ${rate.toFixed(2)} per ₹1` : ''}>
           <NumInput autoFocus value={f.amount_inr} onChange={set('amount_inr')} />
         </Field>
-        <Field label="Rate you paid at (1 ₹ = Rs)" hint={`= ${lkr(lkrAmt)} in LKR · the paid goods are costed at this rate`}><NumInput value={f.exchange_rate} onChange={set('exchange_rate')} /></Field>
         <Field label="Paid by">
           <select className="input" value={f.method} onChange={set('method')}>{PAY_METHODS_SUPPLIER.map((m) => <option key={m}>{m}</option>)}</select>
         </Field>

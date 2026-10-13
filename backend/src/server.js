@@ -13,7 +13,7 @@ import authRoutes from './routes/auth.js';
 import { requireAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
 import { setOnRateChange, startFxTimer } from './fx.js';
-import { revalueGrns, todayRate } from './services.js';
+import { revalueGrns } from './services.js';
 
 // Demo deployment on Vercel: each new instance starts with an empty /tmp database,
 // so fill it with the demo data (suppliers, stock, bills) instead of an empty shop.
@@ -56,10 +56,7 @@ const argPort = process.argv.find((a) => a.startsWith('--port='))?.split('=')[1]
 const PORT = argPort || process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Cargo POS API running on http://localhost:${PORT}`));
 
-// Whenever the INR rate moves, unpaid credit GRNs (and the products in them) are re-costed.
-setOnRateChange((rate) => {
-  const n = revalueGrns(rate);
-  if (n) console.log(`Rate now ${rate}: re-costed ${n} GRN(s)`);
-});
-revalueGrns(todayRate());
+// The live INR rate is shown on the dashboard only — costs always use the fixed costing rate (Settings).
+setOnRateChange((rate) => console.log(`Live INR rate now ${rate}`));
+revalueGrns();
 startFxTimer();

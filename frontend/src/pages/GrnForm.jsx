@@ -1,13 +1,12 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, n, r2, lkr, inr, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
 import { PageHeader, Card, Icon, Field, NumInput, Combobox, Segmented, useToast, Loading } from '../components/ui.jsx';
 import { SupplierForm } from '../components/forms.jsx';
 import SizePicker from '../components/SizePicker.jsx';
-import { useFx, useSettings } from '../App.jsx';
+import { useSettings } from '../App.jsx';
 
 const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR, as a line in the charges list
-const CHARGE_PRESETS = ['Cargo charge', 'Clearing charges', 'Transport', 'Customs / Duty', 'Loading / Unloading', 'Bank charges'];
 let keySeq = 1;
 const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', mrp_per_pcs: '', expected_per_pcs: '' });
 // prices are entered per piece; products keep them per set, so convert on the way in and out
@@ -22,7 +21,6 @@ const forSaving = (it) => ({ ...it, cost_inr_per_set: r2(n(it.cost_inr_per_pcs) 
 
 export default function GrnForm() {
   const { settings, reload: reloadSettings } = useSettings();
-  const { fx } = useFx();
   const toast = useToast();
   const navigate = useNavigate();
   const [suppliers, setSuppliers] = useState(null);
@@ -40,14 +38,15 @@ export default function GrnForm() {
         d.items = d.items.filter((i) => i.name || i.product_id).map((i) => withPcsPrices({ ...i, key: keySeq++ }));
         d.entry = withPcsPrices({ ...(d.entry || blankItem()), key: keySeq++ });
         d.editingKey = null;
+        const total = (d.expenses || []).reduce((t, e) => t + n(e.amount_lkr), 0);
+        d.expenses = [{ label: 'Cargo charge', amount_lkr: total || '' }];
         return d;
       }
     } catch { /* ignore */ }
     return {
       date: today(), supplier_id: null, supplier_invoice_no: '', cargo_name: '', lr_no: '',
-      exchange_rate: fx?.rate ?? settings.default_exchange_rate,
       payment_type: 'credit', due_date: '', payment_method: 'Bank transfer', payment_reference: '', notes: '',
-      expenses: [{ label: 'Cargo charge', amount_lkr: '' }, { label: 'Clearing charges', amount_lkr: '' }, { label: 'Transport', amount_lkr: '' }],
+      expenses: [{ label: 'Cargo charge', amount_lkr: '' }],   // the only charge: the cargo charge in LKR
       items: [], entry: blankItem(), editingKey: null,
     };
   }, []); // eslint-disable-line
@@ -69,17 +68,19 @@ export default function GrnForm() {
   }, [g.supplier_id, g.date, g.payment_type]); // eslint-disable-line
 
   // the bale's figures come from the added items only
-  const calc = useMemo(() => computeLanding(g), [g]);
+  // every cost is worked out at the fixed costing rate (Settings → Exchange rate), never the live rate
+  const rate = n(settings.costing_rate) || 3.5;
+  const calc = useMemo(() => computeLanding({ ...g, exchange_rate: rate }), [g, rate]);
   // the entry card's own figures: worked out as if it were already in the list (charges are shared by value)
   const entryIdx = g.editingKey ? g.items.findIndex((i) => i.key === g.editingKey) : g.items.length;
   const preview = useMemo(() => computeLanding({
-    ...g, items: g.editingKey ? g.items.map((i) => (i.key === g.editingKey ? g.entry : i)) : [...g.items, g.entry],
-  }), [g]);
+    ...g, exchange_rate: rate, items: g.editingKey ? g.items.map((i) => (i.key === g.editingKey ? g.entry : i)) : [...g.items, g.entry],
+  }), [g, rate]);
 
   // an item is either the entry card or a line in the list
   const mapItem = (x, key, fn) => (x.entry?.key === key ? { ...x, entry: fn(x.entry) } : { ...x, items: x.items.map((i) => (i.key === key ? fn(i) : i)) });
   const updItem = (key, patch) => setG((x) => mapItem(x, key, (i) => ({ ...i, ...patch })));
-  const updExp = (idx, patch) => setG((x) => ({ ...x, expenses: x.expenses.map((e, i) => (i === idx ? { ...e, ...patch } : e)) }));
+  const setCargo = (v) => setG((x) => ({ ...x, expenses: [{ label: 'Cargo charge', amount_lkr: v }] }));
 
   const catalog = useMemo(() => parseCatalog(settings), [settings]);
   const rules = useMemo(() => priceRules(settings), [settings]);
@@ -203,7 +204,6 @@ export default function GrnForm() {
 
   const save = async () => {
     if (!g.supplier_id) return toast('Choose the supplier', 'error');
-    if (n(g.exchange_rate) <= 0) return toast('Enter the exchange rate', 'error');
     if (g.editingKey) return toast('Finish editing the item first: press "Update item" or Cancel', 'error');
     if (entryStarted && !confirm(`"${g.entry.name || 'The item you are entering'}" has not been added to the list. Save the GRN without it?`)) return;
     if (!filledItems.length) return toast('Add at least one item to the list', 'error');
@@ -243,18 +243,12 @@ export default function GrnForm() {
               </Field>
               <Field label="LR number" hint="Lorry receipt / tracking no"><input className="input" value={g.lr_no} onChange={set('lr_no')} /></Field>
               <Field label="Supplier invoice no"><input className="input" value={g.supplier_invoice_no} onChange={set('supplier_invoice_no')} /></Field>
-              <Field label="Exchange rate for this package" required
-                hint={fx && Math.abs(n(g.exchange_rate) - fx.rate) > 0.00005
-                  ? <button type="button" className="link-btn" style={{ marginLeft: 0 }} onClick={() => set('exchange_rate')(fx.rate)}>Use today's {fx.mode === 'manual' ? '' : 'live '}rate Rs {fx.rate.toFixed(4)}</button>
-                  : `Today's ${fx?.mode === 'manual' ? '' : 'live '}rate · edit if your rate differs`}>
-                <div className="input-affix"><span>Rs</span><NumInput value={g.exchange_rate} onChange={set('exchange_rate')} /></div>
-              </Field>
               <Field label="Notes"><input className="input" value={g.notes} onChange={set('notes')} /></Field>
             </div>
           </Card>
 
           {/* STEP 2 */}
-          <Card title={<span className="step-title"><span className="step-no">2</span> Items in this bale</span>}
+          <Card title={<span className="step-title"><span className="step-no">2</span> Goods Table</span>}
             actions={<span className="muted small">{filledItems.length} items · {int(calc.total_sets)} sets · {int(calc.total_pcs)} pcs</span>}>
             <datalist id="cat-list">{categories.map((c) => <option key={c} value={c} />)}</datalist>
             {/* the items added so far, category by category */}
@@ -440,7 +434,6 @@ export default function GrnForm() {
                     </Field>
                     <div className="item-calc">
                       <div className="calc-pill">Bill amount<b>{inr(c.line_inr)}</b><small>{int(c.billed_pcs)} pcs × {inr(c.billed_pcs ? c.line_inr / c.billed_pcs : 0)}</small></div>
-                      <div className="calc-pill">Bill price / piece<b>{lkr(c.bill_per_pcs_lkr)}</b></div>
                       <div className="calc-pill hl">Cost / piece<b>{lkr(c.landed_per_pcs_lkr)}</b></div>
                     </div>
                   </div>
@@ -479,31 +472,18 @@ export default function GrnForm() {
                 </div>
               );
             })()}
-          </Card>
 
-          {/* STEP 3 */}
-          <Card title={<span className="step-title"><span className="step-no">3</span> Cargo & local charges (Rs LKR)</span>}
-            actions={<b className="mono">{lkr(calc.expenses_lkr)}</b>}>
-            <div>
-              <p className="muted small" style={{ marginBottom: 10 }}>Everything paid in Sri Lanka for this bale: cargo, clearing, transport and any other charges. It's spread over the items by their value.</p>
-              {g.expenses.map((e, i) => (
-                <div key={i} className="expense-row">
-                  <input className="input" value={e.label} placeholder="Charge name" onChange={(ev) => updExp(i, { label: ev.target.value })} />
-                  <div className="input-affix"><span>Rs</span><NumInput value={e.amount_lkr} onChange={(v) => updExp(i, { amount_lkr: v })} /></div>
-                  <button className="btn btn-icon btn-ghost" onClick={() => setG((x) => ({ ...x, expenses: x.expenses.filter((_, j) => j !== i) }))}><Icon name="x" size={16} /></button>
-                </div>
-              ))}
-              <div className="chips" style={{ marginBottom: 0 }}>
-                {CHARGE_PRESETS.filter((p) => !g.expenses.some((e) => e.label === p)).map((p) => (
-                  <button key={p} className="chip" onClick={() => setG((x) => ({ ...x, expenses: [...x.expenses, { label: p, amount_lkr: '' }] }))}>+ {p}</button>
-                ))}
-                <button className="chip" onClick={() => setG((x) => ({ ...x, expenses: [...x.expenses, { label: '', amount_lkr: '' }] }))}>+ Other</button>
+            <div className="cargo-row">
+              <div className="cargo-row-text">
+                <b>Cargo charge</b>
+                <span className="muted small">Paid in LKR for this shipment · shared over the items above by their value</span>
               </div>
+              <div className="input-affix cargo-input"><span>Rs</span><NumInput value={g.expenses[0]?.amount_lkr ?? ''} onChange={setCargo} placeholder="0.00" /></div>
             </div>
           </Card>
 
-          {/* STEP 4 */}
-          <Card title={<span className="step-title"><span className="step-no">4</span> Supplier payment</span>}>
+          {/* STEP 3 */}
+          <Card title={<span className="step-title"><span className="step-no">3</span> Supplier payment</span>}>
             <div className="grid grid-3">
               <Field label="How will you pay the supplier?" className="span-2">
                 <Segmented size="lg" value={g.payment_type} onChange={set('payment_type')} options={[
@@ -522,9 +502,7 @@ export default function GrnForm() {
             {g.payment_type === 'paid' && <Field label="Payment reference" className="mt"><input className="input" value={g.payment_reference} onChange={set('payment_reference')} /></Field>}
             <div className="alert alert-blue small mt">
               <Icon name="info" size={16} />
-              {g.payment_type === 'paid'
-                ? <span>Paid now — the cost of these goods is <b>fixed at Rs {n(g.exchange_rate).toFixed(4)}</b> per rupee.</span>
-                : <span>On credit — the cost of these goods <b>follows the live INR rate every day</b> until the supplier bill is paid. Each payment fixes its part at the rate you paid.</span>}
+              <span>All costs use the fixed rate <b>Rs {rate.toFixed(2)} per ₹1</b> (Settings → Exchange rate), paid now or on credit. The live rate does not change them.</span>
             </div>
           </Card>
         </div>
@@ -534,15 +512,14 @@ export default function GrnForm() {
           <Card title="Cost summary">
             <dl className="kv">
               <dt>Goods value</dt><dd>{inr(calc.goods_inr)}</dd>
-              <dt>× Exchange rate</dt><dd>{n(g.exchange_rate).toFixed(2)}</dd>
-              <dt>= Goods in LKR</dt><dd>{lkr(calc.goods_inr * n(g.exchange_rate))}</dd>
-              {g.expenses.filter((e) => n(e.amount_lkr)).map((e, i) => <Fragment key={i}><dt>+ {e.label || 'Charge'}</dt><dd>{lkr(e.amount_lkr)}</dd></Fragment>)}
-              {!g.expenses.some((e) => n(e.amount_lkr)) && <><dt>+ Cargo & local charges</dt><dd>{lkr(0)}</dd></>}
+              <dt>× Costing rate</dt><dd>{rate.toFixed(2)}</dd>
+              <dt>= Goods in LKR</dt><dd>{lkr(calc.goods_inr * rate)}</dd>
+              <dt>+ Cargo charge</dt><dd>{lkr(calc.expenses_lkr)}</dd>
               <dt className="total">Total cost</dt><dd className="total">{lkr(calc.total_lkr)}</dd>
             </dl>
             <div className="formula mt">
               <b>Cost factor: {calc.landing_factor ? calc.landing_factor.toFixed(3) : '—'}</b><br />
-              Every ₹1 of goods really costs <b>Rs {calc.landing_factor ? calc.landing_factor.toFixed(2) : '—'}</b> after cargo & local charges.
+              Every ₹1 of goods really costs <b>Rs {calc.landing_factor ? calc.landing_factor.toFixed(2) : '—'}</b> after the cargo charge.
             </div>
             {filledItems.length > 0 && (
               <div className="pcs-costs mt">

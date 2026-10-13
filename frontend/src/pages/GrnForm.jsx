@@ -397,9 +397,17 @@ export default function GrnForm() {
                       <div className="input input-static">{int(c.set_pcs)}</div>
                       <span className="field-hint">Sets × pieces per set</span>
                     </div>
+                    <Field label="Billed per piece (INR)" required hint="From the supplier's bill">
+                      <NumInput value={it.cost_inr_per_pcs} onChange={(v) => updItem(it.key, { cost_inr_per_pcs: v })} placeholder="0.00" />
+                    </Field>
                   </div>
 
-                  {/* 2 · what really came in the bale */}
+                  {/* 2 · what really came in the bale — folded away unless needed */}
+                  {!(it.showQty || n(it.extra_pcs) > 0 || n(it.short_pcs) > 0) ? (
+                    <button type="button" className="item-qty-toggle" onClick={() => updItem(it.key, { showQty: true })}>
+                      <Icon name="plus" size={14} /> Extra or short pieces in this bale?
+                    </button>
+                  ) : (
                   <div className={`item-qty-check ${c.extra_pcs || c.short_pcs ? 'on' : ''}`}>
                     <Field label="+ Extra pieces" hint="Received & billed"><NumInput value={it.extra_pcs} onChange={(v) => updItem(it.key, { extra_pcs: v })} placeholder="0" /></Field>
                     <Field label="− Short pieces" hint="Billed, not received"><NumInput value={it.short_pcs} onChange={(v) => updItem(it.key, { short_pcs: v })} placeholder="0" /></Field>
@@ -414,8 +422,11 @@ export default function GrnForm() {
                         : c.extra_pcs
                           ? 'Extra pieces are added to the supplier bill at the per-piece price. They are listed under Extra & Short.'
                           : 'Got extra pieces, or pieces missing? Enter them here.'}
+                      {' '}<button type="button" className="link-btn" style={{ display: 'inline', marginLeft: 0 }}
+                        onClick={() => updItem(it.key, { showQty: false, extra_pcs: '', short_pcs: '' })}>Remove</button>
                     </p>
                   </div>
+                  )}
 
                   {/* 3 · sizes */}
                   <div className="field">
@@ -429,9 +440,6 @@ export default function GrnForm() {
 
                   {/* 4 · cost */}
                   <div className="item-cost-row">
-                    <Field label="Billed per piece (INR)" required hint="From the supplier's bill">
-                      <NumInput value={it.cost_inr_per_pcs} onChange={(v) => updItem(it.key, { cost_inr_per_pcs: v })} placeholder="0.00" />
-                    </Field>
                     <div className="item-calc">
                       <div className="calc-pill">Bill amount<b>{inr(c.line_inr)}</b><small>{int(c.billed_pcs)} pcs × {inr(c.billed_pcs ? c.line_inr / c.billed_pcs : 0)}</small></div>
                       <div className="calc-pill hl">Cost / piece<b>{lkr(c.landed_per_pcs_lkr)}</b></div>

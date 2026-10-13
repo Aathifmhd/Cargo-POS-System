@@ -88,7 +88,7 @@ export function PageHeader({ title, subtitle, actions, back }) {
     <div className="page-header">
       <div className="page-title">
         {back && (
-          <button className="btn btn-icon btn-ghost" onClick={() => (typeof back === 'string' ? navigate(back) : navigate(-1))} title="Back">
+          <button className="btn btn-icon btn-ghost" onClick={() => (typeof back === 'function' ? back() : typeof back === 'string' ? navigate(back) : navigate(-1))} title="Back">
             <Icon name="back" />
           </button>
         )}

@@ -1,11 +1,15 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { GrnModal } from './GrnView.jsx';
 import { useApi, lkr, inr, niceDate, int, dueText } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, StatusBadge } from '../components/ui.jsx';
 
 export default function GrnList() {
-  const [openId, setOpenId] = useState(null);   // the GRN shown in the pop-up
+  const location = useLocation();
+  const navigate = useNavigate();
+  // coming back from editing a GRN: open it again in the pop-up
+  const [openId, setOpenId] = useState(() => location.state?.openGrn || null);   // the GRN shown in the pop-up
+  useEffect(() => { if (location.state?.openGrn) navigate('.', { replace: true, state: null }); }, []); // eslint-disable-line
   const [q, setQ] = useState('');
   const { data, error, loading, reload } = useApi(`/grns?q=${encodeURIComponent(q)}`);
 

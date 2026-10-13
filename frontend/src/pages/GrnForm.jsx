@@ -26,6 +26,9 @@ export default function GrnForm() {
   // /grn/:id/edit — fixing a GRN that was entered wrongly (saving needs the Super Admin's password)
   const { id: editId } = useParams();
   const [editing, setEditing] = useState(editId ? null : false); // null while the GRN loads, then its GRN number
+  const loadedRef = useRef('');   // the GRN as loaded (to spot unsaved changes)
+  // back to the Shipments list with this GRN open in its pop-up
+  const backToGrn = (grnId = editId) => navigate('/grn', { state: { openGrn: Number(grnId) } });
   const [suppliers, setSuppliers] = useState(null);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -58,6 +61,7 @@ export default function GrnForm() {
   const set = (k) => (v) => setG((x) => ({ ...x, [k]: v && v.target ? (v.target.type === 'checkbox' ? v.target.checked : v.target.value) : v }));
 
   useEffect(() => { if (!editId) localStorage.setItem(DRAFT, JSON.stringify(g)); }, [g, editId]);   // edits are not kept as a draft
+  useEffect(() => { if (loadedRef.current === 'pending') loadedRef.current = JSON.stringify({ ...g, entry: null }); }, [g]);
 
   // editing: load the GRN into the form, keeping its prices as they were
   useEffect(() => {
@@ -80,6 +84,7 @@ export default function GrnForm() {
       setFormOpen(false);
       keepDue.current = true;
       setEditing(d.grn_no);
+      loadedRef.current = 'pending';   // taken on the next render, once the form holds the loaded GRN
     }).catch((e) => { toast(e.message, 'error'); navigate('/grn'); });
   }, [editId]); // eslint-disable-line
   useEffect(() => {
@@ -264,18 +269,28 @@ export default function GrnForm() {
       const saved = editId ? await api.put(`/grns/${editId}`, body) : await api.post('/grns', body);
       if (!editId) localStorage.removeItem(DRAFT);
       toast(editId ? `${saved.grn_no} updated — stock adjusted` : `${saved.grn_no} saved — stock updated`);
-      navigate(`/grn/${saved.id}`);
+      if (editId) backToGrn(saved.id); else navigate(`/grn/${saved.id}`);
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   };
   const reset = () => { if (confirm('Clear this form and start again?')) { localStorage.removeItem(DRAFT); setG({ ...initial, items: [], entry: blankItem(), editingKey: null, supplier_id: null }); window.location.reload(); } };
+
+  // Cancel / Back while editing: ask before throwing away changes
+  const editChanged = Boolean(editId && loadedRef.current && loadedRef.current !== 'pending' && (loadedRef.current !== JSON.stringify({ ...g, entry: null }) || entryStarted));
+  const leaveEdit = () => {
+    if (editChanged && !confirm(`You have unsaved changes to ${editing}.\n\nOK = discard the changes\nCancel = keep editing`)) return;
+    backToGrn();
+  };
 
   if (!suppliers || editing === null) return <Loading />;
 
   return (
     <div>
       {editId ? (
-        <PageHeader back={`/grn/${editId}`} title={`Edit ${editing}`} subtitle="Fix what was entered wrongly. Stock moves by the difference only. Saving needs the Super Admin's password."
-          actions={<button className="btn btn-ghost" onClick={() => navigate(`/grn/${editId}`)}>Cancel</button>} />
+        <PageHeader back={leaveEdit} title={`Edit ${editing}`} subtitle="Fix what was entered wrongly. Stock moves by the difference only. Saving needs the Super Admin's password."
+          actions={<>
+            {editChanged && <span className="badge badge-amber">Unsaved changes</span>}
+            <button className="btn btn-ghost" onClick={leaveEdit}>Cancel</button>
+          </>} />
       ) : (
         <PageHeader title="Receive Goods (GRN)" subtitle="Enter a shipment from India. The system works out the real cost of every item in LKR."
           actions={<button className="btn btn-ghost" onClick={reset}><Icon name="trash" size={16} /> Clear form</button>} />

@@ -534,9 +534,9 @@ export default function GrnForm() {
                     </div>
                     <p className="item-qty-note muted small">
                       {c.short_pcs
-                        ? 'Shorts are still paid in full — their cost is spread over the pieces that arrived. They are listed under Extra & Short.'
+                        ? 'Shorts are still paid in full. They show as a loss under Extra & Short until you resolve them (received later, or lost).'
                         : c.extra_pcs
-                          ? 'Extra pieces are added to the supplier bill at the per-piece price. They are listed under Extra & Short.'
+                          ? 'Extra pieces go into stock and onto the supplier bill. Resolve them under Extra & Short once the supplier answers (keep free, pay, or next shipment).'
                           : 'Got extra pieces, or pieces missing? Enter them here.'}
                       {' '}<button type="button" className="link-btn" style={{ display: 'inline', marginLeft: 0 }}
                         onClick={() => updItem(it.key, { showQty: false, extra_pcs: '', short_pcs: '' })}>Remove</button>

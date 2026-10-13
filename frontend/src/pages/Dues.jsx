@@ -62,7 +62,7 @@ export default function Dues() {
                     <thead><tr><th>{isPay ? 'Supplier' : 'Customer'}</th><th>{isPay ? 'GRN · Bale' : 'Bill'}</th><th>Date</th><th>Due date</th><th className="right">Amount</th><th className="right">Balance</th><th></th></tr></thead>
                     <tbody>
                       {list.map((b) => (
-                        <tr key={`${b.supplier_id || b.customer_id}-${b.id}`}>
+                        <tr key={`${b.supplier_id || b.customer_id}-${b.id}`} className="hover">
                           <td><Link to={isPay ? `/suppliers/${b.supplier_id}` : `/customers/${b.customer_id}`} className="strong">{b.supplier_name || b.customer_name}</Link>{b.customer_phone && <div className="sub">{b.customer_phone}</div>}</td>
                           <td>{isPay ? (b.id ? <Link to={`/grn/${b.id}`}>{b.grn_no}</Link> : b.grn_no) : (b.id ? <Link to={`/sales/${b.id}`}>{b.invoice_no}</Link> : b.invoice_no)}</td>
                           <td>{niceDate(b.date)}</td>

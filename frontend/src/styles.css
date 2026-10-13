@@ -106,7 +106,7 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
 .center { text-align: center; }
 .nowrap { white-space: nowrap; }
 .mono { font-variant-numeric: tabular-nums; }
-.text-green { color: var(--green); } .text-red { color: var(--red); } .text-amber { color: var(--amber); } .text-blue { color: var(--blue); }
+.text-green { color: var(--green); } .text-red { color: var(--red); } .text-amber { color: var(--amber); } .text-blue { color: var(--blue); } .text-violet { color: var(--violet); }
 .row { display: flex; align-items: center; }
 .row.wrap { flex-wrap: wrap; }
 .gap-s { gap: 8px; } .gap { gap: 12px; } .gap-l { gap: 20px; }
@@ -244,7 +244,7 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .table td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .table tr:last-child td { border-bottom: 0; }
 .table tbody tr.click { cursor: pointer; }
-.table tbody tr.click:hover td { background: var(--row-hover); }
+.table tbody tr.click:hover td, .table tbody tr.hover:hover td { background: var(--row-hover); }
 .table th.right, .table td.right { text-align: right; }
 .table tfoot td { font-weight: 700; background: var(--surface-2); border-top: 1px solid var(--border); }
 .table .sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
@@ -271,6 +271,19 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .toolbar .search .input { padding-left: 34px; }
 .es-toolbar .es-supplier { width: auto; min-width: 170px; }
 .es-stats { margin-bottom: 18px; }
+.es-history-bar { display: flex; justify-content: flex-start; margin: 10px 0 14px; }
+.es-status { display: flex; flex-wrap: wrap; gap: 4px; }
+.es-status .badge { white-space: nowrap; }
+.es-resolve { border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.es-resolve-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.es-options { display: grid; gap: 8px; }
+.es-option { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.es-option:hover { background: var(--row-hover); }
+.es-option.on { border-color: var(--primary); background: var(--primary-soft); }
+.es-option input { margin-top: 3px; }
+.es-option span { display: flex; flex-direction: column; gap: 2px; }
+.es-option small { color: var(--muted); font-size: 12.5px; }
+.es-option em { font-style: normal; font-weight: 700; font-size: 12.5px; }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .tabs button {

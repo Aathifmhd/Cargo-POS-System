@@ -174,7 +174,7 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const cost = it.cost_inr_per_pcs !== undefined ? n(it.cost_inr_per_pcs) * pcsPerSet : n(it.cost_inr_per_set);
     const q = (v) => Math.max(0, Math.round(n(v)));
     // extra pieces are billed by the supplier at the per-piece price;
-    // shorts are still paid in full, so their cost is spread over the pieces that did arrive
+    // shorts are still paid in full; they keep their own cost (a loss on Extra & Short until they arrive)
     const extra_pcs = q(it.extra_pcs);
     const extra_sets = q(it.extra_sets); // older GRNs only: free sets, not billed
     const short_sets = q(it.short_sets);
@@ -214,7 +214,9 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   }
   const out = lines.map((l, i) => {
     const landed = l.line_inr * rate + overheadOf[i];
-    const perPcs = l.pcs ? landed / l.pcs : 0;
+    // cost per piece is over every piece paid for, so short pieces don't make the others dearer
+    const basis = l.pcs + l.short_sets * l.pcs_per_set + l.short_pcs;
+    const perPcs = basis ? landed / basis : 0;
     return {
       ...l,
       landed_lkr: r2(landed),

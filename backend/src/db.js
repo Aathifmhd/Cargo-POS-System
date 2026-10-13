@@ -84,7 +84,7 @@ const DEFAULTS = {
     payable_inr: 0, expenses_lkr: 0, total_lkr: 0, total_sets: 0, total_pcs: 0, payment_type: 'credit', due_date: null, notes: null,
     effective_rate: null, settled_at: null },
   grn_expenses: { category: null, amount_lkr: 0 },
-  grn_items: { category: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, mrp_per_set: 0, expected_per_set: 0,
+  grn_items: { category: null, short_status: null, short_date: null, short_note: null, extra_status: null, extra_date: null, extra_note: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, mrp_per_set: 0, expected_per_set: 0,
     extra_sets: 0, extra_pcs: 0, short_sets: 0, short_pcs: 0 },
   supplier_payments: { grn_id: null, exchange_rate: 0, amount_lkr: 0, method: null, reference: null, notes: null },
   sales: { customer_id: null, customer_name: null, discount: 0, paid_at_sale: 0, cost_total: 0, due_date: null, notes: null, status: 'completed' },
@@ -278,7 +278,13 @@ export function dueStatus(balance, dueDate, today = todayStr()) {
 }
 
 /* ---------------- stock ---------------- */
-export const grnItemPcs = (it) => Math.max(0, ((it.sets || 0) + (it.extra_sets || 0) - (it.short_sets || 0)) * (it.pcs_per_set || 1) + (it.extra_pcs || 0) - (it.short_pcs || 0));
+/** Pieces a GRN line put into stock: what arrived, plus short pieces that came later (resolved as "received"). */
+export const grnItemPcs = (it) => Math.max(0, ((it.sets || 0) + (it.extra_sets || 0) - (it.short_sets || 0)) * (it.pcs_per_set || 1) + (it.extra_pcs || 0) - (it.short_pcs || 0))
+  + (it.short_status === 'received' ? itemShortPcs(it) : 0);
+/** Pieces billed but not received on a GRN line. */
+export const itemShortPcs = (it) => Math.max(0, (it.short_sets || 0) * (it.pcs_per_set || 1) + (it.short_pcs || 0));
+/** Extra pieces taken off the supplier bill: kept free, or settled in the next shipment. */
+export const unbilledExtraInr = (it) => (['free', 'next'].includes(it.extra_status) ? round2((it.extra_pcs || 0) * (it.cost_inr_per_set || 0) / (it.pcs_per_set || 1)) : 0);
 
 /**
  * Cost of the stock still on hand, first-in-first-out: the pieces left are taken to be the newest receipts

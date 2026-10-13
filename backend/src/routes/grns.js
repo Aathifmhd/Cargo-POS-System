@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { find, distinct, aggregate, num, contains, inParallel } from '../db.js';
-import { createGrn, updateGrn, getGrn, deleteGrn, supplierLedgers, computeLanding, productsById } from '../services.js';
+import { createGrn, updateGrn, getGrn, deleteGrn, supplierLedgers, computeLanding, productsById, resolveLine } from '../services.js';
 import { guard } from '../auth.js';
 
 const r = Router();
@@ -60,11 +60,21 @@ r.get('/extra-short', async (req, res) => {
       supplier_id: g.supplier_id, supplier_name: names[g.supplier_id], product_id: i.product_id, code: prods[i.product_id].code,
       name: i.name, sizes: i.sizes, pcs_per_set: i.pcs_per_set, sets: i.sets, extra_sets: i.extra_sets, extra_pcs: i.extra_pcs,
       short_sets: i.short_sets, short_pcs: i.short_pcs, cost_inr_per_set: i.cost_inr_per_set, landed_per_pcs_lkr: i.landed_per_pcs_lkr,
+      short_status: i.short_status, short_date: i.short_date, short_note: i.short_note,
+      extra_status: i.extra_status, extra_date: i.extra_date, extra_note: i.extra_note,
       exchange_rate: g.exchange_rate,
     };
   });
   rows.sort((a, b) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : a.grn_id !== b.grn_id ? b.grn_id - a.grn_id : a.id - b.id));
   res.json(rows);
+});
+
+/** Resolve a line's extra or short pieces (or undo that): see resolveLine. */
+const RESOLVE_TEXT = { received: 'received later', lost: 'lost', free: 'kept free', billed: 'paid with the bill', next: 'settled in the next shipment', reopen: 'reopened' };
+r.post('/lines/:id/resolve', async (req, res) => {
+  const { kind, action } = req.body || {};
+  await guard(req, `Extra & Short: ${kind} pieces ${RESOLVE_TEXT[action] || action} (line ${num(req.params.id)})`);
+  res.json(await resolveLine(num(req.params.id), req.body || {}));
 });
 
 r.get('/:id', async (req, res) => res.json(await getGrn(num(req.params.id))));

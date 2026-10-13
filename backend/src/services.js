@@ -1,6 +1,7 @@
 import {
   find, findOne, insert, setById, updateOne, updateMany, deleteMany, tx, fail, round2, num, sum, todayStr, addDays, getSettings,
   nextNo, nextProductCode, allocate, dueStatus, moveStock, recomputeProductCost, grnItemPcs, byDateId, stamp, inParallel,
+  itemShortPcs, unbilledExtraInr, setSetting,
 } from './db.js';
 
 /* =========================================================
@@ -56,10 +57,12 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     spread(num(e.amount_lkr), mine.length ? mine : all);
   }
 
-  // a line's landed cost is spread over every piece received, so free pieces lower the cost per piece
+  // a line's cost per piece is over every piece paid for: short pieces keep their cost (a loss on
+  // Extra & Short until they arrive), and free pieces lower it
   const out = lines.map((l, i) => {
     const landed = l.line_inr * rate + overheadOf[i];
-    const perPcs = l.pcs ? landed / l.pcs : 0;
+    const basis = l.pcs + l.short_sets * l.pcs_per_set + l.short_pcs;
+    const perPcs = basis ? landed / basis : 0;
     return { ...l, landed_lkr: round2(landed), landed_per_set_lkr: round2(perPcs * l.pcs_per_set), landed_per_pcs_lkr: round2(perPcs) };
   });
   return { items: out, goods_inr, cargo_inr, expenses_lkr, total_sets, total_pcs, total_lkr: round2(goods_inr * rate + cargo_inr * cRate + expenses_lkr) };
@@ -100,6 +103,42 @@ function settle(supplier, grns, pays, rate) {
  * Keeps every GRN costed at the costing rate: re-costs any GRN (and the products in it) whose rate differs,
  * e.g. after the costing rate is changed in Settings. Also records when a supplier bill becomes fully paid.
  */
+/** Work out a saved GRN's costs again (at the given rate) and store them on its lines. Returns the product ids. */
+async function recostGrn(g, rate) {
+  const items = await find('grn_items', { grn_id: g.id }, { sort: { id: 1 } });
+  // older lines don't keep their category: take it from the product
+  const cats = await productsById(items.filter((i) => !i.category).map((i) => i.product_id), { category: 1 });
+  for (const i of items) i.category ??= cats[i.product_id]?.category ?? null;
+  const expenses = await find('grn_expenses', { grn_id: g.id });
+  const calc = computeLanding({ items, expenses, exchange_rate: rate, cargo_charge_inr: g.cargo_charge_inr });
+  for (let i = 0; i < calc.items.length; i++) {
+    const it = calc.items[i];
+    await setById('grn_items', items[i].id, { landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr });
+  }
+  return { total_lkr: calc.total_lkr, productIds: items.map((i) => i.product_id) };
+}
+
+/**
+ * Once, after the update that keeps short pieces at their own cost (before, it was spread over the pieces
+ * that arrived): work out every GRN's costs again with the new rule.
+ */
+export async function upgradeCosting() {
+  if (num((await getSettings()).costing_version) >= 2) return 0;
+  const grns = await find('grns');
+  const rate = await costingRate();
+  await tx(async () => {
+    const touched = new Set();
+    for (const g of grns) {
+      const { total_lkr, productIds } = await recostGrn(g, num(g.exchange_rate) || rate);
+      await setById('grns', g.id, { total_lkr });
+      productIds.forEach((p) => touched.add(p));
+    }
+    for (const pid of touched) await recomputeProductCost(pid);
+    await setSetting('costing_version', 2);
+  });
+  return grns.length;
+}
+
 export async function revalueGrns() {
   const rate = await costingRate();
   const [suppliers, grnList, payList] = await inParallel(() => find('suppliers'), () => find('grns'), () => find('supplier_payments'));
@@ -122,18 +161,9 @@ export async function revalueGrns() {
     const touched = new Set();
     for (const { g, settledAt, recost } of actions) {
       if (!recost) { await setById('grns', g.id, { settled_at: settledAt }); continue; }
-      const items = await find('grn_items', { grn_id: g.id }, { sort: { id: 1 } });
-      // older lines don't keep their category: take it from the product
-      const cats = await productsById(items.filter((i) => !i.category).map((i) => i.product_id), { category: 1 });
-      for (const i of items) i.category ??= cats[i.product_id]?.category ?? null;
-      const expenses = await find('grn_expenses', { grn_id: g.id });
-      const calc = computeLanding({ items, expenses, exchange_rate: rate, cargo_charge_inr: g.cargo_charge_inr });
-      for (let i = 0; i < calc.items.length; i++) {
-        const it = calc.items[i];
-        await setById('grn_items', items[i].id, { landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr });
-        touched.add(items[i].product_id);
-      }
-      await setById('grns', g.id, { exchange_rate: rate, effective_rate: rate, total_lkr: calc.total_lkr, settled_at: settledAt });
+      const { total_lkr, productIds } = await recostGrn(g, rate);
+      productIds.forEach((p) => touched.add(p));
+      await setById('grns', g.id, { exchange_rate: rate, effective_rate: rate, total_lkr, settled_at: settledAt });
     }
     for (const pid of touched) await recomputeProductCost(pid);
   });
@@ -250,7 +280,7 @@ async function saveGrn(body, editId = null) {
 
   const calc = computeLanding({ items: rawItems, exchange_rate: rate, cargo_charge_inr: body.cargo_charge_inr, expenses });
   const cargoInBill = body.cargo_in_supplier_bill ? 1 : 0;
-  const payable_inr = round2(calc.goods_inr + (cargoInBill ? calc.cargo_inr : 0));
+  let payable_inr = round2(calc.goods_inr + (cargoInBill ? calc.cargo_inr : 0));
   const paymentType = body.payment_type === 'paid' ? 'paid' : 'credit';
   const due_date = paymentType === 'credit' ? body.due_date || addDays(date, supplier.credit_days) : date;
   const head = {
@@ -275,6 +305,25 @@ async function saveGrn(body, editId = null) {
       grnId = (await insert('grns', { grn_no, ...head })).id;
     }
     const newPcs = new Map(); // product id → pieces this GRN now brings in
+    // editing keeps how each line's extra / short pieces were resolved (Extra & Short) — those can't be changed here
+    const oldLines = new Map();
+    for (const o of old?.items || []) oldLines.set(o.product_id, [...(oldLines.get(o.product_id) || []), o]);
+    const resolvedOf = (o) => [o.short_status && 'short', o.extra_status && 'extra'].filter(Boolean).join(' and ');
+    const carry = (productId, it) => {
+      const o = oldLines.get(productId)?.shift();
+      if (!o) return {};
+      const keep = {};
+      if (o.short_status) {
+        if (itemShortPcs(o) !== itemShortPcs(it)) fail(`"${o.name}": its short pieces are already resolved on Extra & Short. Undo that there first, then change them.`);
+        Object.assign(keep, { short_status: o.short_status, short_date: o.short_date, short_note: o.short_note });
+      }
+      if (o.extra_status) {
+        if ((o.extra_pcs || 0) !== (it.extra_pcs || 0)) fail(`"${o.name}": its extra pieces are already resolved on Extra & Short. Undo that there first, then change them.`);
+        Object.assign(keep, { extra_status: o.extra_status, extra_date: o.extra_date, extra_note: o.extra_note });
+      }
+      return keep;
+    };
+    let unbilled = 0;
 
     for (const e of expenses) await insert('grn_expenses', { grn_id: grnId, label: e.label.trim(), category: String(e.category || '').trim() || null, amount_lkr: round2(e.amount_lkr) });
 
@@ -303,7 +352,8 @@ async function saveGrn(body, editId = null) {
         mrp_per_set: round2(mrp), expected_per_set: round2(expected), updated_at: stamp(),
       });
 
-      await insert('grn_items', {
+      const line = await insert('grn_items', {
+        ...carry(product.id, it),
         grn_id: grnId, product_id: product.id, name: product.name, category: product.category || (it.category || '').trim() || null, pcs_per_set: it.pcs_per_set, colors_count: Math.round(num(it.colors_count)),
         color_names: it.color_names || null, sizes: it.sizes || null, sets: it.sets, cost_inr_per_set: it.cost_inr_per_set,
         line_inr: it.line_inr, landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr,
@@ -316,8 +366,18 @@ async function saveGrn(body, editId = null) {
         it.short_sets && `${it.short_sets} sets short`,
         it.short_pcs && `${it.short_pcs} pcs short`,
       ].filter(Boolean);
-      if (old) newPcs.set(product.id, (newPcs.get(product.id) || 0) + it.pcs);
+      unbilled += unbilledExtraInr(line);
+      if (old) newPcs.set(product.id, (newPcs.get(product.id) || 0) + grnItemPcs(line));
       else await moveStock(product.id, it.pcs, 'grn', grn_no, `Received ${it.sets} sets${notes.length ? ` (${notes.join(', ')})` : ''}`, date);
+    }
+
+    for (const left of [...oldLines.values()].flat()) {
+      if (resolvedOf(left)) fail(`"${left.name}" can't be removed: its ${resolvedOf(left)} pieces are resolved on Extra & Short. Undo that there first.`);
+    }
+    // extra pieces kept free, or settled in the next shipment, are not on this bill
+    if (unbilled > 0) {
+      payable_inr = round2(payable_inr - unbilled);
+      await setById('grns', grnId, { payable_inr });
     }
 
     const autoNote = `Paid with ${grn_no}`;
@@ -392,6 +452,48 @@ export async function getGrn(id) {
   g.balance_inr = bill ? bill.balance : 0;
   g.pay_status = bill ? bill.status : 'paid';
   return g;
+}
+
+/* =========================================================
+   EXTRA & SHORT — resolving a GRN line's extra or short pieces
+   short: received → the pieces came later and go into stock at the line's cost; lost → lost at the cargo / clearance
+   extra: free → the supplier lets us keep them (off the bill); billed → paid with this bill; next → settled in the next shipment (off this bill)
+   "reopen" undoes a resolution.
+   ========================================================= */
+const RESOLVE = { short: ['received', 'lost'], extra: ['free', 'billed', 'next'] };
+export async function resolveLine(itemId, { kind, action, date, note } = {}) {
+  if (!RESOLVE[kind]) fail('Choose extra or short');
+  const to = action === 'reopen' ? null : action;
+  if (to && !RESOLVE[kind].includes(to)) fail('Choose how it was resolved');
+  const item = await findOne('grn_items', { id: itemId });
+  if (!item) fail('GRN line not found', 404);
+  const g = await findOne('grns', { id: item.grn_id });
+  if (!g) fail('GRN not found', 404);
+  const day = date || todayStr();
+  const text = String(note || '').trim() || null;
+  await tx(async () => {
+    if (kind === 'short') {
+      const pcs = itemShortPcs(item);
+      if (!pcs) fail('This line has no short pieces');
+      const was = item.short_status || null;
+      if (was === 'received' && to !== 'received') {
+        const p = await findOne('products', { id: item.product_id });
+        if (p.stock_pcs < pcs) fail(`Cannot undo: only ${p.stock_pcs} pcs of "${p.name}" are left in stock.`);
+      }
+      await setById('grn_items', item.id, { short_status: to, short_date: to ? day : null, short_note: to ? text : null });
+      if (was !== 'received' && to === 'received') await moveStock(item.product_id, pcs, 'short-received', g.grn_no, `Short pieces received later${text ? ` (${text})` : ''}`, day);
+      if (was === 'received' && to !== 'received') await moveStock(item.product_id, -pcs, 'short-undo', g.grn_no, 'Short pieces taken back off (resolve undone)', day);
+    } else {
+      if (!(item.extra_pcs > 0)) fail('This line has no extra pieces');
+      await setById('grn_items', item.id, { extra_status: to, extra_date: to ? day : null, extra_note: to ? text : null });
+      // the supplier bill follows: extras kept free or settled in the next shipment come off it
+      const lines = await find('grn_items', { grn_id: g.id });
+      const payable = round2(g.goods_inr + (g.cargo_in_supplier_bill ? g.cargo_charge_inr : 0) - sum(lines, unbilledExtraInr));
+      await setById('grns', g.id, { payable_inr: payable });
+    }
+  });
+  await revalueGrns();   // a bill that is now fully paid gets its settled date
+  return findOne('grn_items', { id: itemId });
 }
 
 export async function deleteGrn(id) {

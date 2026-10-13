@@ -33,7 +33,6 @@ export default function GrnView() {
 
       <div className="stats mb">
         <div className="stat"><div className="stat-text"><div className="stat-label">Cargo</div><div className="stat-value" style={{ fontSize: 17 }}>{g.cargo_name || '—'}</div></div></div>
-        <div className="stat"><div className="stat-text"><div className="stat-label">LR no</div><div className="stat-value" style={{ fontSize: 17 }}>{g.lr_no || '—'}</div></div></div>
         <div className="stat"><div className="stat-text"><div className="stat-label">Costing rate</div><div className="stat-value" style={{ fontSize: 17 }}>1 ₹ = Rs {g.exchange_rate.toFixed(4)}</div></div></div>
       </div>
 

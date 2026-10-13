@@ -2,10 +2,22 @@ import { useCallback, useEffect, useState } from 'react';
 
 /* ---------------- catalogue (Settings → Categories, products & sizes) ---------------- */
 /** [{ name, sizes: [], types: [] }] from settings.catalog */
+/** Product names per product, kept in the products' order and only for products that still exist (same as the server). */
+export function namesFor(types, names) {
+  const out = {};
+  for (const t of types) {
+    const list = Array.isArray(names?.[t]) ? names[t].filter(Boolean) : [];
+    if (list.length) out[t] = list;
+  }
+  return out;
+}
 export function parseCatalog(settings) {
   try {
     const list = JSON.parse(settings?.catalog || '[]');
-    return Array.isArray(list) ? list.filter((c) => c && c.name).map((c) => ({ name: c.name, sizes: c.sizes || [], types: c.types || [], reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) })) : [];
+    return Array.isArray(list) ? list.filter((c) => c && c.name).map((c) => {
+      const types = c.types || [];
+      return { name: c.name, sizes: c.sizes || [], types, names: namesFor(types, c.names), reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) };
+    }) : [];
   } catch { return []; }
 }
 export const findCategory = (catalog, name) => catalog.find((c) => c.name.toLowerCase() === String(name || '').trim().toLowerCase());

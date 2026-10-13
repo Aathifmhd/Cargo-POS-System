@@ -256,9 +256,9 @@ export function createGrn(body) {
         const code = String(it.code || '').trim() || nextProductCode();
         if (get('SELECT id FROM products WHERE code = ?', code)) fail(`Product code "${code}" already exists`);
         const { lastInsertRowid } = run(
-          `INSERT INTO products (code, name, category, subtype, pcs_per_set, colors_count, color_names, sizes, supplier_id, reorder_sets)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          code, String(it.name).trim(), (it.category || '').trim() || null, (it.subtype || '').trim() || null, it.pcs_per_set, Math.round(num(it.colors_count)),
+          `INSERT INTO products (code, name, category, subtype, pname, pcs_per_set, colors_count, color_names, sizes, supplier_id, reorder_sets)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          code, String(it.name).trim(), (it.category || '').trim() || null, (it.subtype || '').trim() || null, (it.pname || '').trim() || null, it.pcs_per_set, Math.round(num(it.colors_count)),
           it.color_names || null, it.sizes || null, supplier.id, Math.round(num(it.reorder_sets)) || reorderOf(it.category));
         product = get('SELECT * FROM products WHERE id = ?', lastInsertRowid);
       }
@@ -268,10 +268,10 @@ export function createGrn(body) {
       const expected = num(it.expected_per_set) || product.expected_per_set;
       run(
         `UPDATE products SET pcs_per_set = ?, colors_count = ?, color_names = COALESCE(?, color_names), sizes = COALESCE(?, sizes),
-           category = COALESCE(?, category), subtype = COALESCE(?, subtype), supplier_id = ?, mrp_per_set = ?, expected_per_set = ?, updated_at = CURRENT_TIMESTAMP
+           category = COALESCE(?, category), subtype = COALESCE(?, subtype), pname = COALESCE(?, pname), supplier_id = ?, mrp_per_set = ?, expected_per_set = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
         it.pcs_per_set, Math.round(num(it.colors_count)) || product.colors_count, it.color_names || null, it.sizes || null,
-        (it.category || '').trim() || null, (it.subtype || '').trim() || null, supplier.id, round2(mrp), round2(expected), product.id);
+        (it.category || '').trim() || null, (it.subtype || '').trim() || null, (it.pname || '').trim() || null, supplier.id, round2(mrp), round2(expected), product.id);
 
       run(
         `INSERT INTO grn_items (grn_id, product_id, name, pcs_per_set, colors_count, color_names, sizes, sets, cost_inr_per_set,

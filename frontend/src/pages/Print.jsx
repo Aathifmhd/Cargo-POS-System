@@ -93,7 +93,7 @@ export function PrintGrn() {
         <ShopHead title="GOODS RECEIVED NOTE" no={g.grn_no} date={g.date} />
         <div className="print-meta">
           <div><div className="muted">Supplier</div><b>{g.supplier_name}</b><div>{g.supplier_city}</div><div>Invoice: {g.supplier_invoice_no || '—'}</div></div>
-          <div className="right"><div>Cargo: <b>{g.cargo_name || '—'}</b></div><div>LR no: <b>{g.lr_no || '—'}</b></div><div>Rate: <b>1 INR = Rs {g.exchange_rate}</b></div></div>
+          <div className="right"><div>Cargo: <b>{g.cargo_name || '—'}</b></div><div>Rate: <b>1 INR = Rs {g.exchange_rate}</b></div></div>
         </div>
         <table>
           <thead><tr><th>Item</th><th className="right">Sets</th><th className="right">Pcs/set</th><th>Colours / Sizes</th><th className="right">Bill ₹/pc</th><th className="right">Cost Rs/pc</th><th className="right">Expected Rs/pc</th><th className="right">MRP Rs/pc</th></tr></thead>

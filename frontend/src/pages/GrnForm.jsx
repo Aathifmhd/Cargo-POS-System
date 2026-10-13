@@ -44,7 +44,7 @@ export default function GrnForm() {
       }
     } catch { /* ignore */ }
     return {
-      date: today(), supplier_id: null, supplier_invoice_no: '', cargo_name: '', lr_no: '',
+      date: today(), supplier_id: null, supplier_invoice_no: '', cargo_name: '',
       payment_type: 'credit', due_date: '', payment_method: 'Bank transfer', payment_reference: '', notes: '',
       expenses: [{ label: 'Cargo charge', amount_lkr: '' }],   // the only charge: the cargo charge in LKR
       items: [], entry: blankItem(), editingKey: null,
@@ -87,20 +87,22 @@ export default function GrnForm() {
 
   // Category first: it decides the product types and sizes offered
   const chooseCategory = (key, value) => {
-    if (value === '__other') return updItem(key, { catOther: true, category: '', subtype: '', product_id: null, name: '', isNew: false, sizes: '', pcsAuto: false });
-    updItem(key, { catOther: false, category: value, subtype: '', product_id: null, name: '', isNew: false, sizes: '', pcsAuto: false });
+    if (value === '__other') return updItem(key, { catOther: true, category: '', subtype: '', pname: '', product_id: null, name: '', isNew: false, sizes: '', pcsAuto: false });
+    updItem(key, { catOther: false, category: value, subtype: '', pname: '', product_id: null, name: '', isNew: false, sizes: '', pcsAuto: false });
   };
-  // A category's product ("Collar") names the stock item ("T-shirts - Collar") — stock goes onto it if it already exists
-  const chooseProduct = (key, type) => setG((x) => mapItem(x, key, (i) => {
-    if (!type) return { ...i, subtype: '', product_id: null, name: '', isNew: false };
-    const name = `${i.category} - ${type}`;
+  // Category → product ("Kerala") → product name ("Royal Check"): the stock item is "Shirts - Kerala - Royal Check"
+  const chooseProduct = (key, type) => setG((x) => mapItem(x, key, (i) => ({ ...i, subtype: type || '', pname: '', product_id: null, name: '', isNew: false })));
+  // the product name completes the item — stock goes onto the existing item of that name, if there is one
+  const choosePName = (key, pname) => setG((x) => mapItem(x, key, (i) => {
+    if (!pname) return { ...i, pname: '', product_id: null, name: '', isNew: false };
+    const name = `${i.category} - ${i.subtype} - ${pname}`;
     const existing = products.find((p) => p.name.toLowerCase() === name.toLowerCase());
-    if (existing) return { ...i, ...productFields(existing), category: i.category, subtype: type, isNew: false };
-    return { ...i, subtype: type, product_id: null, name, isNew: true };
+    if (existing) return { ...i, ...productFields(existing), category: i.category, subtype: i.subtype, pname, isNew: false };
+    return { ...i, pname, product_id: null, name, isNew: true };
   }));
 
   // "+ Add product" in the Products dropdown: saves it under the category for next time, then selects it
-  const [adding, setAdding] = useState(null); // { key, text }
+  const [adding, setAdding] = useState(null); // { key, text, kind: 'product' | 'name' }
   const addProduct = async (it) => {
     const product = (adding?.text || '').trim();
     if (!product) return;
@@ -112,9 +114,21 @@ export default function GrnForm() {
       toast(`"${res.product}" added to ${it.category}`);
     } catch (e) { toast(e.message, 'error'); }
   };
+  // "+ Add name" in the Product name dropdown: saves it under the product in Settings, then selects it
+  const addName = async (it) => {
+    const name = (adding?.text || '').trim();
+    if (!name) return;
+    try {
+      const res = await api.post('/catalog/names', { category: it.category, product: it.subtype, name });
+      await reloadSettings();
+      setAdding(null);
+      choosePName(it.key, res.name);
+      toast(`"${res.name}" added to ${it.category} › ${it.subtype}`);
+    } catch (e) { toast(e.message, 'error'); }
+  };
 
   const productFields = (p) => ({
-    product_id: p.id, name: p.name, category: p.category || '', subtype: p.subtype || '', pcs_per_set: p.pcs_per_set, colors_count: p.colors_count || '',
+    product_id: p.id, name: p.name, category: p.category || '', subtype: p.subtype || '', pname: p.pname || '', pcs_per_set: p.pcs_per_set, colors_count: p.colors_count || '',
     color_names: p.color_names || '', sizes: p.sizes || '', mrp_per_pcs: perPiece(p.mrp_per_set, p.pcs_per_set), expected_per_pcs: perPiece(p.expected_per_set, p.pcs_per_set),
   });
 
@@ -130,7 +144,7 @@ export default function GrnForm() {
   const entryStarted = Boolean(g.entry.name || g.entry.product_id || n(g.entry.sets) || n(g.entry.cost_inr_per_pcs));
   // the add-item form folds into one "+ Add item" bar under the list; it opens on click or Edit, and folds after adding
   const [formOpen, setFormOpen] = useState(() => !initial.items.length || entryStarted);
-  const showForm = formOpen || Boolean(g.editingKey) || !g.items.length;
+  const showForm = formOpen || Boolean(g.editingKey);   // starts open when the list is empty, and can always be folded
   const openForm = () => {
     setFormOpen(true);
     setTimeout(() => document.querySelector('.item-entry')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
@@ -157,6 +171,9 @@ export default function GrnForm() {
   const addItem = () => {
     const e = g.entry;
     if (!e.category.trim()) return toast('Choose the category', 'error');
+    const fromCatalog = !e.catOther && findCategory(catalog, e.category);
+    if (fromCatalog && !e.subtype) return toast('Choose the product', 'error');
+    if (fromCatalog && !e.pname) return toast('Choose the product name', 'error');
     if (!e.name.trim()) return toast('Choose the product', 'error');
     if (!hasQty(e)) return toast('Enter the number of sets', 'error');
     if (n(e.sets) > 0 && n(e.cost_inr_per_pcs) <= 0 && !confirm(`"${e.name}" has no billed price per piece. Add it anyway?`)) return;
@@ -241,7 +258,6 @@ export default function GrnForm() {
                 <input className="input" list="cargo-list" value={g.cargo_name} onChange={set('cargo_name')} placeholder="e.g. Lanka Speed Cargo" />
                 <datalist id="cargo-list">{cargoNames.map((c) => <option key={c} value={c} />)}</datalist>
               </Field>
-              <Field label="LR number" hint="Lorry receipt / tracking no"><input className="input" value={g.lr_no} onChange={set('lr_no')} /></Field>
               <Field label="Supplier invoice no"><input className="input" value={g.supplier_invoice_no} onChange={set('supplier_invoice_no')} /></Field>
               <Field label="Notes"><input className="input" value={g.notes} onChange={set('notes')} /></Field>
             </div>
@@ -254,7 +270,7 @@ export default function GrnForm() {
             {/* the items added so far, category by category */}
             <div className="item-list">
               {!g.items.length ? (
-                <div className="item-list-empty">No items yet. Fill in the card below and press <b>Add item</b>.</div>
+                <div className="item-list-empty">No items yet. Use <b>Add item</b> below to add the first one.</div>
               ) : groups.map(([cat, rows]) => (
                 <div key={cat} className="item-group">
                   <div className="item-group-head">
@@ -267,7 +283,7 @@ export default function GrnForm() {
                       {rows.map(({ it: row, c: rc }) => (
                         <tr key={row.key} className={g.editingKey === row.key ? 'row-editing' : ''}>
                           <td>
-                            <b>{row.subtype || row.name}</b>
+                            <b>{row.subtype ? (row.pname ? `${row.subtype} · ${row.pname}` : row.subtype) : row.name}</b>
                             {row.sizes && <div className="sub">{row.sizes}</div>}
                           </td>
                           <td className="right nowrap">
@@ -312,7 +328,7 @@ export default function GrnForm() {
                   <div className="item-entry-title">
                     <Icon name={g.editingKey ? 'edit' : 'plus'} size={15} />
                     {g.editingKey ? <span>Editing <b>{it.name}</b></span> : <span>Add an item</span>}
-                    {!g.editingKey && g.items.length > 0 && (
+                    {!g.editingKey && (
                       <button type="button" className="item-fold" onClick={() => { setAdding(null); setFormOpen(false); }} title="Fold the form away (what you typed is kept)">Fold ▴</button>
                     )}
                   </div>
@@ -325,7 +341,10 @@ export default function GrnForm() {
                         const options = cat ? [...cat.types] : [];
                         // a product picked earlier that has since been removed from Settings stays visible on this line only
                         const removed = cat && it.subtype && !options.some((t) => t.toLowerCase() === it.subtype.toLowerCase()) ? it.subtype : null;
-                        const isAdding = adding?.key === it.key;
+                        const isAdding = adding?.key === it.key && adding.kind !== 'name';
+                        const isAddingName = adding?.key === it.key && adding.kind === 'name';
+                        const nameOptions = cat && it.subtype ? cat.names?.[it.subtype] || [] : [];
+                        const removedName = it.pname && !nameOptions.some((x) => x.toLowerCase() === it.pname.toLowerCase()) ? it.pname : null;
                         return (<>
                           <div className="item-pick">
                             <Field label="Category" required>
@@ -340,7 +359,7 @@ export default function GrnForm() {
                               <Field label={`${cat.name} — product`} required>
                                 <select className="input" value={isAdding ? '__add' : it.subtype}
                                   onChange={(e) => {
-                                    if (e.target.value === '__add') return setAdding({ key: it.key, text: '' });
+                                    if (e.target.value === '__add') return setAdding({ key: it.key, text: '', kind: 'product' });
                                     setAdding(null);
                                     chooseProduct(it.key, e.target.value);
                                   }}>
@@ -352,9 +371,33 @@ export default function GrnForm() {
                                 {isAdding && (
                                   <div className="row mt-s" style={{ gap: 8 }}>
                                     <input className="input" autoFocus value={adding.text} placeholder={`New ${cat.name} product, e.g. Collar Boxy`}
-                                      onChange={(e) => setAdding({ key: it.key, text: e.target.value })}
+                                      onChange={(e) => setAdding({ ...adding, text: e.target.value })}
                                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addProduct(it); } if (e.key === 'Escape') { e.stopPropagation(); setAdding(null); } }} />
                                     <button type="button" className="btn btn-primary" disabled={!adding.text.trim()} onClick={() => addProduct(it)}>Add</button>
+                                    <button type="button" className="btn btn-ghost" onClick={() => setAdding(null)}>Cancel</button>
+                                  </div>
+                                )}
+                              </Field>
+                            )}
+                            {cat && it.subtype && !isAdding && (
+                              <Field label={`${it.subtype} — product name`} required>
+                                <select className="input" value={isAddingName ? '__add' : it.pname || ''}
+                                  onChange={(e) => {
+                                    if (e.target.value === '__add') return setAdding({ key: it.key, text: '', kind: 'name' });
+                                    setAdding(null);
+                                    choosePName(it.key, e.target.value);
+                                  }}>
+                                  <option value="">Choose name…</option>
+                                  {nameOptions.map((x) => <option key={x} value={x}>{x}</option>)}
+                                  {removedName && <option value={removedName}>{removedName} (removed in Settings)</option>}
+                                  <option value="__add">+ Add name to {it.subtype}…</option>
+                                </select>
+                                {isAddingName && (
+                                  <div className="row mt-s" style={{ gap: 8 }}>
+                                    <input className="input" autoFocus value={adding.text} placeholder="New product name, e.g. Royal Check"
+                                      onChange={(e) => setAdding({ ...adding, text: e.target.value })}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addName(it); } if (e.key === 'Escape') { e.stopPropagation(); setAdding(null); } }} />
+                                    <button type="button" className="btn btn-primary" disabled={!adding.text.trim()} onClick={() => addName(it)}>Add</button>
                                     <button type="button" className="btn btn-ghost" onClick={() => setAdding(null)}>Cancel</button>
                                   </div>
                                 )}
@@ -371,7 +414,7 @@ export default function GrnForm() {
                               </Field>
                             )}
                           </div>
-                          {it.name && !isAdding && (
+                          {it.name && !isAdding && !isAddingName && (
                             <div className="item-product-row">
                               <span className="item-product-name">{it.name}</span>
                               {it.product_id

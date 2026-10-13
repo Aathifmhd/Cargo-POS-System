@@ -66,6 +66,7 @@ function clean(body) {
     name: String(body.name).trim(),
     category: String(body.category || '').trim() || null,
     subtype: String(body.subtype || '').trim() || null,
+    pname: String(body.pname || '').trim() || null,
     pcs_per_set: Math.max(1, Math.round(num(body.pcs_per_set, 1))),
     colors_count: Math.round(num(body.colors_count)),
     color_names: body.color_names || null,
@@ -87,10 +88,10 @@ r.post('/', (req, res) => {
   const id = tx(() => {
     const opening = Math.round(num(req.body.opening_sets) * d.pcs_per_set + num(req.body.opening_pcs));
     const { lastInsertRowid } = run(
-      `INSERT INTO products (code, name, category, subtype, pcs_per_set, colors_count, color_names, sizes, supplier_id, mrp_per_set,
+      `INSERT INTO products (code, name, category, subtype, pname, pcs_per_set, colors_count, color_names, sizes, supplier_id, mrp_per_set,
          expected_per_set, reorder_sets, active, cost_per_pcs, last_cost_per_pcs, opening_pcs, opening_cost_per_pcs)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      code, d.name, d.category, d.subtype, d.pcs_per_set, d.colors_count, d.color_names, d.sizes, d.supplier_id, d.mrp_per_set,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      code, d.name, d.category, d.subtype, d.pname, d.pcs_per_set, d.colors_count, d.color_names, d.sizes, d.supplier_id, d.mrp_per_set,
       d.expected_per_set, d.reorder_sets, d.active, cost, cost, Math.max(0, opening), cost);
     if (opening) moveStock(lastInsertRowid, opening, 'adjust', null, 'Opening stock');
     return lastInsertRowid;
@@ -112,10 +113,10 @@ r.put('/:id', (req, res) => {
   if (old.active !== d.active) changes.push(d.active ? 'made active' : 'made inactive');
   if (changes.length) guard(req, `Product ${old.name}: ${changes.join(', ')}`);
   run(
-    `UPDATE products SET code = COALESCE(?, code), name = ?, category = ?, subtype = ?, pcs_per_set = ?, colors_count = ?, color_names = ?, sizes = ?,
+    `UPDATE products SET code = COALESCE(?, code), name = ?, category = ?, subtype = ?, pname = ?, pcs_per_set = ?, colors_count = ?, color_names = ?, sizes = ?,
        supplier_id = ?, mrp_per_set = ?, expected_per_set = ?, reorder_sets = ?, active = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
-    code || null, d.name, d.category, d.subtype, d.pcs_per_set, d.colors_count, d.color_names, d.sizes, d.supplier_id,
+    code || null, d.name, d.category, d.subtype, d.pname, d.pcs_per_set, d.colors_count, d.color_names, d.sizes, d.supplier_id,
     d.mrp_per_set, d.expected_per_set, d.reorder_sets, d.active, id);
   res.json(get(`${LIST_SQL} WHERE p.id = ?`, id));
 });

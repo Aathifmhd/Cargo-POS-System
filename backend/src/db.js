@@ -262,6 +262,7 @@ addColumn('products', 'opening_cost_per_pcs', 'REAL NOT NULL DEFAULT 0');
 addColumn('sale_items', 'disc', 'REAL NOT NULL DEFAULT 0');      // line discount amount (Rs)
 addColumn('sale_items', 'disc_pct', 'REAL NOT NULL DEFAULT 0');
 addColumn('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');   // +1 on password change → older logins end
+addColumn('products', 'pname', 'TEXT');                               // product name within the product, e.g. Shirts → Kerala → "Royal Check"
 addColumn('products', 'subtype', 'TEXT');                             // product type within the category, e.g. T-shirts → "Collar"
 addColumn('grn_items', 'extra_sets', 'INTEGER NOT NULL DEFAULT 0');   // (older GRNs) free sets — not on the supplier's bill
 addColumn('grn_items', 'extra_pcs', 'INTEGER NOT NULL DEFAULT 0');    // extra pieces received — billed by the supplier

@@ -18,13 +18,42 @@ function cleanCatalog(raw) {
     if (!name) continue;
     if (seen.has(name.toLowerCase())) fail(`The category "${name}" is listed twice`);
     seen.add(name.toLowerCase());
-    out.push({ name, sizes: uniq(c.sizes), types: uniq(c.types), reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) });
+    const types = uniq(c.types);
+    // product names under each product: { Kerala: ['Royal Check', …] } — only for products still in the list
+    const names = {};
+    for (const t of types) {
+      const list = uniq(c.names?.[t]);
+      if (list.length) names[t] = list;
+    }
+    out.push({ name, sizes: uniq(c.sizes), types, names, reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) });
   }
   return JSON.stringify(out);
 }
 
 /* ---------------- settings ---------------- */
 r.get('/settings', (req, res) => res.json(getSettings()));
+/** Receive Goods → "+ Add name": add one product name under a category's product (any signed-in user). */
+r.post('/catalog/names', (req, res) => {
+  const category = String(req.body?.category || '').trim();
+  const product = String(req.body?.product || '').trim();
+  const pname = String(req.body?.name || '').trim();
+  if (!category || !product || !pname) fail('Choose the category and product, and type the product name');
+  const list = JSON.parse(getSettings().catalog || '[]');
+  const cat = list.find((c) => c.name.toLowerCase() === category.toLowerCase());
+  if (!cat) fail(`"${category}" is not in the category list`);
+  const type = (cat.types || []).find((t) => t.toLowerCase() === product.toLowerCase());
+  if (!type) fail(`"${product}" is not a product of ${cat.name}`);
+  cat.names = cat.names || {};
+  const names = (cat.names[type] = cat.names[type] || []);
+  const existing = names.find((x) => x.toLowerCase() === pname.toLowerCase());
+  if (!existing) {
+    names.push(pname);
+    run('UPDATE settings SET value = ? WHERE key = ?', cleanCatalog(list), 'catalog');
+    audit(req.user, `Added product name "${pname}" to ${cat.name} › ${type}`);
+  }
+  res.json({ catalog: getSettings().catalog, name: existing || pname });
+});
+
 /** Receive Goods → "+ Add product": add one product to a category's list (any signed-in user). */
 r.post('/catalog/products', (req, res) => {
   const category = String(req.body?.category || '').trim();

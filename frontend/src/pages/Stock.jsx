@@ -66,7 +66,7 @@ export default function Stock() {
                   return (
                     <tr key={p.id} className="click" onClick={() => setOpen(p.id)}>
                       <td className="muted strong">{p.code}</td>
-                      <td><b>{p.name}</b><div className="sub">{p.category || 'No category'}{p.subtype ? ` · ${p.subtype}` : ''}{p.supplier_name ? ` · ${p.supplier_name}` : ''}</div></td>
+                      <td><b>{p.name}</b><div className="sub">{p.category || 'No category'}{p.subtype ? ` · ${p.subtype}` : ''}{p.pname ? ` · ${p.pname}` : ''}{p.supplier_name ? ` · ${p.supplier_name}` : ''}</div></td>
                       <td className="nowrap">{p.pcs_per_set} pcs/set<div className="sub">{p.colors_count ? `${p.colors_count} colours` : ''}{p.sizes ? ` · ${p.sizes}` : ''}</div></td>
                       <td><Badge tone={p.stock_pcs <= 0 ? 'red' : low ? 'amber' : 'green'}>{stockText(p.stock_pcs, p.pcs_per_set)}</Badge></td>
                       <td className="right">{money(p.cost_per_pcs)}</td>
@@ -137,9 +137,9 @@ function ProductModal({ id, categories, onClose, onChanged }) {
           </div>
           <Card title="Purchase history (GRNs)" pad={false}>
             {p.purchases.length === 0 ? <p className="muted card-body">No GRNs yet.</p> : (
-              <table className="table"><thead><tr><th>GRN</th><th>Date</th><th>Cargo / LR</th><th className="right">Sets</th><th className="right">Bill ₹/pc</th><th className="right">Rate</th><th className="right">Cost Rs/pc</th></tr></thead>
+              <table className="table"><thead><tr><th>GRN</th><th>Date</th><th>Cargo</th><th className="right">Sets</th><th className="right">Bill ₹/pc</th><th className="right">Rate</th><th className="right">Cost Rs/pc</th></tr></thead>
                 <tbody>{p.purchases.map((x) => (
-                  <tr key={x.id}><td><Link to={`/grn/${x.grn_id}`}>{x.grn_no}</Link></td><td>{niceDate(x.date)}</td><td>{x.cargo_name || '—'}<div className="sub">{x.lr_no ? `LR ${x.lr_no}` : ''}</div></td>
+                  <tr key={x.id}><td><Link to={`/grn/${x.grn_id}`}>{x.grn_no}</Link></td><td>{niceDate(x.date)}</td><td>{x.cargo_name || '—'}</td>
                     <td className="right">{x.sets}</td><td className="right">{money(x.cost_inr_per_set / (x.pcs_per_set || 1))}</td><td className="right">{x.exchange_rate}</td><td className="right strong">{money(x.landed_per_pcs_lkr)}</td></tr>
                 ))}</tbody></table>
             )}
@@ -180,19 +180,31 @@ function ProductModal({ id, categories, onClose, onChanged }) {
           <Field label="Code"><input className="input" value={f.code} onChange={set('code')} /></Field>
           <Field label="Product name" required className="span-2"><input className="input" value={f.name} onChange={set('name')} autoFocus /></Field>
           <Field label="Category">
-            <select className="input" value={f.category || ''} onChange={(e) => setF((x) => ({ ...x, category: e.target.value, subtype: '' }))}>
+            <select className="input" value={f.category || ''} onChange={(e) => setF((x) => ({ ...x, category: e.target.value, subtype: '', pname: '' }))}>
               <option value="">No category</option>
               {catalog.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               {[...new Set([f.category, ...categories])].filter((c) => c && !findCategory(catalog, c)).map((c) => <option key={c} value={c}>{c} (old)</option>)}
             </select>
           </Field>
-          <Field label="Product type">
-            <select className="input" value={f.subtype || ''} onChange={set('subtype')} disabled={!cat && !f.subtype}>
-              <option value="">{cat ? 'Choose type…' : '—'}</option>
+          <Field label="Product">
+            <select className="input" value={f.subtype || ''} onChange={(e) => setF((x) => ({ ...x, subtype: e.target.value, pname: '' }))} disabled={!cat && !f.subtype}>
+              <option value="">{cat ? 'Choose product…' : '—'}</option>
               {(cat?.types || []).map((t) => <option key={t} value={t}>{t}</option>)}
               {f.subtype && !(cat?.types || []).includes(f.subtype) && <option value={f.subtype}>{f.subtype}</option>}
             </select>
           </Field>
+          {(() => {
+            const names = (cat && f.subtype && cat.names?.[f.subtype]) || [];
+            return (
+              <Field label="Product name">
+                <select className="input" value={f.pname || ''} onChange={set('pname')} disabled={!f.subtype}>
+                  <option value="">{f.subtype ? 'Choose name…' : '—'}</option>
+                  {names.map((x) => <option key={x} value={x}>{x}</option>)}
+                  {f.pname && !names.includes(f.pname) && <option value={f.pname}>{f.pname}</option>}
+                </select>
+              </Field>
+            );
+          })()}
           <Field label="Pieces per set"><NumInput value={f.pcs_per_set} onChange={set('pcs_per_set')} /></Field>
           <Field label="No. of colours"><NumInput value={f.colors_count} onChange={set('colors_count')} /></Field>
           <Field label="Colour names" className="span-2"><input className="input" value={f.color_names || ''} onChange={set('color_names')} /></Field>

@@ -427,6 +427,21 @@ export function getSale(id) {
   return s;
 }
 
+/**
+ * Deletes a bill for good (Super Admin only). Its stock goes back (unless it was already cancelled),
+ * and any payments recorded against it stay with the customer as money on account.
+ */
+export function deleteSale(id) {
+  const s = getSale(id);
+  return tx(() => {
+    if (s.status !== 'void') for (const it of s.items) moveStock(it.product_id, it.pcs, 'void', s.invoice_no, 'Bill deleted');
+    run('UPDATE customer_payments SET sale_id = NULL WHERE sale_id = ?', id);
+    run('DELETE FROM sale_items WHERE sale_id = ?', id);
+    run('DELETE FROM sales WHERE id = ?', id);
+    return { ok: true, invoice_no: s.invoice_no, payments_kept: s.payments.length };
+  });
+}
+
 export function voidSale(id, reason) {
   const s = getSale(id);
   if (s.status === 'void') fail('This bill is already cancelled');

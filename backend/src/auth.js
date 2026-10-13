@@ -151,8 +151,9 @@ export function audit(user, action, approvedBy = null) {
  * Without one, the API answers 403 { needApproval, level } and the app asks for those credentials.
  * level: 'admin' (most changes) or 'superadmin' (credit limits).
  */
-export function guard(req, action, level = 'admin') {
-  if (rankOf(req.user) >= RANK[level]) {
+/** always: ask for the password even when the logged-in user already has the level (e.g. deleting a bill). */
+export function guard(req, action, level = 'admin', { always = false } = {}) {
+  if (!always && rankOf(req.user) >= RANK[level]) {
     audit(req.user, action);
     return;
   }

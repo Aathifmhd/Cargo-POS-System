@@ -154,7 +154,7 @@ export default function GrnForm() {
     if (!e.category.trim()) return toast('Choose the category', 'error');
     if (!e.name.trim()) return toast('Choose the product', 'error');
     if (!hasQty(e)) return toast('Enter the number of sets', 'error');
-    if (n(e.sets) > 0 && n(e.cost_inr_per_set) <= 0 && !confirm(`"${e.name}" has no cost per set. Add it anyway?`)) return;
+    if (n(e.sets) > 0 && n(e.cost_inr_per_set) <= 0 && !confirm(`"${e.name}" has no billed price per set. Add it anyway?`)) return;
     const editing = g.editingKey;
     setG((x) => ({
       ...x,
@@ -432,7 +432,7 @@ export default function GrnForm() {
 
                   {/* 4 · cost */}
                   <div className="item-cost-row">
-                    <Field label="Cost per set (₹ INR)" required hint="From the supplier's bill">
+                    <Field label="Billed per set (₹)" required hint="From the supplier's bill, in INR">
                       <NumInput value={it.cost_inr_per_set} onChange={(v) => updItem(it.key, { cost_inr_per_set: v })} placeholder="0.00" />
                     </Field>
                     <div className="item-calc">

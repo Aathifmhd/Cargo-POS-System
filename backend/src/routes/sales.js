@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { all, num, nextNo, getSettings } from '../db.js';
-import { createSale, getSale, voidSale, customerBills } from '../services.js';
+import { createSale, getSale, voidSale, deleteSale, customerBills } from '../services.js';
 import { guard } from '../auth.js';
 
 const r = Router();
@@ -44,6 +44,13 @@ r.post('/:id/void', (req, res) => {
   if (s.status === 'void') return res.json(s);
   guard(req, `Cancel bill ${s.invoice_no} (Rs ${s.total}) — ${req.body?.reason || 'no reason'}`);
   res.json(voidSale(s.id, req.body?.reason));
+});
+
+// Deleting a bill always needs the Super Admin's password — even when the Super Admin is the one logged in
+r.delete('/:id', (req, res) => {
+  const s = getSale(num(req.params.id));
+  guard(req, `Delete bill ${s.invoice_no} (Rs ${s.total}, ${s.customer_name})`, 'superadmin', { always: true });
+  res.json(deleteSale(s.id));
 });
 
 export default r;

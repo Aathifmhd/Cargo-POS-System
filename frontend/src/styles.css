@@ -1088,3 +1088,18 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .item-entry .item-entry-title { color: var(--primary-text); font-size: 13px; }
 :root[data-theme="dark"] .item-add-plus { background: var(--primary); }
 .item-entry.editing { border-color: #E0A73A; box-shadow: 0 0 0 3px rgba(224, 167, 58, .14); }
+.row-del { color: var(--muted); }
+.row-del:hover { color: var(--red); background: var(--red-soft); }
+
+/* Extra & Short: line details pop-up */
+.es-detail { display: flex; flex-direction: column; gap: 16px; }
+.es-qty { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.es-qty > div { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); display: flex; flex-direction: column; gap: 2px; }
+.es-qty span { font-size: 11px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.es-qty b { font-size: 19px; font-variant-numeric: tabular-nums; }
+.es-qty small { font-size: 11.5px; color: var(--muted); }
+.es-qty .plus b { color: var(--green); }
+.es-qty .minus b { color: var(--red); }
+.es-qty .got { background: var(--primary-soft); border-color: transparent; }
+.es-h { margin: 0 0 8px; font-size: 13px; font-weight: 750; color: var(--text-2); }
+@media (max-width: 700px) { .es-qty { grid-template-columns: 1fr 1fr; } }

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi, lkr, inr, niceDate, int } from '../lib.js';
-import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Stat, Segmented } from '../components/ui.jsx';
+import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Stat, Segmented, Modal } from '../components/ui.jsx';
 
 /** One GRN line's extra / short numbers, worked out from what was billed vs. what arrived. */
 function lineFigures(r) {
@@ -19,6 +19,53 @@ function lineFigures(r) {
   };
 }
 
+/** Pop-up with everything about one line: the shipment, the product, the quantities and the money. */
+function LineModal({ r, onClose }) {
+  const f = r.f;
+  const pcPrice = r.cost_inr_per_set / (r.pcs_per_set || 1);
+  const kind = f.extraPcs && f.shortPcs ? 'Extra and short' : f.extraPcs ? 'Extra pieces' : 'Short pieces';
+  return (
+    <Modal size="lg" title={r.name} subtitle={<>{r.grn_no} · {niceDate(r.date)} · <span className={f.shortPcs ? 'text-red' : 'text-green'}>{kind}</span></>} onClose={onClose}
+      footer={<><span className="spacer" /><button className="btn" onClick={onClose}>Close</button></>}>
+      <div className="es-detail">
+        <div className="es-qty">
+          <div><span>Billed</span><b>{int(f.billedPcs)} pcs</b><small>{int(r.sets)} sets × {r.pcs_per_set}{r.extra_pcs ? ` + ${int(r.extra_pcs)}` : ''}</small></div>
+          <div className="plus"><span>Extra</span><b>{f.extraPcs ? `+${int(f.extraPcs)}` : '0'} pcs</b><small>{r.extra_sets ? 'incl. free sets' : 'billed by the supplier'}</small></div>
+          <div className="minus"><span>Short</span><b>{f.shortPcs ? `−${int(f.shortPcs)}` : '0'} pcs</b><small>paid, not received</small></div>
+          <div className="got"><span>Received</span><b>{int(f.receivedPcs)} pcs</b><small>added to stock</small></div>
+        </div>
+        <div className="grid grid-2">
+          <div>
+            <h4 className="es-h">Shipment</h4>
+            <dl className="kv">
+              <dt>GRN</dt><dd>{r.grn_no}</dd>
+              <dt>Date</dt><dd>{niceDate(r.date)}</dd>
+              <dt>Supplier</dt><dd>{r.supplier_name}</dd>
+              <dt>Cargo</dt><dd>{r.cargo_name || '—'}</dd>
+              <dt>Bale no</dt><dd>{r.bale_no || '—'}</dd>
+              <dt>LR no</dt><dd>{r.lr_no || '—'}</dd>
+              <dt>Exchange rate</dt><dd>Rs {Number(r.exchange_rate).toFixed(4)}</dd>
+            </dl>
+          </div>
+          <div>
+            <h4 className="es-h">Product & money</h4>
+            <dl className="kv">
+              <dt>Code</dt><dd>{r.code}</dd>
+              <dt>Sizes</dt><dd>{r.sizes || '—'}</dd>
+              <dt>Billed per set</dt><dd>{inr(r.cost_inr_per_set)}</dd>
+              <dt>Billed per piece</dt><dd>{inr(pcPrice)}</dd>
+              {f.extraInr > 0 && <><dt>Extra added to bill</dt><dd className="text-green">+{inr(f.extraInr)}</dd></>}
+              {f.shortInr > 0 && <><dt>Short — paid, not received</dt><dd className="text-red">{inr(f.shortInr)} · {lkr(f.shortLkr)}</dd></>}
+              <dt>Cost per piece</dt><dd className="strong">{lkr(r.landed_per_pcs_lkr)}</dd>
+            </dl>
+          </div>
+        </div>
+        {f.shortPcs > 0 && <div className="alert alert-amber small"><Icon name="info" size={16} /> The shorts were paid in full, so their cost is shared by the {int(f.receivedPcs)} pieces that arrived.</div>}
+      </div>
+    </Modal>
+  );
+}
+
 export default function ExtraShort() {
   const [kind, setKind] = useState('all');
   const [from, setFrom] = useState('');
@@ -26,7 +73,16 @@ export default function ExtraShort() {
   const qs = new URLSearchParams({ ...(kind !== 'all' && { kind }), ...(from && { from }), ...(to && { to }) }).toString();
   const { data, error, loading, reload } = useApi(`/grns/extra-short${qs ? `?${qs}` : ''}`);
 
-  const rows = (data || []).map((r) => ({ ...r, f: lineFigures(r) }));
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(null);   // the line shown in the pop-up
+  const rows = useMemo(() => {
+    const words = q.trim().toLowerCase().split(/s+/).filter(Boolean);
+    return (data || []).map((r) => ({ ...r, f: lineFigures(r) })).filter((r) => {
+      if (!words.length) return true;
+      const text = [r.grn_no, r.supplier_name, r.name, r.code, r.bale_no, r.lr_no, r.cargo_name, r.sizes].join(' ').toLowerCase();
+      return words.every((w) => text.includes(w));
+    });
+  }, [data, q]);
   const totals = rows.reduce((t, r) => ({
     extraPcs: t.extraPcs + r.f.extraPcs, shortPcs: t.shortPcs + r.f.shortPcs,
     extraInr: t.extraInr + r.f.extraInr, shortInr: t.shortInr + r.f.shortInr, shortLkr: t.shortLkr + r.f.shortLkr,
@@ -42,6 +98,7 @@ export default function ExtraShort() {
           { value: 'extra', label: 'Extra', icon: 'plus' },
           { value: 'short', label: 'Short', icon: 'minus' },
         ]} />
+        <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Search GRN, product, supplier, bale or LR no…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <span className="spacer" />
         <label className="row gap-s small muted">From <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label className="row gap-s small muted">To <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} /></label>
@@ -59,7 +116,9 @@ export default function ExtraShort() {
       )}
 
       <Card pad={false}>
-        {loading && !data ? <Loading /> : !rows.length ? (
+        {loading && !data ? <Loading /> : !rows.length && q ? (
+          <Empty icon="search" title="Nothing matches your search" text={`No extra or short line for "${q}".`} action={<button className="btn" onClick={() => setQ('')}>Clear search</button>} />
+        ) : !rows.length ? (
           <Empty icon="layers" title="Nothing extra or short" text="When a bale has extra pieces, or sets or pieces are missing, enter them on Receive Goods. They will be listed here."
             action={<Link to="/grn/new" className="btn btn-primary">Receive goods</Link>} />
         ) : (
@@ -71,7 +130,7 @@ export default function ExtraShort() {
               </tr></thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} className="click" onClick={() => setOpen(r)} title="View details">
                     <td className="strong nowrap">{r.grn_no}<div className="sub">{niceDate(r.date)}</div></td>
                     <td>{r.supplier_name}</td>
                     <td>{r.cargo_name || '—'}<div className="sub">Bale {r.bale_no || '—'} · LR {r.lr_no || '—'}</div></td>
@@ -91,6 +150,7 @@ export default function ExtraShort() {
           </div>
         )}
       </Card>
+      {open && <LineModal r={open} onClose={() => setOpen(null)} />}
     </div>
   );
 }

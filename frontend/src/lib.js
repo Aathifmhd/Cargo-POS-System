@@ -202,7 +202,7 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   };
 }
 
-export const PAY_METHODS_SUPPLIER = ['Bank transfer', 'Hawala', 'Cash', 'Cheque', 'UPI / Online'];
+export const PAY_METHODS_SUPPLIER = ['Bank transfer', 'Cash', 'Cheque', 'UPI / Online'];
 export const PAY_METHODS_CUSTOMER = ['Cash', 'Bank transfer', 'Cheque', 'Card', 'Online'];
 
 /* ---------------- automatic selling price & MRP (Settings → Price & billing) ---------------- */

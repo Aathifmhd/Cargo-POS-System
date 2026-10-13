@@ -97,7 +97,7 @@ const grns = bales.map((b) => createGrn(b));
 // a part payment on the first bale, so the payables screens have something to show
 if (grns[0]) {
   run(`INSERT INTO supplier_payments (supplier_id, grn_id, date, amount_inr, exchange_rate, amount_lkr, method, reference)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, grns[0].supplier_id, grns[0].id, addDays(today, -15), 40000, 3.60, 144000, 'Hawala', 'H-2231');
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, grns[0].supplier_id, grns[0].id, addDays(today, -15), 40000, 3.60, 144000, 'Bank transfer', 'TT-2231');
 }
 
 /* ---------- selling price & MRP from the cost, as Receive Goods does ---------- */

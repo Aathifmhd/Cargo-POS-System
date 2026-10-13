@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useApi, lkr, niceDate, today, addDays } from '../lib.js';
-import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, StatusBadge, Segmented, Stat } from '../components/ui.jsx';
+import { api, useApi, lkr, niceDate, today, addDays } from '../lib.js';
+import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, StatusBadge, Segmented, Stat, useToast } from '../components/ui.jsx';
 import { SaleModal } from './SaleView.jsx';
 
 const RANGES = {
@@ -13,6 +13,18 @@ const RANGES = {
 
 export default function Sales() {
   const [openId, setOpenId] = useState(null);   // the bill shown in the pop-up
+  const toast = useToast();
+  // deleting a bill always asks for the Super Admin's password (the approval box appears by itself)
+  const deleteBill = async (s) => {
+    if (!confirm(`Delete bill ${s.invoice_no} (${lkr(s.total)}) for ${s.customer_name}?
+
+The stock goes back. This cannot be undone. The Super Admin's password is needed.`)) return;
+    try {
+      const r = await api.del(`/sales/${s.id}`);
+      toast(`${r.invoice_no} deleted${r.payments_kept ? ' — its payments stay on the customer account' : ''}`);
+      reload();
+    } catch (e) { if (e.message) toast(e.message, 'error'); }
+  };
   const [range, setRange] = useState('week');
   const [type, setType] = useState('');
   const [q, setQ] = useState('');
@@ -53,7 +65,7 @@ export default function Sales() {
         ) : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Bill no</th><th>Date</th><th>Customer</th><th>Type</th><th className="right">Total</th><th className="right">Profit</th><th className="right">Balance</th><th>Status</th></tr></thead>
+              <thead><tr><th>Bill no</th><th>Date</th><th>Customer</th><th>Type</th><th className="right">Total</th><th className="right">Profit</th><th className="right">Balance</th><th>Status</th><th className="x" /></tr></thead>
               <tbody>
                 {rows.map((s) => (
                   <tr key={s.id} className={`click ${s.status === 'void' ? 'void' : ''}`} onClick={() => setOpenId(s.id)}>
@@ -65,6 +77,10 @@ export default function Sales() {
                     <td className={`right ${s.profit < 0 ? 'text-red' : ''}`}>{lkr(s.profit)}</td>
                     <td className="right">{s.balance > 0 ? lkr(s.balance) : '—'}</td>
                     <td><StatusBadge status={s.pay_status} /></td>
+                    <td className="right">
+                      <button type="button" className="btn btn-icon btn-sm btn-ghost row-del" title="Delete bill (Super Admin)"
+                        onClick={(e) => { e.stopPropagation(); deleteBill(s); }}><Icon name="trash" size={15} /></button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

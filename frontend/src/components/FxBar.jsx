@@ -97,7 +97,7 @@ function FxEdit({ fx, onClose, onSaved }) {
             <NumInput autoFocus value={rate} onChange={setRate} />
           </Field>
         ) : (
-          <p className="muted small">The rate is fetched from the internet every few minutes. Your bank or hawala rate may differ — set it by hand if you want that instead.</p>
+          <p className="muted small">The rate is fetched from the internet every few minutes. Your bank's rate may differ — set it by hand if you want that instead.</p>
         )}
       </form>
     </Modal>

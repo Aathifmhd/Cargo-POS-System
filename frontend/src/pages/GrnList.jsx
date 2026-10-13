@@ -10,27 +10,27 @@ export default function GrnList() {
 
   return (
     <div>
-      <PageHeader title="Shipments (GRN)" subtitle="Every bale received from India. Search by bale no, LR no, cargo or supplier."
+      <PageHeader title="Shipments (GRN)" subtitle="Every shipment received from India. Search by GRN no, LR no, cargo or supplier."
         actions={<Link to="/grn/new" className="btn btn-primary"><Icon name="plus" /> Receive goods</Link>} />
       <div className="toolbar">
-        <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Bale no, LR no, GRN no, cargo, supplier…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="GRN no, LR no, cargo, supplier…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       </div>
       <ErrorBox error={error} onRetry={reload} />
       <Card pad={false}>
         {loading && !data ? <Loading /> : !data?.length ? (
-          <Empty icon="truck" title={q ? 'No shipment matches your search' : 'No shipments yet'} text="When a bale arrives from India, record it here to add stock."
+          <Empty icon="truck" title={q ? 'No shipment matches your search' : 'No shipments yet'} text="When a shipment arrives from India, record it here to add stock."
             action={<Link to="/grn/new" className="btn btn-primary">Receive goods</Link>} />
         ) : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Cargo · Bale · LR</th><th className="right">Rate</th><th className="right">Goods (INR)</th><th className="right">Cost (LKR)</th><th className="right">To pay (INR)</th><th>Payment</th></tr></thead>
+              <thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Cargo · LR</th><th className="right">Rate</th><th className="right">Goods (INR)</th><th className="right">Cost (LKR)</th><th className="right">To pay (INR)</th><th>Payment</th></tr></thead>
               <tbody>
                 {data.map((g) => (
                   <tr key={g.id} className="click" onClick={() => navigate(`/grn/${g.id}`)}>
                     <td className="strong">{g.grn_no}</td>
                     <td className="nowrap">{niceDate(g.date)}</td>
                     <td>{g.supplier_name}<div className="sub">{int(g.total_sets)} sets · {int(g.total_pcs)} pcs</div></td>
-                    <td>{g.cargo_name || '—'}<div className="sub">Bale {g.bale_no || '—'} · LR {g.lr_no || '—'}</div></td>
+                    <td>{g.cargo_name || '—'}<div className="sub">LR {g.lr_no || '—'}</div></td>
                     <td className="right">{g.exchange_rate.toFixed(2)}</td>
                     <td className="right">{inr(g.goods_inr)}</td>
                     <td className="right strong">{lkr(g.total_lkr)}</td>

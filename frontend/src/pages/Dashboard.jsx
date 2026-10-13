@@ -91,7 +91,7 @@ export default function Dashboard() {
           {d.payables.upcoming.length === 0 ? <p className="muted">No supplier payments due this week.</p> :
             d.payables.upcoming.map((b) => (
               <Link key={`${b.supplier_id}-${b.id}`} to={`/suppliers/${b.supplier_id}`} className="list-row">
-                <div><div className="t">{b.supplier_name}</div><div className="s">{b.grn_no}{b.bale_no ? ` · Bale ${b.bale_no}` : ''} · {dueText(b.due_date)}</div></div>
+                <div><div className="t">{b.supplier_name}</div><div className="s">{b.grn_no} · {dueText(b.due_date)}</div></div>
                 <div className="right"><div className="t">{inr(b.balance)}</div><StatusBadge status={b.status} /></div>
               </Link>
             ))}
@@ -114,7 +114,7 @@ export default function Dashboard() {
             </div>
           )) : d.recentGrns.length === 0 ? <p className="muted">No shipments received yet.</p> : d.recentGrns.map((g) => (
             <Link key={g.id} to={`/grn/${g.id}`} className="list-row">
-              <div><div className="t">{g.supplier_name}</div><div className="s">{g.grn_no} · {g.cargo_name || 'Cargo —'}{g.bale_no ? ` · Bale ${g.bale_no}` : ''}</div></div>
+              <div><div className="t">{g.supplier_name}</div><div className="s">{g.grn_no} · {g.cargo_name || 'Cargo —'}</div></div>
               <b className="mono">{lkr(g.total_lkr)}</b>
             </Link>
           ))}

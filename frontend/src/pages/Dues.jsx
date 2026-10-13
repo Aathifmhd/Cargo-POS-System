@@ -64,8 +64,7 @@ export default function Dues() {
                       {list.map((b) => (
                         <tr key={`${b.supplier_id || b.customer_id}-${b.id}`}>
                           <td><Link to={isPay ? `/suppliers/${b.supplier_id}` : `/customers/${b.customer_id}`} className="strong">{b.supplier_name || b.customer_name}</Link>{b.customer_phone && <div className="sub">{b.customer_phone}</div>}</td>
-                          <td>{isPay ? (b.id ? <Link to={`/grn/${b.id}`}>{b.grn_no}</Link> : b.grn_no) : (b.id ? <Link to={`/sales/${b.id}`}>{b.invoice_no}</Link> : b.invoice_no)}
-                            {isPay && b.bale_no && <div className="sub">Bale {b.bale_no}</div>}</td>
+                          <td>{isPay ? (b.id ? <Link to={`/grn/${b.id}`}>{b.grn_no}</Link> : b.grn_no) : (b.id ? <Link to={`/sales/${b.id}`}>{b.invoice_no}</Link> : b.invoice_no)}</td>
                           <td>{niceDate(b.date)}</td>
                           <td>{niceDate(b.due_date)}<div className={`sub ${b.status === 'overdue' ? 'text-red' : ''}`}>{dueText(b.due_date)}</div></td>
                           <td className="right">{fmt(b.amount)}</td>

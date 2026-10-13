@@ -158,7 +158,8 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   const lines = items.map((it) => {
     const sets = Math.max(0, Math.round(n(it.sets)));
     const pcsPerSet = Math.max(1, Math.round(n(it.pcs_per_set) || 1));
-    const cost = n(it.cost_inr_per_set);
+    // the supplier's price: per piece on Receive Goods, per set on saved GRNs
+    const cost = it.cost_inr_per_pcs !== undefined ? n(it.cost_inr_per_pcs) * pcsPerSet : n(it.cost_inr_per_set);
     const q = (v) => Math.max(0, Math.round(n(v)));
     // extra pieces are billed by the supplier at the per-piece price;
     // shorts are still paid in full, so their cost is spread over the pieces that did arrive
@@ -173,7 +174,7 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
       billed_pcs: sets * pcsPerSet + extra_pcs,        // pieces on the supplier's bill
       pcs: Math.max(0, (sets + extra_sets - short_sets) * pcsPerSet + extra_pcs - short_pcs), // pieces really received
       // the supplier's price for one piece, in LKR
-      bill_per_pcs_lkr: r2((n(it.cost_inr_per_set) / pcsPerSet) * rate),
+      bill_per_pcs_lkr: r2((cost / pcsPerSet) * rate),
     };
   });
   const goods_inr = r2(lines.reduce((s, l) => s + l.line_inr, 0));

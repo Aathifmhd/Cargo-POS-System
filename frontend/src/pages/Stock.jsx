@@ -137,10 +137,10 @@ function ProductModal({ id, categories, onClose, onChanged }) {
           </div>
           <Card title="Purchase history (GRNs)" pad={false}>
             {p.purchases.length === 0 ? <p className="muted card-body">No GRNs yet.</p> : (
-              <table className="table"><thead><tr><th>GRN</th><th>Date</th><th>Bale / Cargo</th><th className="right">Sets</th><th className="right">Bill ₹/set</th><th className="right">Rate</th><th className="right">Cost Rs/pc</th></tr></thead>
+              <table className="table"><thead><tr><th>GRN</th><th>Date</th><th>Cargo / LR</th><th className="right">Sets</th><th className="right">Bill ₹/pc</th><th className="right">Rate</th><th className="right">Cost Rs/pc</th></tr></thead>
                 <tbody>{p.purchases.map((x) => (
-                  <tr key={x.id}><td><Link to={`/grn/${x.grn_id}`}>{x.grn_no}</Link></td><td>{niceDate(x.date)}</td><td>{x.bale_no || '—'}<div className="sub">{x.cargo_name}</div></td>
-                    <td className="right">{x.sets}</td><td className="right">{money(x.cost_inr_per_set)}</td><td className="right">{x.exchange_rate}</td><td className="right strong">{money(x.landed_per_pcs_lkr)}</td></tr>
+                  <tr key={x.id}><td><Link to={`/grn/${x.grn_id}`}>{x.grn_no}</Link></td><td>{niceDate(x.date)}</td><td>{x.cargo_name || '—'}<div className="sub">{x.lr_no ? `LR ${x.lr_no}` : ''}</div></td>
+                    <td className="right">{x.sets}</td><td className="right">{money(x.cost_inr_per_set / (x.pcs_per_set || 1))}</td><td className="right">{x.exchange_rate}</td><td className="right strong">{money(x.landed_per_pcs_lkr)}</td></tr>
                 ))}</tbody></table>
             )}
           </Card>

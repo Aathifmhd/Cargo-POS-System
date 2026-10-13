@@ -112,9 +112,9 @@ function ShipmentReport({ from, to }) {
       </Card>
       <Card title="All shipments" pad={false}>
         <div className="table-wrap"><table className="table">
-          <thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Cargo</th><th>Bale</th><th>LR</th><th className="right">Rate</th><th className="right">Cost LKR</th></tr></thead>
+          <thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Cargo</th><th>LR</th><th className="right">Rate</th><th className="right">Cost LKR</th></tr></thead>
           <tbody>{d.grns.map((g) => (
-            <tr key={g.id}><td><Link to={`/grn/${g.id}`}>{g.grn_no}</Link></td><td>{niceDate(g.date)}</td><td>{g.supplier_name}</td><td>{g.cargo_name || '—'}</td><td>{g.bale_no || '—'}</td><td>{g.lr_no || '—'}</td><td className="right">{g.exchange_rate}</td><td className="right strong">{money(g.total_lkr)}</td></tr>
+            <tr key={g.id}><td><Link to={`/grn/${g.id}`}>{g.grn_no}</Link></td><td>{niceDate(g.date)}</td><td>{g.supplier_name}</td><td>{g.cargo_name || '—'}</td><td>{g.lr_no || '—'}</td><td className="right">{g.exchange_rate}</td><td className="right strong">{money(g.total_lkr)}</td></tr>
           ))}</tbody>
         </table></div>
       </Card>

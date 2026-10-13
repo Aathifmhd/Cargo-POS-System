@@ -33,7 +33,6 @@ export default function GrnView() {
 
       <div className="stats mb">
         <div className="stat"><div className="stat-text"><div className="stat-label">Cargo</div><div className="stat-value" style={{ fontSize: 17 }}>{g.cargo_name || '—'}</div></div></div>
-        <div className="stat"><div className="stat-text"><div className="stat-label">Bale no</div><div className="stat-value" style={{ fontSize: 17 }}>{g.bale_no || '—'}</div></div></div>
         <div className="stat"><div className="stat-text"><div className="stat-label">LR no</div><div className="stat-value" style={{ fontSize: 17 }}>{g.lr_no || '—'}</div></div></div>
         <div className="stat"><div className="stat-text"><div className="stat-label">Rate at receipt</div><div className="stat-value" style={{ fontSize: 17 }}>1 ₹ = Rs {g.exchange_rate.toFixed(4)}</div></div></div>
       </div>
@@ -53,7 +52,7 @@ export default function GrnView() {
           <Card title="Items received" pad={false}>
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Product</th><th className="right">Received</th><th className="right">Bill ₹/set</th><th className="right">Cost / piece</th><th className="right">Expected / piece</th><th className="right">MRP / piece</th><th className="right">Margin</th></tr></thead>
+                <thead><tr><th>Product</th><th className="right">Received</th><th className="right">Bill ₹/pc</th><th className="right">Cost / piece</th><th className="right">Expected / piece</th><th className="right">MRP / piece</th><th className="right">Margin</th></tr></thead>
                 <tbody>
                   {g.items.map((i) => {
                     const pcs = Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + i.extra_pcs - i.short_pcs);
@@ -67,7 +66,7 @@ export default function GrnView() {
                           {i.extra_sets > 0 && <div className="sub text-green">+ {int(i.extra_sets)} free sets</div>}
                           {(i.short_sets > 0 || i.short_pcs > 0) && <div className="sub text-red">− {int(i.short_sets * i.pcs_per_set + i.short_pcs)} pcs short</div>}
                         </td>
-                        <td className="right">{money(i.cost_inr_per_set)}<div className="sub">{inr(i.line_inr)}</div></td>
+                        <td className="right">{money(i.cost_inr_per_set / (i.pcs_per_set || 1))}<div className="sub">{inr(i.line_inr)}</div></td>
                         <td className="right strong">{lkr(i.landed_per_pcs_lkr)}</td>
                         <td className="right">{lkr(per(i.expected_per_set))}</td>
                         <td className="right">{lkr(per(i.mrp_per_set))}</td>

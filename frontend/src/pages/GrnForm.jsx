@@ -9,12 +9,16 @@ import { useFx, useSettings } from '../App.jsx';
 const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR, as a line in the charges list
 const CHARGE_PRESETS = ['Cargo charge', 'Clearing charges', 'Transport', 'Customs / Duty', 'Loading / Unloading', 'Bank charges'];
 let keySeq = 1;
-const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_set: '', mrp_per_pcs: '', expected_per_pcs: '' });
+const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', mrp_per_pcs: '', expected_per_pcs: '' });
 // prices are entered per piece; products keep them per set, so convert on the way in and out
 const ppsOf = (it) => Math.max(1, Math.round(n(it.pcs_per_set) || 1));
 const perPiece = (v, pps) => (n(v) > 0 ? r2(n(v) / Math.max(1, Math.round(n(pps) || 1))) : '');
-const withPcsPrices = (it) => (it.expected_per_pcs !== undefined ? it : { ...it, expected_per_pcs: perPiece(it.expected_per_set, it.pcs_per_set), mrp_per_pcs: perPiece(it.mrp_per_set, it.pcs_per_set) });
-const forSaving = (it) => ({ ...it, expected_per_set: r2(n(it.expected_per_pcs) * ppsOf(it)), mrp_per_set: r2(n(it.mrp_per_pcs) * ppsOf(it)) });
+const withPcsPrices = (it) => {
+  let x = it.expected_per_pcs !== undefined ? it : { ...it, expected_per_pcs: perPiece(it.expected_per_set, it.pcs_per_set), mrp_per_pcs: perPiece(it.mrp_per_set, it.pcs_per_set) };
+  if (x.cost_inr_per_pcs === undefined) { x = { ...x, cost_inr_per_pcs: perPiece(x.cost_inr_per_set, x.pcs_per_set) }; delete x.cost_inr_per_set; }
+  return x;
+};
+const forSaving = (it) => ({ ...it, cost_inr_per_set: r2(n(it.cost_inr_per_pcs) * ppsOf(it)), expected_per_set: r2(n(it.expected_per_pcs) * ppsOf(it)), mrp_per_set: r2(n(it.mrp_per_pcs) * ppsOf(it)) });
 
 export default function GrnForm() {
   const { settings, reload: reloadSettings } = useSettings();
@@ -40,7 +44,7 @@ export default function GrnForm() {
       }
     } catch { /* ignore */ }
     return {
-      date: today(), supplier_id: null, supplier_invoice_no: '', cargo_name: '', bale_no: '', lr_no: '',
+      date: today(), supplier_id: null, supplier_invoice_no: '', cargo_name: '', lr_no: '',
       exchange_rate: fx?.rate ?? settings.default_exchange_rate,
       payment_type: 'credit', due_date: '', payment_method: 'Bank transfer', payment_reference: '', notes: '',
       expenses: [{ label: 'Cargo charge', amount_lkr: '' }, { label: 'Clearing charges', amount_lkr: '' }, { label: 'Transport', amount_lkr: '' }],
@@ -122,7 +126,7 @@ export default function GrnForm() {
   const filledItems = g.items;
   const extraPcs = calc.items.reduce((s, c) => s + c.extra_pcs, 0);
   const shortPcs = calc.items.reduce((s, c) => s + c.short_sets * c.pcs_per_set + c.short_pcs, 0);
-  const entryStarted = Boolean(g.entry.name || g.entry.product_id || n(g.entry.sets) || n(g.entry.cost_inr_per_set));
+  const entryStarted = Boolean(g.entry.name || g.entry.product_id || n(g.entry.sets) || n(g.entry.cost_inr_per_pcs));
   // the add-item form folds into one "+ Add item" bar under the list; it opens on click or Edit, and folds after adding
   const [formOpen, setFormOpen] = useState(() => !initial.items.length || entryStarted);
   const showForm = formOpen || Boolean(g.editingKey) || !g.items.length;
@@ -154,7 +158,7 @@ export default function GrnForm() {
     if (!e.category.trim()) return toast('Choose the category', 'error');
     if (!e.name.trim()) return toast('Choose the product', 'error');
     if (!hasQty(e)) return toast('Enter the number of sets', 'error');
-    if (n(e.sets) > 0 && n(e.cost_inr_per_set) <= 0 && !confirm(`"${e.name}" has no billed price per set. Add it anyway?`)) return;
+    if (n(e.sets) > 0 && n(e.cost_inr_per_pcs) <= 0 && !confirm(`"${e.name}" has no billed price per piece. Add it anyway?`)) return;
     const editing = g.editingKey;
     setG((x) => ({
       ...x,
@@ -203,7 +207,7 @@ export default function GrnForm() {
     if (g.editingKey) return toast('Finish editing the item first: press "Update item" or Cancel', 'error');
     if (entryStarted && !confirm(`"${g.entry.name || 'The item you are entering'}" has not been added to the list. Save the GRN without it?`)) return;
     if (!filledItems.length) return toast('Add at least one item to the list', 'error');
-    const missing = filledItems.find((i) => n(i.sets) > 0 && n(i.cost_inr_per_set) <= 0);
+    const missing = filledItems.find((i) => n(i.sets) > 0 && n(i.cost_inr_per_pcs) <= 0);
     if (missing && !confirm(`"${missing.name}" has no cost. Save anyway?`)) return;
     setBusy(true);
     try {
@@ -237,7 +241,6 @@ export default function GrnForm() {
                 <input className="input" list="cargo-list" value={g.cargo_name} onChange={set('cargo_name')} placeholder="e.g. Lanka Speed Cargo" />
                 <datalist id="cargo-list">{cargoNames.map((c) => <option key={c} value={c} />)}</datalist>
               </Field>
-              <Field label="Bale number"><input className="input" value={g.bale_no} onChange={set('bale_no')} placeholder="e.g. B-125" /></Field>
               <Field label="LR number" hint="Lorry receipt / tracking no"><input className="input" value={g.lr_no} onChange={set('lr_no')} /></Field>
               <Field label="Supplier invoice no"><input className="input" value={g.supplier_invoice_no} onChange={set('supplier_invoice_no')} /></Field>
               <Field label="Exchange rate for this package" required
@@ -432,11 +435,11 @@ export default function GrnForm() {
 
                   {/* 4 · cost */}
                   <div className="item-cost-row">
-                    <Field label="Billed per set (₹)" required hint="From the supplier's bill, in INR">
-                      <NumInput value={it.cost_inr_per_set} onChange={(v) => updItem(it.key, { cost_inr_per_set: v })} placeholder="0.00" />
+                    <Field label="Billed per piece (INR)" required hint="From the supplier's bill">
+                      <NumInput value={it.cost_inr_per_pcs} onChange={(v) => updItem(it.key, { cost_inr_per_pcs: v })} placeholder="0.00" />
                     </Field>
                     <div className="item-calc">
-                      <div className="calc-pill">Bill total<b>{inr(c.line_inr)}</b></div>
+                      <div className="calc-pill">Bill amount<b>{inr(c.line_inr)}</b><small>{int(c.billed_pcs)} pcs × {inr(c.billed_pcs ? c.line_inr / c.billed_pcs : 0)}</small></div>
                       <div className="calc-pill">Bill price / piece<b>{lkr(c.bill_per_pcs_lkr)}</b></div>
                       <div className="calc-pill hl">Cost / piece<b>{lkr(c.landed_per_pcs_lkr)}</b></div>
                     </div>

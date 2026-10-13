@@ -93,13 +93,13 @@ export function PrintGrn() {
         <ShopHead title="GOODS RECEIVED NOTE" no={g.grn_no} date={g.date} />
         <div className="print-meta">
           <div><div className="muted">Supplier</div><b>{g.supplier_name}</b><div>{g.supplier_city}</div><div>Invoice: {g.supplier_invoice_no || '—'}</div></div>
-          <div className="right"><div>Cargo: <b>{g.cargo_name || '—'}</b></div><div>Bale no: <b>{g.bale_no || '—'}</b></div><div>LR no: <b>{g.lr_no || '—'}</b></div><div>Rate: <b>1 INR = Rs {g.exchange_rate}</b></div></div>
+          <div className="right"><div>Cargo: <b>{g.cargo_name || '—'}</b></div><div>LR no: <b>{g.lr_no || '—'}</b></div><div>Rate: <b>1 INR = Rs {g.exchange_rate}</b></div></div>
         </div>
         <table>
-          <thead><tr><th>Item</th><th className="right">Sets</th><th className="right">Pcs/set</th><th>Colours / Sizes</th><th className="right">Bill ₹/set</th><th className="right">Cost Rs/pc</th><th className="right">Expected Rs/pc</th><th className="right">MRP Rs/pc</th></tr></thead>
+          <thead><tr><th>Item</th><th className="right">Sets</th><th className="right">Pcs/set</th><th>Colours / Sizes</th><th className="right">Bill ₹/pc</th><th className="right">Cost Rs/pc</th><th className="right">Expected Rs/pc</th><th className="right">MRP Rs/pc</th></tr></thead>
           <tbody>{g.items.map((i) => (
             <tr key={i.id}><td>{i.name}<div className="muted small">{i.code}</div></td><td className="right">{i.sets}{i.extra_pcs > 0 && <div className="muted small">+{i.extra_pcs} extra pcs</div>}{i.extra_sets > 0 && <div className="muted small">+{i.extra_sets} free sets</div>}{(i.short_sets > 0 || i.short_pcs > 0) && <div className="muted small">−{i.short_sets * i.pcs_per_set + i.short_pcs} pcs short</div>}</td><td className="right">{i.pcs_per_set}</td><td>{i.colors_count || '—'} / {i.sizes || '—'}</td>
-              <td className="right">{money(i.cost_inr_per_set)}</td><td className="right">{money(i.landed_per_pcs_lkr)}</td><td className="right">{money(i.expected_per_set / (i.pcs_per_set || 1))}</td><td className="right">{money(i.mrp_per_set / (i.pcs_per_set || 1))}</td></tr>
+              <td className="right">{money(i.cost_inr_per_set / (i.pcs_per_set || 1))}</td><td className="right">{money(i.landed_per_pcs_lkr)}</td><td className="right">{money(i.expected_per_set / (i.pcs_per_set || 1))}</td><td className="right">{money(i.mrp_per_set / (i.pcs_per_set || 1))}</td></tr>
           ))}</tbody>
         </table>
         <div className="print-totals">

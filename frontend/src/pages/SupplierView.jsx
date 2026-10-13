@@ -49,14 +49,14 @@ export default function SupplierView() {
             <Card pad={false}>
               <div className="table-wrap">
                 <table className="table">
-                  <thead><tr><th>GRN</th><th>Date</th><th>Bale · LR</th><th className="right">Amount</th><th className="right">Paid</th><th className="right">Balance</th><th>Due</th><th></th></tr></thead>
+                  <thead><tr><th>GRN</th><th>Date</th><th>LR no</th><th className="right">Amount</th><th className="right">Paid</th><th className="right">Balance</th><th>Due</th><th></th></tr></thead>
                   <tbody>
                     {s.bills.length === 0 && <tr><td colSpan={8} className="muted center">No GRNs yet.</td></tr>}
                     {[...s.bills].reverse().map((b) => (
                       <tr key={b.id ?? 'open'}>
                         <td className="strong">{b.id ? <Link to={`/grn/${b.id}`}>{b.grn_no}</Link> : b.grn_no}</td>
                         <td>{niceDate(b.date)}</td>
-                        <td>{b.bale_no || '—'}<div className="sub">{b.lr_no || ''}</div></td>
+                        <td>{b.lr_no || '—'}</td>
                         <td className="right">{inr(b.amount)}</td>
                         <td className="right text-green">{inr(b.paid)}</td>
                         <td className="right strong">{b.balance > 0 ? inr(b.balance) : '—'}</td>

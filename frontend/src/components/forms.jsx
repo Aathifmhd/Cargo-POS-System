@@ -118,7 +118,7 @@ export function SupplierPaymentModal({ supplier, bills = [], defaultGrnId, onClo
             setF((x) => ({ ...x, grn_id: e.target.value, amount_inr: b ? b.balance : x.amount_inr }));
           }}>
             <option value="">Oldest first (automatic)</option>
-            {open.filter((b) => b.id).map((b) => <option key={b.id} value={b.id}>{b.grn_no} · Bale {b.bale_no || '—'} · balance {inr(b.balance)}</option>)}
+            {open.filter((b) => b.id).map((b) => <option key={b.id} value={b.id}>{b.grn_no} · balance {inr(b.balance)}</option>)}
           </select>
         </Field>
         <Field label="Amount paid (₹ INR)" required>

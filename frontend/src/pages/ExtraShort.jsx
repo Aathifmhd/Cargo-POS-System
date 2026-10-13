@@ -42,7 +42,6 @@ function LineModal({ r, onClose }) {
               <dt>Date</dt><dd>{niceDate(r.date)}</dd>
               <dt>Supplier</dt><dd>{r.supplier_name}</dd>
               <dt>Cargo</dt><dd>{r.cargo_name || '—'}</dd>
-              <dt>Bale no</dt><dd>{r.bale_no || '—'}</dd>
               <dt>LR no</dt><dd>{r.lr_no || '—'}</dd>
               <dt>Exchange rate</dt><dd>Rs {Number(r.exchange_rate).toFixed(4)}</dd>
             </dl>
@@ -52,7 +51,6 @@ function LineModal({ r, onClose }) {
             <dl className="kv">
               <dt>Code</dt><dd>{r.code}</dd>
               <dt>Sizes</dt><dd>{r.sizes || '—'}</dd>
-              <dt>Billed per set</dt><dd>{inr(r.cost_inr_per_set)}</dd>
               <dt>Billed per piece</dt><dd>{inr(pcPrice)}</dd>
               {f.extraInr > 0 && <><dt>Extra added to bill</dt><dd className="text-green">+{inr(f.extraInr)}</dd></>}
               {f.shortInr > 0 && <><dt>Short — paid, not received</dt><dd className="text-red">{inr(f.shortInr)} · {lkr(f.shortLkr)}</dd></>}
@@ -79,7 +77,7 @@ export default function ExtraShort() {
     const words = q.trim().toLowerCase().split(/s+/).filter(Boolean);
     return (data || []).map((r) => ({ ...r, f: lineFigures(r) })).filter((r) => {
       if (!words.length) return true;
-      const text = [r.grn_no, r.supplier_name, r.name, r.code, r.bale_no, r.lr_no, r.cargo_name, r.sizes].join(' ').toLowerCase();
+      const text = [r.grn_no, r.supplier_name, r.name, r.code, r.lr_no, r.cargo_name, r.sizes].join(' ').toLowerCase();
       return words.every((w) => text.includes(w));
     });
   }, [data, q]);
@@ -98,7 +96,7 @@ export default function ExtraShort() {
           { value: 'extra', label: 'Extra', icon: 'plus' },
           { value: 'short', label: 'Short', icon: 'minus' },
         ]} />
-        <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Search GRN, product, supplier, bale or LR no…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Search GRN, product, supplier or LR no…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <span className="spacer" />
         <label className="row gap-s small muted">From <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label className="row gap-s small muted">To <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} /></label>
@@ -119,13 +117,13 @@ export default function ExtraShort() {
         {loading && !data ? <Loading /> : !rows.length && q ? (
           <Empty icon="search" title="Nothing matches your search" text={`No extra or short line for "${q}".`} action={<button className="btn" onClick={() => setQ('')}>Clear search</button>} />
         ) : !rows.length ? (
-          <Empty icon="layers" title="Nothing extra or short" text="When a bale has extra pieces, or sets or pieces are missing, enter them on Receive Goods. They will be listed here."
+          <Empty icon="layers" title="Nothing extra or short" text="When a shipment has extra pieces, or pieces are missing, enter them on Receive Goods. They will be listed here."
             action={<Link to="/grn/new" className="btn btn-primary">Receive goods</Link>} />
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead><tr>
-                <th>GRN</th><th>Supplier</th><th>Cargo · Bale · LR</th><th>Product</th>
+                <th>GRN</th><th>Supplier</th><th>Cargo · LR</th><th>Product</th>
                 <th className="right">Billed</th><th className="right">Extra</th><th className="right">Short</th><th className="right">Received</th><th className="right">Value</th>
               </tr></thead>
               <tbody>
@@ -133,7 +131,7 @@ export default function ExtraShort() {
                   <tr key={r.id} className="click" onClick={() => setOpen(r)} title="View details">
                     <td className="strong nowrap">{r.grn_no}<div className="sub">{niceDate(r.date)}</div></td>
                     <td>{r.supplier_name}</td>
-                    <td>{r.cargo_name || '—'}<div className="sub">Bale {r.bale_no || '—'} · LR {r.lr_no || '—'}</div></td>
+                    <td>{r.cargo_name || '—'}<div className="sub">LR {r.lr_no || '—'}</div></td>
                     <td><b>{r.name}</b><div className="sub">{r.code}{r.sizes ? ` · ${r.sizes}` : ''}</div></td>
                     <td className="right">{int(r.f.billedPcs)} pcs</td>
                     <td className="right">{r.f.extraPcs ? <span className="text-green strong">+{int(r.f.extraPcs)} pcs</span> : '—'}</td>

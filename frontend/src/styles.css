@@ -1103,3 +1103,4 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .es-qty .got { background: var(--primary-soft); border-color: transparent; }
 .es-h { margin: 0 0 8px; font-size: 13px; font-weight: 750; color: var(--text-2); }
 @media (max-width: 700px) { .es-qty { grid-template-columns: 1fr 1fr; } }
+.calc-pill small { display: block; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }

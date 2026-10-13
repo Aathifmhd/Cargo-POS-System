@@ -86,9 +86,9 @@ Anywhere: `F2` dashboard · `F3` new sale · `F9` bills · `F7` take a payment.
 
 | Area | Features |
 |---|---|
-| **Receive Goods (GRN)** | Supplier, cargo name, bale no, LR no, supplier invoice no and the **exchange rate for the package**. Items are entered one at a time in a card (category → product from Settings, pieces per set, sets, **extra or short pieces**, sizes, billed per set in INR) and added to a list grouped by category, where each can be edited. Cargo, clearing, transport and other LKR charges are **spread over items by value**, giving the **cost per piece in LKR**. **Selling price and MRP per piece** fill in automatically from Settings → Price & billing (cost + %, rounded) and can be changed. A draft is saved automatically. |
+| **Receive Goods (GRN)** | Supplier, cargo name, LR no, supplier invoice no and the **exchange rate for the package**. Items are entered one at a time in a card (category → product from Settings, pieces per set, sets, **extra or short pieces**, sizes, billed per piece in INR) and added to a list grouped by category, where each can be edited. Cargo, clearing, transport and other LKR charges are **spread over items by value**, giving the **cost per piece in LKR**. **Selling price and MRP per piece** fill in automatically from Settings → Price & billing (cost + %, rounded) and can be changed. A draft is saved automatically. |
 | **New Sale (POS)** | Search or scan by code and sell **by the piece**, on a **Cash / Credit** bill. Each line shows **Cost, Expected price and MRP per piece**, and you can click one to use it. A **hide cost** key (`) keeps cost private when the customer can see the screen. Also: discounts (amount or %), change calculator, advance payment and due date for credit bills, credit-limit approval, quick-add customer, held bills, keyboard shortcuts and printing. |
-| **Stock** | Stock is kept in pieces and shown as "12 sets + 3 pcs". Cost is the cost of the pieces still in stock (oldest sold first). There are low-stock alerts (re-order level), a full stock card per product, stock corrections (damaged, return, physical count) and purchase history by bale. |
+| **Stock** | Stock is kept and shown in pieces. Cost is the cost of the pieces still in stock (oldest sold first). There are low-stock alerts (re-order level), a full stock card per product, stock corrections (damaged, return, physical count) and purchase history by GRN. |
 | **Suppliers** | Contact, GST, bank details and credit days. You see every GRN with **paid, balance and due date**, record payments in INR with the exchange rate (Bank, Cash, Cheque, UPI…), and an "oldest first" automatic settlement. |
 | **Customers** | Credit limit, credit days, opening balance, unpaid bills, collections and a WhatsApp payment reminder. |
 | **Payments Due** | One screen for *to collect* and *to pay*, grouped into **Overdue / Due in 7 days / Later**. |
@@ -99,9 +99,9 @@ Anywhere: `F2` dashboard · `F3` new sale · `F9` bills · `F7` take a payment.
 ## How cost is calculated
 
 ```
-INR total     = Σ(sets × billed per set) + cargo charge
+INR total     = Σ(pieces billed × billed per piece) + cargo charge
 LKR total     = INR total × exchange rate + LKR expenses
-item INR      = sets × billed per set + extra pieces × (billed per set ÷ pieces per set)
+item INR      = (sets × pieces per set + extra pieces) × billed per piece
 item cost     = item INR × rate + (item share of goods value) × (cargo & local charges in LKR)
 cost / piece  = item cost ÷ pieces actually received (sets × pieces per set + extra − short)
 ```

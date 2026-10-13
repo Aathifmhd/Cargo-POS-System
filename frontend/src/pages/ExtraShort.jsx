@@ -59,13 +59,31 @@ function StatusBadges({ r }) {
 }
 
 /** Pop-up with everything about one line: the shipment, the product, the quantities and the money. */
-function LineModal({ r, onClose, onResolve }) {
+function LineModal({ r, onClose, onResolve, undoKind, onUndone }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const undo = async () => {
+    const what = undoKind === 'short' ? `short pieces (${SHORT[r.short_status].label})` : `extra pieces (${EXTRA[r.extra_status].label})`;
+    const stockNote = undoKind === 'short' && r.short_status === 'received' ? `\n\n${int(r.f.shortPcs)} pcs will be taken off stock.` : '';
+    if (!confirm(`Undo the resolution of the ${what}? It goes back to the table as "to resolve".${stockNote}`)) return;
+    setBusy(true);
+    try {
+      await api.post(`/grns/lines/${r.id}/resolve`, { kind: undoKind, action: 'reopen' });
+      toast('Undone — back in the table to resolve');
+      onUndone();
+    } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+  };
   const f = r.f;
   const pcPrice = r.cost_inr_per_set / (r.pcs_per_set || 1);
   const kind = f.extraPcs && f.shortPcs ? 'Extra and short' : f.extraPcs ? 'Extra pieces' : 'Short pieces';
   return (
     <Modal size="lg" title={r.name} subtitle={<>{r.grn_no} · {niceDate(r.date)} · <span className={f.shortPcs ? 'text-red' : 'text-green'}>{kind}</span></>} onClose={onClose}
-      footer={<><span className="spacer" /><button className="btn" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={onResolve}><Icon name="check" size={16} /> Resolve</button></>}>
+      footer={undoKind !== undefined ? (
+        <><span className="spacer" /><button className="btn" onClick={onClose}>Cancel</button>
+          {undoKind && <button className="btn btn-danger" onClick={undo} disabled={busy}><Icon name="back" size={16} /> {busy ? 'Undoing…' : 'Undo'}</button>}</>
+      ) : (
+        <><span className="spacer" /><button className="btn" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={onResolve}><Icon name="check" size={16} /> Resolve</button></>
+      )}>
       <div className="es-detail">
         <div className="es-qty">
           <div><span>Billed</span><b>{int(f.billedPcs)} pcs</b><small>{int(r.sets)} sets × {r.pcs_per_set}{r.extra_pcs ? ` + ${int(r.extra_pcs)}` : ''}</small></div>
@@ -195,15 +213,15 @@ function HistorySection({ version, onHide, onOpen }) {
     for (const raw of data || []) {
       const r = { ...raw, f: lineFigures(raw) };
       if (r.short_status && r.f.shortPcs > 0) {
-        out.push({ key: `s${r.id}`, r, kind: 'Short', pcs: -r.f.shortPcs, how: SHORT[r.short_status], date: r.short_date, note: r.short_note,
+        out.push({ key: `s${r.id}`, r, undo: 'short', kind: 'Short', pcs: -r.f.shortPcs, how: SHORT[r.short_status], date: r.short_date, note: r.short_note,
           money: r.short_status === 'lost' ? -r.f.shortLkr : 0 });
       }
       if (r.extra_sets > 0) {
-        out.push({ key: `f${r.id}`, r, kind: 'Extra', pcs: r.extra_sets * r.pcs_per_set, how: { label: 'Free sets', tone: 'green' }, date: r.date, note: 'Older GRN: free sets',
+        out.push({ key: `f${r.id}`, r, undo: null, kind: 'Extra', pcs: r.extra_sets * r.pcs_per_set, how: { label: 'Free sets', tone: 'green' }, date: r.date, note: 'Older GRN: free sets',
           money: r.extra_sets * r.pcs_per_set * (r.landed_per_pcs_lkr || 0) });
       }
       if (r.extra_status && r.extra_pcs > 0) {
-        out.push({ key: `e${r.id}`, r, kind: 'Extra', pcs: r.extra_pcs, how: EXTRA[r.extra_status], date: r.extra_date, note: r.extra_note,
+        out.push({ key: `e${r.id}`, r, undo: 'extra', kind: 'Extra', pcs: r.extra_pcs, how: EXTRA[r.extra_status], date: r.extra_date, note: r.extra_note,
           money: r.extra_status === 'free' ? r.f.extraLkr : 0 });
       }
     }
@@ -225,7 +243,7 @@ function HistorySection({ version, onHide, onOpen }) {
             <thead><tr><th>Resolved</th><th>GRN</th><th>Product</th><th className="right">Pieces</th><th>How</th><th className="right">Profit / loss</th></tr></thead>
             <tbody>
               {entries.map((e) => (
-                <tr key={e.key} className="click" onClick={() => onOpen(e.r)} title="View details">
+                <tr key={e.key} className="click" onClick={() => onOpen(e.r, e.undo)} title="View details">
                   <td className="nowrap">{e.date ? niceDate(e.date) : '—'}</td>
                   <td className="nowrap strong">{e.r.grn_no}<div className="sub">{e.r.supplier_name}</div></td>
                   <td><b>{e.r.name}</b>{e.note && <div className="sub">{e.note}</div>}</td>
@@ -262,6 +280,7 @@ export default function ExtraShort() {
     setHistory((h) => !h);
     setTimeout(() => document.querySelector('.es-history')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
   };
+  const [undoKind, setUndoKind] = useState(undefined);   // set when a line is opened from the history: 'short' / 'extra' / null
   const [picked, setPicked] = useState(null);   // a line opened from History (it may be outside the filters)
   const rows = useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -340,7 +359,7 @@ export default function ExtraShort() {
               </tr></thead>
               <tbody>
                 {openRows.map((r) => (
-                  <tr key={r.id} className="click" onClick={() => setOpen(r.id)} title="View details">
+                  <tr key={r.id} className="click" onClick={() => { setUndoKind(undefined); setOpen(r.id); }} title="View details">
                     <td className="strong nowrap">{r.grn_no}<div className="sub">{niceDate(r.date)}</div></td>
                     <td>{r.supplier_name}<div className="sub">{r.cargo_name || ''}</div></td>
                     <td><b>{r.name}</b><div className="sub">{r.code}{r.sizes ? ` · ${r.sizes}` : ''}</div></td>
@@ -369,8 +388,10 @@ export default function ExtraShort() {
       <div className="es-history-bar">
         <button className={`btn btn-sm ${history ? '' : 'btn-ghost'}`} onClick={showHistory}><Icon name="clock" size={14} /> {history ? 'Hide history' : 'History'}</button>
       </div>
-      {history && <HistorySection version={version} onHide={() => setHistory(false)} onOpen={(r) => { setPicked(r); setOpen(r.id); }} />}
-      {openRow && <LineModal r={openRow} onClose={() => setOpen(null)} onResolve={() => { setOpen(null); setResolving(openRow.id); }} />}
+      {history && <HistorySection version={version} onHide={() => setHistory(false)} onOpen={(r, undo) => { setPicked(r); setUndoKind(undo); setOpen(r.id); }} />}
+      {openRow && <LineModal r={openRow} undoKind={undoKind} onClose={() => { setOpen(null); setUndoKind(undefined); }}
+        onResolve={() => { setOpen(null); setResolving(openRow.id); }}
+        onUndone={() => { setOpen(null); setUndoKind(undefined); reload(); setVersion((v) => v + 1); }} />}
       {resolveRow && <ResolveModal key={`${resolveRow.id}-${resolveRow.short_status}-${resolveRow.extra_status}`} r={resolveRow} onClose={() => setResolving(null)} onDone={() => { reload(); setVersion((v) => v + 1); }} />}
     </div>
   );

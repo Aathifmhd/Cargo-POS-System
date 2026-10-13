@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useApi, lkr, niceDate, today, addDays } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, StatusBadge, Segmented, Stat } from '../components/ui.jsx';
+import { SaleModal } from './SaleView.jsx';
 
 const RANGES = {
   today: () => [today(), today()],
@@ -11,7 +12,7 @@ const RANGES = {
 };
 
 export default function Sales() {
-  const navigate = useNavigate();
+  const [openId, setOpenId] = useState(null);   // the bill shown in the pop-up
   const [range, setRange] = useState('week');
   const [type, setType] = useState('');
   const [q, setQ] = useState('');
@@ -55,7 +56,7 @@ export default function Sales() {
               <thead><tr><th>Bill no</th><th>Date</th><th>Customer</th><th>Type</th><th className="right">Total</th><th className="right">Profit</th><th className="right">Balance</th><th>Status</th></tr></thead>
               <tbody>
                 {rows.map((s) => (
-                  <tr key={s.id} className={`click ${s.status === 'void' ? 'void' : ''}`} onClick={() => navigate(`/sales/${s.id}`)}>
+                  <tr key={s.id} className={`click ${s.status === 'void' ? 'void' : ''}`} onClick={() => setOpenId(s.id)}>
                     <td className="strong">{s.invoice_no}</td>
                     <td>{niceDate(s.date)}</td>
                     <td>{s.customer_name}<div className="sub">{s.item_count} item{s.item_count === 1 ? '' : 's'}</div></td>
@@ -71,6 +72,7 @@ export default function Sales() {
           </div>
         )}
       </Card>
+      {openId && <SaleModal id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
     </div>
   );
 }

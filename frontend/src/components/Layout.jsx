@@ -14,6 +14,7 @@ const NAV = [
   { group: 'Records' },
   { to: '/stock', icon: 'box', label: 'Stock' },
   { to: '/grn', icon: 'layers', label: 'Shipments (GRN)', end: true },
+  { to: '/extra-short', icon: 'adjust', label: 'Extra & Short' },
   { to: '/customers', icon: 'users', label: 'Customers' },
   { to: '/suppliers', icon: 'factory', label: 'Suppliers' },
   { group: 'Money' },

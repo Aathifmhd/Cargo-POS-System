@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, useApi, lkr, niceDate, dueText } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, Stat, Tabs, Badge, useToast } from '../components/ui.jsx';
 import { CustomerForm, CustomerPaymentModal } from '../components/forms.jsx';
+import { SaleModal } from './SaleView.jsx';
 import { useSettings } from '../App.jsx';
 
 export function whatsappReminder(c, amount, shop) {
@@ -15,6 +16,7 @@ export default function CustomerView() {
   const { id } = useParams();
   const toast = useToast();
   const navigate = useNavigate();
+  const [openSale, setOpenSale] = useState(null);
   const { settings } = useSettings();
   const { data: c, error, reload } = useApi(`/customers/${id}`);
   const [tab, setTab] = useState('open');
@@ -67,7 +69,7 @@ export default function CustomerView() {
                     {openBills.length === 0 && <tr><td colSpan={7} className="center muted">No unpaid bills. 🎉</td></tr>}
                     {openBills.map((b) => (
                       <tr key={b.id ?? 'ob'}>
-                        <td className="strong">{b.id ? <Link to={`/sales/${b.id}`}>{b.invoice_no}</Link> : b.invoice_no}</td>
+                        <td className="strong">{b.id ? <button type="button" className="link-btn" style={{ marginLeft: 0 }} onClick={() => setOpenSale(b.id)}>{b.invoice_no}</button> : b.invoice_no}</td>
                         <td>{niceDate(b.date)}</td>
                         <td className="right">{lkr(b.amount)}</td>
                         <td className="right text-green">{lkr(b.paid)}</td>
@@ -84,7 +86,7 @@ export default function CustomerView() {
                   <thead><tr><th>Bill</th><th>Date</th><th>Type</th><th className="right">Total</th><th></th></tr></thead>
                   <tbody>
                     {c.sales.map((s) => (
-                      <tr key={s.id} className={`click ${s.status === 'void' ? 'void' : ''}`} onClick={() => navigate(`/sales/${s.id}`)}>
+                      <tr key={s.id} className={`click ${s.status === 'void' ? 'void' : ''}`} onClick={() => setOpenSale(s.id)}>
                         <td className="strong">{s.invoice_no}</td><td>{niceDate(s.date)}</td>
                         <td><Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type}</Badge></td>
                         <td className="right strong">{lkr(s.total)}</td><td>{s.status === 'void' && <Badge>Cancelled</Badge>}</td>
@@ -128,6 +130,7 @@ export default function CustomerView() {
 
       {editing && <CustomerForm customer={c} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload(); }} />}
       {paying && <CustomerPaymentModal customer={c} bills={c.bills} defaultSaleId={paying === true ? null : paying} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); reload(); }} />}
+      {openSale && <SaleModal id={openSale} onClose={() => setOpenSale(null)} onChanged={reload} />}
     </div>
   );
 }

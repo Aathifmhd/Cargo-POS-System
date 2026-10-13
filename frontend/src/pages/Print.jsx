@@ -55,7 +55,7 @@ export function PrintSale() {
         <table>
           <thead><tr><th>#</th><th>Item</th><th className="right">Qty</th><th className="right">MRP</th><th className="right">Rate</th>{hasDisc && <th className="right">Dis</th>}<th className="right">Amount</th></tr></thead>
           <tbody>{s.items.map((i, idx) => (
-            <tr key={i.id}><td>{idx + 1}</td><td>{i.name}<div className="muted small">{i.code}</div></td><td className="right">{i.qty} {i.unit === 'set' ? 'set' : 'pcs'}<div className="muted small">{int(i.pcs)} pcs</div></td>
+            <tr key={i.id}><td>{idx + 1}</td><td>{i.name}<div className="muted small">{i.code}</div></td><td className="right">{int(i.pcs)} pcs</td>
               <td className="right">{money(i.mrp_per_unit)}</td><td className="right">{money(i.price)}</td>
               {hasDisc && <td className="right">{i.disc ? `${i.disc_pct}%` : '—'}</td>}<td className="right">{money(i.line_total)}</td></tr>
           ))}</tbody>
@@ -96,17 +96,17 @@ export function PrintGrn() {
           <div className="right"><div>Cargo: <b>{g.cargo_name || '—'}</b></div><div>Bale no: <b>{g.bale_no || '—'}</b></div><div>LR no: <b>{g.lr_no || '—'}</b></div><div>Rate: <b>1 INR = Rs {g.exchange_rate}</b></div></div>
         </div>
         <table>
-          <thead><tr><th>Item</th><th className="right">Sets</th><th className="right">Pcs/set</th><th>Colours / Sizes</th><th className="right">Cost ₹/set</th><th className="right">Landed Rs/set</th><th className="right">Expected</th><th className="right">MRP</th></tr></thead>
+          <thead><tr><th>Item</th><th className="right">Sets</th><th className="right">Pcs/set</th><th>Colours / Sizes</th><th className="right">Bill ₹/set</th><th className="right">Cost Rs/pc</th><th className="right">Expected Rs/pc</th><th className="right">MRP Rs/pc</th></tr></thead>
           <tbody>{g.items.map((i) => (
-            <tr key={i.id}><td>{i.name}<div className="muted small">{i.code}</div></td><td className="right">{i.sets}</td><td className="right">{i.pcs_per_set}</td><td>{i.colors_count || '—'} / {i.sizes || '—'}</td>
-              <td className="right">{money(i.cost_inr_per_set)}</td><td className="right">{money(i.landed_per_set_lkr)}</td><td className="right">{money(i.expected_per_set)}</td><td className="right">{money(i.mrp_per_set)}</td></tr>
+            <tr key={i.id}><td>{i.name}<div className="muted small">{i.code}</div></td><td className="right">{i.sets}{i.extra_pcs > 0 && <div className="muted small">+{i.extra_pcs} extra pcs</div>}{i.extra_sets > 0 && <div className="muted small">+{i.extra_sets} free sets</div>}{(i.short_sets > 0 || i.short_pcs > 0) && <div className="muted small">−{i.short_sets * i.pcs_per_set + i.short_pcs} pcs short</div>}</td><td className="right">{i.pcs_per_set}</td><td>{i.colors_count || '—'} / {i.sizes || '—'}</td>
+              <td className="right">{money(i.cost_inr_per_set)}</td><td className="right">{money(i.landed_per_pcs_lkr)}</td><td className="right">{money(i.expected_per_set / (i.pcs_per_set || 1))}</td><td className="right">{money(i.mrp_per_set / (i.pcs_per_set || 1))}</td></tr>
           ))}</tbody>
         </table>
         <div className="print-totals">
           <div><span>Goods</span><span>{inr(g.goods_inr)}</span></div>
-          <div><span>Cargo charge</span><span>{inr(g.cargo_charge_inr)}</span></div>
+          {g.cargo_charge_inr > 0 && <div><span>Cargo charge (₹)</span><span>{inr(g.cargo_charge_inr)}</span></div>}
           {g.expenses.map((e) => <div key={e.id}><span>{e.label}</span><span>{lkr(e.amount_lkr)}</span></div>)}
-          <div className="grand"><span>Total landed</span><span>{lkr(g.total_lkr)}</span></div>
+          <div className="grand"><span>Total cost</span><span>{lkr(g.total_lkr)}</span></div>
           <div><span>Payable to supplier</span><span>{inr(g.payable_inr)}</span></div>
           <div><span>Due date</span><span>{niceDate(g.due_date)}</span></div>
         </div>

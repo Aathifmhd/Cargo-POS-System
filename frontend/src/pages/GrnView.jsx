@@ -19,7 +19,7 @@ export default function GrnView() {
     try { await api.del(`/grns/${g.id}`); toast(`${g.grn_no} deleted`); navigate('/grn'); } catch (e) { toast(e.message, 'error'); }
   };
   const pay = async () => setPaying(await api.get(`/suppliers/${g.supplier_id}`));
-  const expectedValue = g.items.reduce((s, i) => s + i.expected_per_set * i.sets, 0);
+  const expectedValue = g.items.reduce((s, i) => s + (i.expected_per_set / (i.pcs_per_set || 1)) * Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + i.extra_pcs - i.short_pcs), 0);
 
   return (
     <div>
@@ -53,26 +53,34 @@ export default function GrnView() {
           <Card title="Items received" pad={false}>
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Product</th><th className="right">Sets</th><th className="right">Cost/set ₹</th><th className="right">Landed/set</th><th className="right">Landed/pc</th><th className="right">Expected/set</th><th className="right">MRP/set</th><th className="right">Margin</th></tr></thead>
+                <thead><tr><th>Product</th><th className="right">Received</th><th className="right">Bill ₹/set</th><th className="right">Cost / piece</th><th className="right">Expected / piece</th><th className="right">MRP / piece</th><th className="right">Margin</th></tr></thead>
                 <tbody>
-                  {g.items.map((i) => (
-                    <tr key={i.id}>
-                      <td><b>{i.name}</b><div className="sub">{i.code} · {i.pcs_per_set} pcs/set{i.colors_count ? ` · ${i.colors_count} colours` : ''}{i.sizes ? ` · ${i.sizes}` : ''}</div></td>
-                      <td className="right">{int(i.sets)}<div className="sub">{int(i.sets * i.pcs_per_set)} pcs</div></td>
-                      <td className="right">{money(i.cost_inr_per_set)}<div className="sub">{inr(i.line_inr)}</div></td>
-                      <td className="right strong">{money(i.landed_per_set_lkr)}</td>
-                      <td className="right">{money(i.landed_per_pcs_lkr)}</td>
-                      <td className="right">{money(i.expected_per_set)}</td>
-                      <td className="right">{money(i.mrp_per_set)}</td>
-                      <td className={`right ${margin(i.expected_per_set, i.landed_per_set_lkr) < 0 ? 'text-red' : 'text-green'}`}>{pct(margin(i.expected_per_set, i.landed_per_set_lkr))}</td>
-                    </tr>
-                  ))}
+                  {g.items.map((i) => {
+                    const pcs = Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + i.extra_pcs - i.short_pcs);
+                    const per = (v) => v / (i.pcs_per_set || 1);
+                    return (
+                      <tr key={i.id}>
+                        <td><b>{i.name}</b><div className="sub">{i.code} · {i.pcs_per_set} pcs/set{i.colors_count ? ` · ${i.colors_count} colours` : ''}{i.sizes ? ` · ${i.sizes}` : ''}</div></td>
+                        <td className="right">{int(pcs)} pcs
+                          <div className="sub">{int(i.sets)} sets billed</div>
+                          {i.extra_pcs > 0 && <div className="sub text-green">+ {int(i.extra_pcs)} extra pcs (billed)</div>}
+                          {i.extra_sets > 0 && <div className="sub text-green">+ {int(i.extra_sets)} free sets</div>}
+                          {(i.short_sets > 0 || i.short_pcs > 0) && <div className="sub text-red">− {int(i.short_sets * i.pcs_per_set + i.short_pcs)} pcs short</div>}
+                        </td>
+                        <td className="right">{money(i.cost_inr_per_set)}<div className="sub">{inr(i.line_inr)}</div></td>
+                        <td className="right strong">{lkr(i.landed_per_pcs_lkr)}</td>
+                        <td className="right">{lkr(per(i.expected_per_set))}</td>
+                        <td className="right">{lkr(per(i.mrp_per_set))}</td>
+                        <td className={`right ${margin(i.expected_per_set, i.landed_per_set_lkr) < 0 ? 'text-red' : 'text-green'}`}>{pct(margin(i.expected_per_set, i.landed_per_set_lkr))}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </Card>
           <div className="grid grid-2">
-            <Card title="Expenses (LKR)">
+            <Card title="Cargo & local charges (LKR)">
               {g.expenses.length === 0 ? <p className="muted">No extra expenses.</p> : g.expenses.map((e) => (
                 <div key={e.id} className="list-row"><span>{e.label}</span><b className="mono">{lkr(e.amount_lkr)}</b></div>
               ))}
@@ -91,11 +99,11 @@ export default function GrnView() {
           <Card title="Cost breakdown">
             <dl className="kv">
               <dt>Goods</dt><dd>{inr(g.goods_inr)}</dd>
-              <dt>Cargo charge</dt><dd>{inr(g.cargo_charge_inr)}</dd>
+              {g.cargo_charge_inr > 0 && <><dt>Cargo charge (₹)</dt><dd>{inr(g.cargo_charge_inr)}</dd></>}
               <dt>Goods in LKR (× {(g.effective_rate ?? g.exchange_rate).toFixed(4)})</dt><dd>{lkr(g.goods_inr * (g.effective_rate ?? g.exchange_rate))}</dd>
-              <dt>Cargo in LKR (× {(g.cargo_in_supplier_bill ? g.effective_rate ?? g.exchange_rate : g.exchange_rate).toFixed(4)})</dt><dd>{lkr(g.cargo_charge_inr * (g.cargo_in_supplier_bill ? g.effective_rate ?? g.exchange_rate : g.exchange_rate))}</dd>
-              <dt>Expenses</dt><dd>{lkr(g.expenses_lkr)}</dd>
-              <dt className="total">Total landed</dt><dd className="total">{lkr(g.total_lkr)}</dd>
+              {g.cargo_charge_inr > 0 && <><dt>Cargo in LKR (× {(g.cargo_in_supplier_bill ? g.effective_rate ?? g.exchange_rate : g.exchange_rate).toFixed(4)})</dt><dd>{lkr(g.cargo_charge_inr * (g.cargo_in_supplier_bill ? g.effective_rate ?? g.exchange_rate : g.exchange_rate))}</dd></>}
+              <dt>Cargo & local charges</dt><dd>{lkr(g.expenses_lkr)}</dd>
+              <dt className="total">Total cost</dt><dd className="total">{lkr(g.total_lkr)}</dd>
               <dt>Expected sales value</dt><dd>{lkr(expectedValue)}</dd>
               <dt>Expected profit</dt><dd className="text-green">{lkr(expectedValue - g.total_lkr)}</dd>
             </dl>

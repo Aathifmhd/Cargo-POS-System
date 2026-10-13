@@ -1,41 +1,46 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, useApi, lkr, money, niceDate, int, margin, pct } from '../lib.js';
-import { PageHeader, Card, Icon, Loading, ErrorBox, Badge, StatusBadge, useToast } from '../components/ui.jsx';
+import { PageHeader, Card, Icon, Loading, ErrorBox, Badge, StatusBadge, Modal, useToast } from '../components/ui.jsx';
 import { CustomerPaymentModal } from '../components/forms.jsx';
 
-export default function SaleView() {
-  const { id } = useParams();
+/** Loads one bill and the actions on it (receive payment, print, cancel) — shared by the page and the pop-up. */
+function useSale(id, onChanged) {
   const toast = useToast();
   const { data: s, error, reload } = useApi(`/sales/${id}`);
   const [paying, setPaying] = useState(null);
-
-  if (error) return <ErrorBox error={error} onRetry={reload} />;
-  if (!s) return <Loading />;
-
+  const changed = () => { reload(); onChanged?.(); };
   const cancel = async () => {
     const reason = prompt('Why are you cancelling this bill? Stock will be returned.');
     if (reason == null) return;
-    try { await api.post(`/sales/${s.id}/void`, { reason }); toast('Bill cancelled, stock returned'); reload(); }
+    try { await api.post(`/sales/${s.id}/void`, { reason }); toast('Bill cancelled, stock returned'); changed(); }
     catch (e) { toast(e.message, 'error'); }
   };
-  const receive = async () => {
-    const c = await api.get(`/customers/${s.customer_id}`);
-    setPaying(c);
-  };
+  const receive = async () => setPaying(await api.get(`/customers/${s.customer_id}`));
+  const print = () => window.open(`/print/sale/${s.id}`, '_blank');
+  const paymentModal = paying && (
+    <CustomerPaymentModal customer={paying} bills={paying.bills} defaultSaleId={s.id} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); changed(); }} />
+  );
+  return { s, error, reload, cancel, receive, print, paymentModal };
+}
 
+const subtitleOf = (s) => (
+  <>{niceDate(s.date)} · {s.customer_name} · <Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge> <StatusBadge status={s.pay_status} /></>
+);
+
+function SaleActions({ s, receive, print, cancel }) {
+  return <>
+    {s.status === 'completed' && <button className="btn btn-danger" onClick={cancel}><Icon name="x" /> Cancel bill</button>}
+    <button className="btn" onClick={print}><Icon name="print" /> Print bill</button>
+    {s.status === 'completed' && s.balance > 0 && <button className="btn btn-primary" onClick={receive}><Icon name="cash" /> Receive payment</button>}
+  </>;
+}
+
+/** The bill: items (per piece) and the summary. */
+function SaleDetails({ s }) {
   return (
-    <div>
-      <PageHeader back="/sales" title={`Bill ${s.invoice_no}`}
-        subtitle={<>{niceDate(s.date)} · {s.customer_name} · <Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge> <StatusBadge status={s.pay_status} /></>}
-        actions={<>
-          {s.status === 'completed' && s.balance > 0 && <button className="btn btn-primary" onClick={receive}><Icon name="cash" /> Receive payment</button>}
-          <button className="btn" onClick={() => window.open(`/print/sale/${s.id}`, '_blank')}><Icon name="print" /> Print bill</button>
-          {s.status === 'completed' && <button className="btn btn-danger" onClick={cancel}><Icon name="x" /> Cancel bill</button>}
-        </>} />
-
+    <>
       {s.status === 'void' && <div className="alert alert-red mb"><Icon name="alert" /> This bill was cancelled and its stock returned. {s.notes}</div>}
-
       <div className="grn-layout">
         <Card title="Items" pad={false}>
           <div className="table-wrap">
@@ -45,11 +50,11 @@ export default function SaleView() {
                 {s.items.map((i) => (
                   <tr key={i.id}>
                     <td><b>{i.name}</b><div className="sub">{i.code}</div></td>
-                    <td className="right nowrap">{i.qty} {i.unit === 'set' ? 'set' : 'pcs'}<div className="sub">{int(i.pcs)} pcs</div></td>
-                    <td className="right">{money(i.price)}</td>
-                    <td className="right muted">{money(i.mrp_per_unit)}</td>
-                    <td className="right muted">{money(i.expected_per_unit)}</td>
-                    <td className="right muted">{money(i.cost_per_unit)}</td>
+                    <td className="right nowrap">{int(i.pcs)} pcs</td>
+                    <td className="right">{money(i.price / (i.pcs / i.qty || 1))}</td>
+                    <td className="right muted">{money(i.mrp_per_unit / (i.pcs / i.qty || 1))}</td>
+                    <td className="right muted">{money(i.expected_per_unit / (i.pcs / i.qty || 1))}</td>
+                    <td className="right muted">{money(i.cost_per_unit / (i.pcs / i.qty || 1))}</td>
                     <td className={`right ${i.price < i.cost_per_unit ? 'text-red' : 'text-green'}`}>{pct(margin(i.price, i.cost_per_unit))}</td>
                     <td className="right strong">{money(i.line_total)}</td>
                   </tr>
@@ -91,8 +96,33 @@ export default function SaleView() {
           )}
         </div>
       </div>
+    </>
+  );
+}
 
-      {paying && <CustomerPaymentModal customer={paying} bills={paying.bills} defaultSaleId={s.id} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); reload(); }} />}
+/** Pop-up view of a bill, used by Sales & Bills. onChanged lets the list refresh after a payment or cancel. */
+export function SaleModal({ id, onClose, onChanged }) {
+  const { s, error, reload, cancel, receive, print, paymentModal } = useSale(id, onChanged);
+  return (
+    <Modal size="xl" title={s ? `Bill ${s.invoice_no}` : 'Bill'} subtitle={s ? subtitleOf(s) : null} onClose={onClose}
+      footer={s ? <><span className="spacer" /><SaleActions s={s} receive={receive} print={print} cancel={cancel} /></> : null}>
+      {error ? <ErrorBox error={error} onRetry={reload} /> : !s ? <Loading /> : <SaleDetails s={s} />}
+      {paymentModal}
+    </Modal>
+  );
+}
+
+/** Full page (/sales/:id), still used by links from other screens. */
+export default function SaleView() {
+  const { id } = useParams();
+  const { s, error, reload, cancel, receive, print, paymentModal } = useSale(id);
+  if (error) return <ErrorBox error={error} onRetry={reload} />;
+  if (!s) return <Loading />;
+  return (
+    <div>
+      <PageHeader back="/sales" title={`Bill ${s.invoice_no}`} subtitle={subtitleOf(s)} actions={<SaleActions s={s} receive={receive} print={print} cancel={cancel} />} />
+      <SaleDetails s={s} />
+      {paymentModal}
     </div>
   );
 }

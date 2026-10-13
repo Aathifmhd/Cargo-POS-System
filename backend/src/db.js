@@ -262,6 +262,26 @@ addColumn('products', 'opening_cost_per_pcs', 'REAL NOT NULL DEFAULT 0');
 addColumn('sale_items', 'disc', 'REAL NOT NULL DEFAULT 0');      // line discount amount (Rs)
 addColumn('sale_items', 'disc_pct', 'REAL NOT NULL DEFAULT 0');
 addColumn('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');   // +1 on password change → older logins end
+addColumn('products', 'subtype', 'TEXT');                             // product type within the category, e.g. T-shirts → "Collar"
+addColumn('grn_items', 'extra_sets', 'INTEGER NOT NULL DEFAULT 0');   // (older GRNs) free sets — not on the supplier's bill
+addColumn('grn_items', 'extra_pcs', 'INTEGER NOT NULL DEFAULT 0');    // extra pieces received — billed by the supplier
+addColumn('grn_items', 'short_sets', 'INTEGER NOT NULL DEFAULT 0');   // sets billed but missing from the bale
+addColumn('grn_items', 'short_pcs', 'INTEGER NOT NULL DEFAULT 0');    // pieces billed but missing from the bale
+
+/* The shop's catalogue: categories, the product types in each, and the sizes they come in.
+   Editable in Settings → Categories, products & sizes (stored as JSON in settings.catalog). */
+const TOP_SIZES = ['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
+const BOTTOM_SIZES = ['28/32', '30/36', '28/34', '28/36', '28/38', '38/42', 'M', 'L', 'XL', '2XL'];
+export const DEFAULT_CATALOG = [
+  { name: 'T-shirts', sizes: TOP_SIZES, types: ['Collar', 'Collar L/S', 'Collar Drop Shoulder', 'Collar Zipper', 'Collar Boxy', 'Old Money', 'R/N Regular', 'R/N Drop Shoulder', 'R/N 5 Sleeve', 'R/N Long Sleeve', 'Arm Cut'] },
+  { name: 'Shirts', sizes: TOP_SIZES, types: ['L/S', 'H/S', 'Drop Shoulder', 'Kerala', 'Boxy Fit'] },
+  { name: 'Pant', sizes: BOTTOM_SIZES, types: ['Linen Pant', 'Linen Baggy', 'Color Pant', 'Cotton Pant', 'Korean Baggy Pant', 'Kurka Pant', 'Kurka Baggy Pant', 'Formal', 'Cargo', 'Boot Cut'] },
+  { name: 'Denim', sizes: BOTTOM_SIZES, types: ['Slim', 'Regular', 'Mom Fit', 'Baggy', 'Wide Leg', 'Cargo'] },
+  { name: 'Track Pant', sizes: BOTTOM_SIZES, types: ['Baggy', 'Regular', 'Boot Cut'] },
+  { name: 'Shorts', sizes: BOTTOM_SIZES, types: ['Short', '3 Quarter', '3 Quarter Cargo', 'Cargo'] },
+  { name: 'Underwear', sizes: ['M', 'L', 'XL', '2XL'], types: ['Boxer', 'V Cut', 'RN West', 'RNS West'] },
+  { name: 'Jacket', sizes: TOP_SIZES, types: ['Jacket', 'Hoodie'] },
+];
 
 const DEFAULT_SETTINGS = {
   fx_mode: 'auto',
@@ -270,9 +290,13 @@ const DEFAULT_SETTINGS = {
   shop_phone: '',
   default_exchange_rate: '3.60',
   default_markup_percent: '40',
+  selling_markup_percent: '30',       // auto expected selling price = landed cost + this %
+  mrp_markup_percent: '40',           // auto MRP = landed cost + this %
+  price_round_to: '10',               // auto prices are rounded up to this (per piece)
   invoice_footer: 'Thank you for your business! Goods once sold cannot be returned without the bill.',
   grn_prefix: 'GRN-',
   invoice_prefix: 'INV-',
+  catalog: JSON.stringify(DEFAULT_CATALOG),
 };
 for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
   db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(k, v);
@@ -371,7 +395,7 @@ export function recomputeProductCost(productId) {
   const p = get('SELECT * FROM products WHERE id = ?', productId);
   if (!p) return;
   const receipts = all(
-    `SELECT gi.sets * gi.pcs_per_set AS pcs, gi.landed_per_pcs_lkr AS cost
+    `SELECT MAX(0, (gi.sets + gi.extra_sets - gi.short_sets) * gi.pcs_per_set + gi.extra_pcs - gi.short_pcs) AS pcs, gi.landed_per_pcs_lkr AS cost
        FROM grn_items gi JOIN grns g ON g.id = gi.grn_id
       WHERE gi.product_id = ? ORDER BY g.date DESC, g.id DESC, gi.id DESC`, productId);
   if (p.opening_pcs > 0) receipts.push({ pcs: p.opening_pcs, cost: p.opening_cost_per_pcs });

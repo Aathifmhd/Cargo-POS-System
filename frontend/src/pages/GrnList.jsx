@@ -23,7 +23,7 @@ export default function GrnList() {
         ) : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Cargo · Bale · LR</th><th className="right">Rate</th><th className="right">Goods (INR)</th><th className="right">Landed (LKR)</th><th className="right">To pay (INR)</th><th>Payment</th></tr></thead>
+              <thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Cargo · Bale · LR</th><th className="right">Rate</th><th className="right">Goods (INR)</th><th className="right">Cost (LKR)</th><th className="right">To pay (INR)</th><th>Payment</th></tr></thead>
               <tbody>
                 {data.map((g) => (
                   <tr key={g.id} className="click" onClick={() => navigate(`/grn/${g.id}`)}>

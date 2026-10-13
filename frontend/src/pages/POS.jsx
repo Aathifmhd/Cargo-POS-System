@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, n, r2, lkr, money, today, addDays, stockText, margin, pct, niceDate } from '../lib.js';
+import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate } from '../lib.js';
 import { Icon, Modal, Field, NumInput, useToast, Loading } from '../components/ui.jsx';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
@@ -17,14 +17,12 @@ export const POS_KEYS = [
   ['F1', 'Back to the code box'],
   ['Enter', 'Next box · add the line'],
   ['← →', 'Previous / next box'],
-  ['U', 'Sets ↔ pieces (in the entry row or on a line)'],
   ['Esc', 'Clear the entry row'],
   ['* in code box', 'List every product'],
   ['↓ (empty code box)', 'Go to the bill'],
   ['↑ ↓', 'Move on the bill'],
-  ['Space', 'Edit the line (unit · qty · price)'],
-  ['← → (editing)', 'Move between unit, qty and price'],
-  ['↑ ↓ on unit', 'Sets ↔ pieces while editing'],
+  ['Space', 'Edit the line (qty · price)'],
+  ['← → (editing)', 'Move between qty and price'],
   ['Enter (editing)', 'Keep the change · Esc to cancel'],
   ['P', 'Edit the price on the line'],
   ['Enter Enter', 'Take payment → choose Cash or Credit'],
@@ -50,6 +48,10 @@ function unitInfo(p, unit) {
     expected: r2(p.expected_per_set / div),
     mrp: r2(p.mrp_per_set / div),
     per: unit === 'set' ? p.pcs_per_set : 1,
+    // always per piece too, so a set price can be read as a piece price
+    costPc: r2(p.cost_per_pcs),
+    expectedPc: r2(p.expected_per_set / p.pcs_per_set),
+    mrpPc: r2(p.mrp_per_set / p.pcs_per_set),
   };
 }
 const lineCalc = (l) => {
@@ -57,7 +59,8 @@ const lineCalc = (l) => {
   const disc = r2((gross * n(l.disc_pct)) / 100);
   return { gross, disc, amount: r2(gross - disc), net: n(l.qty) ? (gross - disc) / n(l.qty) : n(l.price) };
 };
-const blankEntry = { q: '', pid: null, unit: 'set', qty: '1', price: '', disc_pct: '' };
+const pcsText = (pcs) => `${int(pcs)} pcs`;
+const blankEntry = { q: '', pid: null, unit: 'pcs', qty: '1', price: '', disc_pct: '' };   // sold by the piece only
 const typingIn = (el) => el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
 
 export default function POS() {
@@ -98,6 +101,15 @@ export default function POS() {
   useEffect(() => { billRef.current?.querySelector('tr.on')?.scrollIntoView({ block: 'nearest' }); }, [sel]);
 
   const byId = useMemo(() => Object.fromEntries((products || []).map((p) => [p.id, p])), [products]);
+  // everything is sold by the piece: a line or held bill from before (in sets) becomes the same quantity in pieces
+  useEffect(() => {
+    if (!lines.some((l) => l.unit === 'set' && byId[l.product_id])) return;
+    setLines((ls) => ls.map((l) => {
+      const p = byId[l.product_id];
+      if (l.unit !== 'set' || !p) return l;
+      return { ...l, unit: 'pcs', qty: n(l.qty) * p.pcs_per_set, price: r2(n(l.price) / p.pcs_per_set) };
+    }));
+  }, [lines, byId]);
   const customer = customers.find((c) => c.id === customerId);
   const cur = entry.pid ? byId[entry.pid] : null;
 
@@ -123,18 +135,13 @@ export default function POS() {
   /* ---------- entry row ---------- */
   const pick = (p) => {
     if (!p) return;
-    const unit = p.stock_pcs >= p.pcs_per_set ? 'set' : 'pcs';
+    const unit = 'pcs';
     const u = unitInfo(p, unit);
     setEntry({ q: p.code, pid: p.id, unit, qty: '1', price: String(u.expected || u.mrp || ''), disc_pct: '' });
     setHi(0);
     if (p.stock_pcs - inBillPcs(p.id) <= 0) toast(`"${p.name}" has no stock left`, 'error');
     focus('tQty');
   };
-  const setUnit = (unit) => setEntry((e) => {
-    const p = byId[e.pid];
-    if (!p || e.unit === unit) return e;
-    return { ...e, unit, price: String(r2(n(e.price) * (unit === 'pcs' ? 1 / p.pcs_per_set : p.pcs_per_set))) };
-  });
   const commit = () => {
     const p = cur;
     if (!p) { toast('Scan or type a product code first', 'error'); return toCode(); }
@@ -142,7 +149,7 @@ export default function POS() {
     if (qty <= 0) { toast('Enter a quantity', 'error'); return focus('tQty'); }
     const per = unitInfo(p, entry.unit).per;
     const free = p.stock_pcs - inBillPcs(p.id);
-    if (qty * per > free) { toast(`Only ${stockText(Math.max(0, free), p.pcs_per_set)} of ${p.name} left`, 'error'); return focus('tQty'); }
+    if (qty * per > free) { toast(`Only ${pcsText(Math.max(0, free))} of ${p.name} left`, 'error'); return focus('tQty'); }
     const line = { product_id: p.id, unit: entry.unit, qty, price: n(entry.price), disc_pct: n(entry.disc_pct) };
     setLines((ls) => {
       const i = ls.findIndex((l) => l.product_id === line.product_id && l.unit === line.unit && n(l.price) === line.price && n(l.disc_pct) === line.disc_pct);
@@ -159,7 +166,6 @@ export default function POS() {
     const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
     const atEnd = el.selectionStart === el.value.length;
     if (e.key === 'Escape') { e.preventDefault(); setEntry(blankEntry); return toCode(); }
-    if ((e.key === 'u' || e.key === 'U') && id !== 'tCode') { e.preventDefault(); return setUnit(entry.unit === 'set' ? 'pcs' : 'set'); }
     if (id === 'tCode') {
       if (e.key === 'ArrowDown' && hits.length) { e.preventDefault(); return setHi((h) => Math.min(h + 1, hits.length - 1)); }
       if (e.key === 'ArrowUp' && hits.length) { e.preventDefault(); return setHi((h) => Math.max(h - 1, 0)); }
@@ -188,30 +194,13 @@ export default function POS() {
     setLines((ls) => { const c = [...ls]; [c[i], c[j]] = [c[j], c[i]]; return c; });
     setSel(j);
   };
-  const toggleLineUnit = (i) => {
-    const l = lines[i];
-    const p = byId[l?.product_id];
-    if (!p) return;
-    const unit = l.unit === 'set' ? 'pcs' : 'set';
-    update(i, { unit, price: r2(n(l.price) * (unit === 'pcs' ? 1 / p.pcs_per_set : p.pcs_per_set)), qty: unit === 'pcs' ? n(l.qty) * p.pcs_per_set : Math.max(1, Math.floor(n(l.qty) / p.pcs_per_set)) });
-  };
-  // Space on a bill line: Unit · Qty · Price become editable in the row; ← → moves between them.
-  const EDIT_ORDER = ['lnUnit', 'lnQty', 'lnPrice'];
+  // Space on a bill line: Qty · Price become editable in the row; ← → moves between them.
+  const EDIT_ORDER = ['lnQty', 'lnPrice'];
   const startEdit = (i, field = 'lnQty') => {
     setSel(i);
     setEdit({ i, unit: lines[i].unit, qty: String(lines[i].qty), price: String(lines[i].price) });
     focus(field);
   };
-  const editToggleUnit = () => setEdit((ed) => {
-    const p = ed && byId[lines[ed.i]?.product_id];
-    if (!p) return ed;
-    const unit = ed.unit === 'set' ? 'pcs' : 'set';
-    return {
-      ...ed, unit,
-      qty: String(unit === 'pcs' ? n(ed.qty) * p.pcs_per_set : Math.max(1, Math.floor(n(ed.qty) / p.pcs_per_set))),
-      price: String(r2(n(ed.price) * (unit === 'pcs' ? 1 / p.pcs_per_set : p.pcs_per_set))),
-    };
-  });
   const saveEdit = () => {
     if (!edit) return;
     const l = lines[edit.i];
@@ -234,8 +223,6 @@ export default function POS() {
     const atEnd = !isInput || el.selectionEnd === el.value.length;
     if ((e.key === 'ArrowRight' && atEnd) || (e.key === 'Tab' && !e.shiftKey)) { stop(); return focus(EDIT_ORDER[Math.min(i + 1, EDIT_ORDER.length - 1)]); }
     if ((e.key === 'ArrowLeft' && atStart) || (e.key === 'Tab' && e.shiftKey)) { stop(); return focus(EDIT_ORDER[Math.max(i - 1, 0)]); }
-    if (id === 'lnUnit' && ['ArrowUp', 'ArrowDown', ' ', 's', 'S', 'p', 'P', 'u', 'U'].includes(e.key)) { stop(); return editToggleUnit(); }
-    if (isInput && (e.key === 'u' || e.key === 'U')) { stop(); return editToggleUnit(); }
   };
   // Enter twice quickly (with nothing being typed) = take payment
   const lastEnter = useRef(0);
@@ -359,7 +346,6 @@ export default function POS() {
         if (k.toLowerCase() === 'p') return take(() => startEdit(sel, 'lnPrice'));
         if (k === '+' || k === '=') return take(() => update(sel, { qty: n(lines[sel].qty) + 1 }));
         if (k === '-') return take(() => update(sel, { qty: Math.max(1, n(lines[sel].qty) - 1) }));
-        if (k.toLowerCase() === 'u') return take(() => toggleLineUnit(sel));
         if (k === 'Delete' || k === 'Backspace') return take(() => remove(sel));
         if (k === 'Escape') return take(toCode);
       }
@@ -411,17 +397,11 @@ export default function POS() {
           <div className={`till-item ${cur ? 'has' : ''}`}>
             {cur ? <>
               <b>{cur.name.toUpperCase()}</b>
-              <em>{cur.code} · {cur.pcs_per_set} pcs/set{cur.sizes ? ` · ${cur.sizes}` : ''} · stock {stockText(cur.stock_pcs - inBillPcs(cur.id), cur.pcs_per_set)}</em>
+              <em>{cur.code}{cur.sizes ? ` · ${cur.sizes}` : ''} · stock {pcsText(cur.stock_pcs - inBillPcs(cur.id))}</em>
             </> : <i>scan or key a code — F1</i>}
           </div>
         </div>
-        <div className="f-unit"><span>UNIT <i>U</i></span>
-          <div className="till-unit">
-            <button disabled={!cur} className={entry.unit === 'set' ? 'on' : ''} onClick={() => setUnit('set')}>SETS</button>
-            <button disabled={!cur} className={entry.unit === 'pcs' ? 'on' : ''} onClick={() => setUnit('pcs')}>PCS</button>
-          </div>
-        </div>
-        <label className="f-qty"><span>QTY</span>
+        <label className="f-qty"><span>QTY (PCS)</span>
           <input id="tQty" inputMode="decimal" autoComplete="off" value={entry.qty} onFocus={(e) => e.target.select()}
             onChange={(e) => setEntry({ ...entry, qty: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tQty')} />
         </label>
@@ -447,17 +427,17 @@ export default function POS() {
         {hits.length > 0 && (
           <div className="till-hits">
             <table>
-              <thead><tr><th>CODE</th><th>ITEM</th><th>CATEGORY</th><th>PACK</th><th className="n">IN STOCK</th><th className="n">EXPECTED / SET</th><th className="n">MRP / SET</th></tr></thead>
+              <thead><tr><th>CODE</th><th>ITEM</th><th>CATEGORY</th><th>SIZES</th><th className="n">IN STOCK</th><th className="n">EXPECTED / PC</th><th className="n">MRP / PC</th></tr></thead>
               <tbody>
                 {hits.map((p, i) => (
                   <tr key={p.id} className={i === hi ? 'on' : ''} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p); }}>
                     <td className="c">{p.code}</td>
                     <td className="d">{p.name}</td>
                     <td className="s">{p.category || '—'}</td>
-                    <td className="s">{p.pcs_per_set} pcs/set{p.sizes ? ` · ${p.sizes}` : ''}</td>
-                    <td className={`n ${p.stock_pcs <= 0 ? 'neg' : p.stock_pcs < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{p.stock_pcs <= 0 ? 'none' : stockText(p.stock_pcs, p.pcs_per_set)}</td>
-                    <td className="p">{money(p.expected_per_set)}</td>
-                    <td className="n">{money(p.mrp_per_set)}</td>
+                    <td className="s">{p.sizes || '—'}</td>
+                    <td className={`n ${p.stock_pcs <= 0 ? 'neg' : p.stock_pcs < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{p.stock_pcs <= 0 ? 'none' : pcsText(p.stock_pcs)}</td>
+                    <td className="p">{money(p.expected_per_set / p.pcs_per_set)}</td>
+                    <td className="n">{money(p.mrp_per_set / p.pcs_per_set)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -470,25 +450,21 @@ export default function POS() {
       <div className="till-main">
         <div className="till-lines" ref={billRef}>
           <table className="till-tbl">
-            <thead><tr><th className="c">#</th><th className="c">CODE</th><th>ITEM</th><th>UNIT</th><th className="n">QTY</th><th className="n">MRP</th><th className="n">PRICE</th><th className="n">DIS</th><th className="n">AMOUNT</th><th className="x"></th></tr></thead>
+            <thead><tr><th className="c">#</th><th className="c">CODE</th><th>ITEM</th><th className="n">QTY (PCS)</th><th className="n">MRP</th><th className="n">PRICE</th><th className="n">DIS</th><th className="n">AMOUNT</th><th className="x"></th></tr></thead>
             <tbody>
-              {T.rows.length === 0 && <tr><td colSpan={10} className="till-empty">Scan or key an item code above. The newest line sits at the top.</td></tr>}
+              {T.rows.length === 0 && <tr><td colSpan={9} className="till-empty">Scan or key an item code above. The newest line sits at the top.</td></tr>}
               {T.rows.map((r, i) => r && (
                 <tr key={i} className={`${i === sel ? 'on' : ''} ${edit?.i === i ? 'editing' : ''}`} onClick={(e) => { if (!typingIn(e.target) && e.target.tagName !== 'BUTTON') { setSel(i); document.activeElement?.blur(); } }}>
                   <td className="c">{T.rows.length - i}</td>
                   <td className="c">{r.p.code}</td>
                   <td className="d">
                     <b>{r.p.name.toUpperCase()}</b>
-                    <em>{r.p.pcs_per_set} pcs/set{r.p.sizes ? ` · ${r.p.sizes}` : ''}{showCost ? ` · cost ${money(r.u.cost)}` : ''} · expected {money(r.u.expected)}</em>
+                    <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}expected {money(r.u.expectedPc)}</em>
                     {showCost && r.under && <span className="tag bad">under cost</span>}
                   </td>
-                  <td className="w">{edit?.i === i
-                    ? <button id="lnUnit" className="unit-chip editing" onClick={editToggleUnit} onKeyDown={editKey} title="↑ ↓ or Space switches sets / pieces · ← → moves">
-                        {edit.unit === 'set' ? 'SETS' : 'PCS'} <span className="unit-arrows">⇅</span></button>
-                    : <button className="unit-chip" onClick={() => toggleLineUnit(i)} title="U switches sets / pieces">{r.unit === 'set' ? 'SETS' : 'PCS'}</button>}</td>
                   <td className="n q">{edit?.i === i
                     ? <input id="lnQty" className="ln-in" inputMode="decimal" value={edit.qty} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} onKeyDown={editKey} onFocus={(e) => e.target.select()} />
-                    : <b>{r.qty}</b>}<em>{edit?.i === i ? n(edit.qty) * unitInfo(r.p, edit.unit).per : r.qty * r.u.per} pcs</em></td>
+                    : <b>{r.qty}</b>}</td>
                   <td className="n mrp">{money(r.u.mrp)}</td>
                   <td className={`n pr ${showCost && r.under ? 'under' : ''}`}>{edit?.i === i
                     ? <input id="lnPrice" className="ln-in" inputMode="decimal" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} onKeyDown={editKey} onFocus={(e) => e.target.select()} />

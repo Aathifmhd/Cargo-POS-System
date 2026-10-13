@@ -18,23 +18,38 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const sets = Math.max(0, Math.round(num(it.sets)));
     const pcsPerSet = Math.max(1, Math.round(num(it.pcs_per_set, 1)));
     const cost = num(it.cost_inr_per_set);
-    return { ...it, sets, pcs_per_set: pcsPerSet, cost_inr_per_set: cost, line_inr: round2(sets * cost), pcs: sets * pcsPerSet };
+    const q = (v) => Math.max(0, Math.round(num(v)));
+    // extra pieces are billed by the supplier at the per-piece price;
+    // shorts are still paid in full, so their cost is spread over the pieces that did arrive
+    const extraPcs = q(it.extra_pcs);
+    const extraSets = q(it.extra_sets); // older GRNs only: free sets, not billed
+    const shortSets = q(it.short_sets);
+    const shortPcs = q(it.short_pcs);
+    return {
+      ...it, sets, pcs_per_set: pcsPerSet, cost_inr_per_set: cost,
+      line_inr: round2(sets * cost + extraPcs * (cost / pcsPerSet)),
+      extra_sets: extraSets, extra_pcs: extraPcs, short_sets: shortSets, short_pcs: shortPcs,
+      billed_pcs: sets * pcsPerSet + extraPcs,
+      pcs: Math.max(0, (sets + extraSets - shortSets) * pcsPerSet + extraPcs - shortPcs),
+    };
   });
   const goods_inr = round2(lines.reduce((s, l) => s + l.line_inr, 0));
   const cargo_inr = num(cargo_charge_inr);
   const expenses_lkr = round2((expenses || []).reduce((s, e) => s + num(e.amount_lkr), 0));
   const overhead_lkr = cargo_inr * cRate + expenses_lkr;
   const total_pcs = lines.reduce((s, l) => s + l.pcs, 0);
-  const total_sets = lines.reduce((s, l) => s + l.sets, 0);
+  const total_sets = lines.reduce((s, l) => s + Math.max(0, l.sets + l.extra_sets - l.short_sets), 0);
 
+  // a line's landed cost is spread over every piece received (billed + free), so free pieces lower the cost per piece
   const out = lines.map((l) => {
     const share = goods_inr > 0 ? l.line_inr / goods_inr : total_pcs > 0 ? l.pcs / total_pcs : 0;
     const landed = l.line_inr * rate + share * overhead_lkr;
+    const perPcs = l.pcs ? landed / l.pcs : 0;
     return {
       ...l,
       landed_lkr: round2(landed),
-      landed_per_set_lkr: l.sets ? round2(landed / l.sets) : 0,
-      landed_per_pcs_lkr: l.pcs ? round2(landed / l.pcs) : 0,
+      landed_per_set_lkr: round2(perPcs * l.pcs_per_set),
+      landed_per_pcs_lkr: round2(perPcs),
     };
   });
   return {
@@ -196,11 +211,15 @@ export function customerSummary(customerId) {
    ========================================================= */
 export function createGrn(body) {
   const settings = getSettings();
+  // a new product takes its re-order level from its category (Settings → Categories & products)
+  let catalog = [];
+  try { catalog = JSON.parse(settings.catalog || '[]'); } catch { /* keep empty */ }
+  const reorderOf = (category) => Math.round(num(catalog.find((c) => c.name.toLowerCase() === String(category || '').trim().toLowerCase())?.reorder_sets));
   const supplier = get('SELECT * FROM suppliers WHERE id = ?', num(body.supplier_id));
   if (!supplier) fail('Please choose a supplier');
   const rate = num(body.exchange_rate);
   if (rate <= 0) fail('Exchange rate must be more than 0');
-  const rawItems = (body.items || []).filter((i) => (i.product_id || String(i.name || '').trim()) && num(i.sets) > 0);
+  const rawItems = (body.items || []).filter((i) => (i.product_id || String(i.name || '').trim()) && (num(i.sets) > 0 || num(i.extra_pcs) > 0));
   if (!rawItems.length) fail('Add at least one item with a quantity');
   const expenses = (body.expenses || []).filter((e) => String(e.label || '').trim() && num(e.amount_lkr) !== 0);
   const date = body.date || todayStr();
@@ -233,10 +252,10 @@ export function createGrn(body) {
         const code = String(it.code || '').trim() || nextProductCode();
         if (get('SELECT id FROM products WHERE code = ?', code)) fail(`Product code "${code}" already exists`);
         const { lastInsertRowid } = run(
-          `INSERT INTO products (code, name, category, pcs_per_set, colors_count, color_names, sizes, supplier_id, reorder_sets)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          code, String(it.name).trim(), (it.category || '').trim() || null, it.pcs_per_set, Math.round(num(it.colors_count)),
-          it.color_names || null, it.sizes || null, supplier.id, Math.round(num(it.reorder_sets)));
+          `INSERT INTO products (code, name, category, subtype, pcs_per_set, colors_count, color_names, sizes, supplier_id, reorder_sets)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          code, String(it.name).trim(), (it.category || '').trim() || null, (it.subtype || '').trim() || null, it.pcs_per_set, Math.round(num(it.colors_count)),
+          it.color_names || null, it.sizes || null, supplier.id, Math.round(num(it.reorder_sets)) || reorderOf(it.category));
         product = get('SELECT * FROM products WHERE id = ?', lastInsertRowid);
       }
 
@@ -245,19 +264,25 @@ export function createGrn(body) {
       const expected = num(it.expected_per_set) || product.expected_per_set;
       run(
         `UPDATE products SET pcs_per_set = ?, colors_count = ?, color_names = COALESCE(?, color_names), sizes = COALESCE(?, sizes),
-           category = COALESCE(?, category), supplier_id = ?, mrp_per_set = ?, expected_per_set = ?, updated_at = CURRENT_TIMESTAMP
+           category = COALESCE(?, category), subtype = COALESCE(?, subtype), supplier_id = ?, mrp_per_set = ?, expected_per_set = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
         it.pcs_per_set, Math.round(num(it.colors_count)) || product.colors_count, it.color_names || null, it.sizes || null,
-        (it.category || '').trim() || null, supplier.id, round2(mrp), round2(expected), product.id);
+        (it.category || '').trim() || null, (it.subtype || '').trim() || null, supplier.id, round2(mrp), round2(expected), product.id);
 
       run(
         `INSERT INTO grn_items (grn_id, product_id, name, pcs_per_set, colors_count, color_names, sizes, sets, cost_inr_per_set,
-           line_inr, landed_lkr, landed_per_set_lkr, landed_per_pcs_lkr, mrp_per_set, expected_per_set)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           line_inr, landed_lkr, landed_per_set_lkr, landed_per_pcs_lkr, mrp_per_set, expected_per_set, extra_sets, extra_pcs, short_sets, short_pcs)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         grnId, product.id, product.name, it.pcs_per_set, Math.round(num(it.colors_count)), it.color_names || null, it.sizes || null,
-        it.sets, it.cost_inr_per_set, it.line_inr, it.landed_lkr, it.landed_per_set_lkr, it.landed_per_pcs_lkr, round2(mrp), round2(expected));
+        it.sets, it.cost_inr_per_set, it.line_inr, it.landed_lkr, it.landed_per_set_lkr, it.landed_per_pcs_lkr, round2(mrp), round2(expected),
+        it.extra_sets, it.extra_pcs, it.short_sets, it.short_pcs);
 
-      moveStock(product.id, it.pcs, 'grn', grn_no, `Received ${it.sets} sets`, date);
+      const notes = [
+        it.extra_pcs && `+${it.extra_pcs} extra pcs`,
+        it.short_sets && `${it.short_sets} sets short`,
+        it.short_pcs && `${it.short_pcs} pcs short`,
+      ].filter(Boolean);
+      moveStock(product.id, it.pcs, 'grn', grn_no, `Received ${it.sets} sets${notes.length ? ` (${notes.join(', ')})` : ''}`, date);
     }
 
     if (paymentType === 'paid' && payable_inr > 0) {
@@ -296,7 +321,7 @@ export function deleteGrn(id) {
   const g = getGrn(id);
   return tx(() => {
     for (const it of g.items) {
-      const pcs = it.sets * it.pcs_per_set;
+      const pcs = Math.max(0, (it.sets + it.extra_sets - it.short_sets) * it.pcs_per_set + it.extra_pcs - it.short_pcs);
       const p = get('SELECT stock_pcs, name FROM products WHERE id = ?', it.product_id);
       if (p.stock_pcs < pcs) fail(`Cannot delete: "${p.name}" from this GRN is already sold (only ${p.stock_pcs} pcs left).`);
       moveStock(it.product_id, -pcs, 'grn-delete', g.grn_no, 'GRN deleted');

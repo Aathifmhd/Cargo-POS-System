@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 
+/* ---------------- catalogue (Settings → Categories, products & sizes) ---------------- */
+/** [{ name, sizes: [], types: [] }] from settings.catalog */
+export function parseCatalog(settings) {
+  try {
+    const list = JSON.parse(settings?.catalog || '[]');
+    return Array.isArray(list) ? list.filter((c) => c && c.name).map((c) => ({ name: c.name, sizes: c.sizes || [], types: c.types || [], reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) })) : [];
+  } catch { return []; }
+}
+export const findCategory = (catalog, name) => catalog.find((c) => c.name.toLowerCase() === String(name || '').trim().toLowerCase());
+
 /* ---------------- theme (light by default, or dark) ---------------- */
 const THEME_KEY = 'cargo-pos-theme';
 export const getThemePref = () => { try { return localStorage.getItem(THEME_KEY) === 'dark' ? 'dark' : 'light'; } catch { return 'light'; } };
@@ -107,14 +117,9 @@ export const inr = (v) => '₹ ' + fmt2.format(n(v));
 export const int = (v) => fmt0.format(n(v));
 export const pct = (v) => (isFinite(v) ? `${n(v).toFixed(1)}%` : '—');
 
-/** "12 sets + 3 pcs" */
-export function stockText(pcs, perSet) {
-  pcs = n(pcs);
-  perSet = Math.max(1, n(perSet));
-  if (perSet === 1) return `${int(pcs)} pcs`;
-  const sets = Math.trunc(pcs / perSet);
-  const loose = pcs - sets * perSet;
-  return loose ? `${int(sets)} sets + ${loose} pcs` : `${int(sets)} sets`;
+/** Stock is shown in pieces, e.g. "58 pcs" (the shop sells by the piece). */
+export function stockText(pcs) {
+  return `${int(n(pcs))} pcs`;
 }
 
 /** profit margin on selling price */
@@ -153,23 +158,40 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   const lines = items.map((it) => {
     const sets = Math.max(0, Math.round(n(it.sets)));
     const pcsPerSet = Math.max(1, Math.round(n(it.pcs_per_set) || 1));
-    const line_inr = r2(sets * n(it.cost_inr_per_set));
-    return { sets, pcs_per_set: pcsPerSet, line_inr, pcs: sets * pcsPerSet };
+    const cost = n(it.cost_inr_per_set);
+    const q = (v) => Math.max(0, Math.round(n(v)));
+    // extra pieces are billed by the supplier at the per-piece price;
+    // shorts are still paid in full, so their cost is spread over the pieces that did arrive
+    const extra_pcs = q(it.extra_pcs);
+    const extra_sets = q(it.extra_sets); // older GRNs only: free sets, not billed
+    const short_sets = q(it.short_sets);
+    const short_pcs = q(it.short_pcs);
+    const line_inr = r2(sets * cost + extra_pcs * (cost / pcsPerSet));
+    return {
+      sets, pcs_per_set: pcsPerSet, line_inr, extra_sets, extra_pcs, short_sets, short_pcs,
+      set_pcs: sets * pcsPerSet,                       // pieces in the billed sets
+      billed_pcs: sets * pcsPerSet + extra_pcs,        // pieces on the supplier's bill
+      pcs: Math.max(0, (sets + extra_sets - short_sets) * pcsPerSet + extra_pcs - short_pcs), // pieces really received
+      // the supplier's price for one piece, in LKR
+      bill_per_pcs_lkr: r2((n(it.cost_inr_per_set) / pcsPerSet) * rate),
+    };
   });
   const goods_inr = r2(lines.reduce((s, l) => s + l.line_inr, 0));
   const cargo_inr = n(cargo_charge_inr);
   const expenses_lkr = r2((expenses || []).reduce((s, e) => s + n(e.amount_lkr), 0));
   const overhead = cargo_inr * rate + expenses_lkr;
   const total_pcs = lines.reduce((s, l) => s + l.pcs, 0);
-  const total_sets = lines.reduce((s, l) => s + l.sets, 0);
+  const total_sets = lines.reduce((s, l) => s + Math.max(0, l.sets + l.extra_sets - l.short_sets), 0);
+  // a line's landed cost is spread over every piece received (billed + free)
   const out = lines.map((l) => {
     const share = goods_inr > 0 ? l.line_inr / goods_inr : total_pcs > 0 ? l.pcs / total_pcs : 0;
     const landed = l.line_inr * rate + share * overhead;
+    const perPcs = l.pcs ? landed / l.pcs : 0;
     return {
       ...l,
       landed_lkr: r2(landed),
-      landed_per_set_lkr: l.sets ? r2(landed / l.sets) : 0,
-      landed_per_pcs_lkr: l.pcs ? r2(landed / l.pcs) : 0,
+      landed_per_set_lkr: r2(perPcs * l.pcs_per_set),
+      landed_per_pcs_lkr: r2(perPcs),
     };
   });
   const total_lkr = r2((goods_inr + cargo_inr) * rate + expenses_lkr);
@@ -182,3 +204,20 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
 
 export const PAY_METHODS_SUPPLIER = ['Bank transfer', 'Hawala', 'Cash', 'Cheque', 'UPI / Online'];
 export const PAY_METHODS_CUSTOMER = ['Cash', 'Bank transfer', 'Cheque', 'Card', 'Online'];
+
+/* ---------------- automatic selling price & MRP (Settings → Price & billing) ---------------- */
+/** The pricing rules from settings: % added to the landed cost, and the step prices are rounded up to. */
+export const priceRules = (settings) => ({
+  selling: n(settings?.selling_markup_percent ?? 30),
+  mrp: n(settings?.mrp_markup_percent ?? 40),
+  round: Math.max(1, n(settings?.price_round_to) || 1),
+});
+const roundUp = (v, step) => Math.ceil(v / step - 1e-9) * step;
+/** Prices per piece and per set worked out from the landed cost per piece. */
+export function autoPrices(costPerPcs, pcsPerSet, rules) {
+  if (!(costPerPcs > 0)) return null;
+  const pps = Math.max(1, Math.round(n(pcsPerSet) || 1));
+  const expectedPcs = roundUp(costPerPcs * (1 + rules.selling / 100), rules.round);
+  const mrpPcs = roundUp(costPerPcs * (1 + rules.mrp / 100), rules.round);
+  return { expected_per_pcs: expectedPcs, mrp_per_pcs: mrpPcs, expected_per_set: expectedPcs * pps, mrp_per_set: mrpPcs * pps };
+}

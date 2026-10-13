@@ -1,21 +1,68 @@
 import { Router } from 'express';
-import { all, get, run, round2, todayStr, addDays, getSettings, DB_FILE } from '../db.js';
+import { all, get, run, fail, round2, todayStr, addDays, getSettings, DB_FILE } from '../db.js';
 import { supplierBills, customerBills } from '../services.js';
-import { guard } from '../auth.js';
+import { guard, audit } from '../auth.js';
 
 const r = Router();
 
+/** Settings → Categories, products & sizes: keep it a tidy list of { name, sizes[], types[] }. */
+function cleanCatalog(raw) {
+  let list;
+  try { list = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { fail('The category list could not be read'); }
+  if (!Array.isArray(list)) fail('The category list could not be read');
+  const uniq = (arr) => [...new Set((Array.isArray(arr) ? arr : []).map((x) => String(x).trim()).filter(Boolean))];
+  const seen = new Set();
+  const out = [];
+  for (const c of list) {
+    const name = String(c?.name || '').trim();
+    if (!name) continue;
+    if (seen.has(name.toLowerCase())) fail(`The category "${name}" is listed twice`);
+    seen.add(name.toLowerCase());
+    out.push({ name, sizes: uniq(c.sizes), types: uniq(c.types), reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) });
+  }
+  return JSON.stringify(out);
+}
+
 /* ---------------- settings ---------------- */
 r.get('/settings', (req, res) => res.json(getSettings()));
+/** Receive Goods → "+ Add product": add one product to a category's list (any signed-in user). */
+r.post('/catalog/products', (req, res) => {
+  const category = String(req.body?.category || '').trim();
+  const product = String(req.body?.product || '').trim();
+  if (!category || !product) fail('Choose a category and type the product name');
+  const list = JSON.parse(getSettings().catalog || '[]');
+  const cat = list.find((c) => c.name.toLowerCase() === category.toLowerCase());
+  if (!cat) fail(`"${category}" is not in the category list`);
+  cat.types = cat.types || [];
+  const existing = cat.types.find((t) => t.toLowerCase() === product.toLowerCase());
+  if (!existing) {
+    cat.types.push(product);
+    run('UPDATE settings SET value = ? WHERE key = ?', cleanCatalog(list), 'catalog');
+    audit(req.user, `Added product "${product}" to ${cat.name}`);
+  }
+  res.json({ catalog: getSettings().catalog, product: existing || product });
+});
+
 r.put('/settings', (req, res) => {
   const old = getSettings();
   // the exchange rate has its own endpoint (/api/fx); never overwrite it from here
   for (const k of Object.keys(req.body || {})) if (k === 'default_exchange_rate' || k.startsWith('fx_')) delete req.body[k];
+  if ('catalog' in (req.body || {})) req.body.catalog = cleanCatalog(req.body.catalog);
   const changed = Object.keys(req.body || {}).filter((k) => String(req.body[k] ?? '') !== String(old[k] ?? ''));
   if (!changed.length) return res.json(old);
   guard(req, `Settings changed: ${changed.join(', ')}`);
   for (const [k, v] of Object.entries(req.body || {})) {
     run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, String(v ?? ''));
+  }
+  // a category's re-order level that changed applies to every product in that category
+  if (changed.includes('catalog')) {
+    let before = [];
+    try { before = JSON.parse(old.catalog || '[]'); } catch { /* treat as empty */ }
+    for (const c of JSON.parse(req.body.catalog)) {
+      const prev = before.find((b) => b.name.toLowerCase() === c.name.toLowerCase());
+      if (Number(prev?.reorder_sets || 0) === c.reorder_sets) continue;
+      run('UPDATE products SET reorder_sets = ? WHERE LOWER(category) = LOWER(?)', c.reorder_sets, c.name);
+    }
   }
   res.json(getSettings());
 });
@@ -151,7 +198,9 @@ r.get('/reports/shipments', (req, res) => {
       WHERE g.date BETWEEN ? AND ? ORDER BY g.date DESC`, from, to);
   const byCargo = all(
     `SELECT COALESCE(cargo_name, 'Not set') AS cargo_name, COUNT(*) AS shipments, SUM(goods_inr) AS goods_inr,
-            SUM(cargo_charge_inr) AS cargo_inr, SUM(cargo_charge_inr * exchange_rate) AS cargo_lkr,
+            SUM(cargo_charge_inr) AS cargo_inr,
+            -- cargo paid in rupees on older GRNs + 'Cargo …' lines paid in LKR
+            SUM(cargo_charge_inr * exchange_rate + COALESCE((SELECT SUM(amount_lkr) FROM grn_expenses e WHERE e.grn_id = grns.id AND e.label LIKE 'Cargo%'), 0)) AS cargo_lkr,
             SUM(expenses_lkr) AS expenses_lkr, SUM(total_lkr) AS total_lkr, SUM(total_pcs) AS pcs
        FROM grns WHERE date BETWEEN ? AND ? GROUP BY COALESCE(cargo_name, 'Not set') ORDER BY total_lkr DESC`, from, to);
   const bySupplier = all(

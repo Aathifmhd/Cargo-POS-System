@@ -11,6 +11,7 @@ import SaleView from './pages/SaleView.jsx';
 import GrnList from './pages/GrnList.jsx';
 import GrnForm from './pages/GrnForm.jsx';
 import GrnView from './pages/GrnView.jsx';
+import ExtraShort from './pages/ExtraShort.jsx';
 import Stock from './pages/Stock.jsx';
 import Suppliers from './pages/Suppliers.jsx';
 import SupplierView from './pages/SupplierView.jsx';
@@ -102,6 +103,7 @@ export default function App() {
                   <Route path="/grn" element={<GrnList />} />
                   <Route path="/grn/new" element={<GrnForm />} />
                   <Route path="/grn/:id" element={<GrnView />} />
+                  <Route path="/extra-short" element={<ExtraShort />} />
                   <Route path="/stock" element={<Stock />} />
                   <Route path="/suppliers" element={<Suppliers />} />
                   <Route path="/suppliers/:id" element={<SupplierView />} />

@@ -1,4 +1,4 @@
-import { all, get, run, getSettings, round2 } from './db.js';
+import { find, findOne, insert, getSettings, setSetting, round2, inParallel } from './db.js';
 
 /*
  * Live INR → LKR rate.
@@ -39,61 +39,64 @@ const SOURCES = [
   },
 ];
 
-const setSetting = (k, v) => run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, String(v ?? ''));
-export const currentRate = () => Number(getSettings().default_exchange_rate) || 0;
+export const currentRate = async () => Number((await getSettings()).default_exchange_rate) || 0;
 
-function applyRate(rate, source) {
+async function applyRate(rate, source) {
   const r = Math.round(rate * 10000) / 10000;
-  const old = currentRate();
-  setSetting('default_exchange_rate', r);
-  setSetting('fx_source', source);
-  setSetting('fx_updated_at', new Date().toISOString());
-  const last = get('SELECT rate, at FROM fx_rates ORDER BY id DESC LIMIT 1');
+  const old = await currentRate();
+  await setSetting('default_exchange_rate', r);
+  await setSetting('fx_source', source);
+  await setSetting('fx_updated_at', new Date().toISOString());
+  const last = await findOne('fx_rates', {}, { sort: { id: -1 } });
   // keep a history point when the rate moves, and at least one per hour
   if (!last || last.rate !== r || Date.now() - new Date(last.at).getTime() > 3600_000) {
-    run('INSERT INTO fx_rates (at, rate, source) VALUES (?, ?, ?)', new Date().toISOString(), r, source);
+    await insert('fx_rates', { at: new Date().toISOString(), rate: r, source });
   }
   if (old !== r) onChange(r);
   return r;
 }
 
 export async function refreshRate() {
-  const s = getSettings();
+  const s = await getSettings();
   if (s.fx_mode === 'manual') return fxStatus();
   const errors = [];
   for (const src of SOURCES) {
     try {
       const rate = await src.rate();
       if (!(rate > 1 && rate < 20)) throw new Error(`odd value ${rate}`);   // sanity: INR→LKR is a few rupees
-      applyRate(rate, src.name);
-      setSetting('fx_error', '');
+      await applyRate(rate, src.name);
+      await setSetting('fx_error', '');
       return fxStatus();
     } catch (e) {
       errors.push(`${src.name}: ${e.message}`);
     }
   }
-  setSetting('fx_error', `Could not get the live rate (${errors.join('; ')}). Using the last known rate.`);
+  await setSetting('fx_error', `Could not get the live rate (${errors.join('; ')}). Using the last known rate.`);
   return fxStatus();
 }
 
-export function setManualRate(rate) {
-  setSetting('fx_mode', 'manual');
-  setSetting('fx_error', '');
-  applyRate(rate, 'Entered by hand');
+export async function setManualRate(rate) {
+  await setSetting('fx_mode', 'manual');
+  await setSetting('fx_error', '');
+  await applyRate(rate, 'Entered by hand');
   return fxStatus();
 }
 
 export async function setAutoMode() {
-  setSetting('fx_mode', 'auto');
+  await setSetting('fx_mode', 'auto');
   return refreshRate();
 }
 
-export function fxStatus() {
-  const s = getSettings();
-  const rate = currentRate();
-  const dayAgo = get(`SELECT rate FROM fx_rates WHERE at <= ? ORDER BY id DESC LIMIT 1`, new Date(Date.now() - 24 * 3600_000).toISOString())
-    || get('SELECT rate FROM fx_rates ORDER BY id ASC LIMIT 1');
-  const history = all(`SELECT at, rate FROM fx_rates ORDER BY id DESC LIMIT 60`).reverse();
+export async function fxStatus() {
+  const [s, before, first, recent] = await inParallel(
+    () => getSettings(),
+    () => findOne('fx_rates', { at: { $lte: new Date(Date.now() - 24 * 3600_000).toISOString() } }, { sort: { id: -1 } }),
+    () => findOne('fx_rates', {}, { sort: { id: 1 } }),
+    () => find('fx_rates', {}, { sort: { id: -1 }, limit: 60, project: { at: 1, rate: 1 } }),
+  );
+  const rate = Number(s.default_exchange_rate) || 0;
+  const dayAgo = before || first;
+  const history = recent.reverse();
   return {
     rate,
     mode: s.fx_mode || 'auto',
@@ -113,7 +116,7 @@ export function fxStatus() {
  */
 let inFlight = null;
 export async function ensureFreshRate() {
-  const s = getSettings();
+  const s = await getSettings();
   const age = s.fx_updated_at ? Date.now() - new Date(s.fx_updated_at).getTime() : Infinity;
   if (s.fx_mode === 'manual' || age < REFRESH_MS) return fxStatus();
   inFlight ??= refreshRate().finally(() => { inFlight = null; });

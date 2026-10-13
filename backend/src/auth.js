@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { get, run, HttpError } from './db.js';
+import { findOne, insert, updateOne, getSettings, setSetting, HttpError, stamp, inParallel } from './db.js';
+import { connect } from './db.js';
 
 const SESSION_HOURS = 12;
 const APPROVAL_MINUTES = 3;
@@ -25,12 +26,22 @@ export const RANK = { cashier: 0, admin: 1, superadmin: 2 };
 export const rankOf = (u) => RANK[u?.role] ?? 0;
 export const ROLE_NAME = { cashier: 'Cashier', admin: 'Admin', superadmin: 'Super Admin' };
 
-// First run: create the default admin (admin / admin123) and super admin (superadmin / Superadmin123).
-if (!get('SELECT id FROM users LIMIT 1')) {
-  run(`INSERT INTO users (username, name, password_hash, role) VALUES ('admin', 'Administrator', ?, 'admin')`, hashPassword('admin123'));
-}
-if (!get(`SELECT id FROM users WHERE role = 'superadmin' LIMIT 1`)) {
-  run(`INSERT INTO users (username, name, password_hash, role) VALUES ('superadmin', 'Super Admin', ?, 'superadmin')`, hashPassword('Superadmin123'));
+const NOCASE = { locale: 'en', strength: 2 };   // usernames are not case-sensitive
+export const userByName = (username, onlyActive = true) =>
+  findOne('users', { username: String(username || '').trim(), ...(onlyActive ? { active: 1 } : {}) }, { collation: NOCASE });
+
+/* ---------------- start-up: default logins + the token secret ---------------- */
+let SECRET = null;
+export async function initAuth() {
+  await connect();
+  // First run: create the default admin (admin / admin123) and super admin (superadmin / Superadmin123).
+  if (!(await findOne('users', {}))) {
+    await insert('users', { username: 'admin', name: 'Administrator', password_hash: hashPassword('admin123'), role: 'admin' });
+  }
+  if (!(await findOne('users', { role: 'superadmin' }))) {
+    await insert('users', { username: 'superadmin', name: 'Super Admin', password_hash: hashPassword('Superadmin123'), role: 'superadmin' });
+  }
+  SECRET = await loadSecret();
 }
 
 /* ---------------- login throttling (per username, in memory) ---------------- */
@@ -49,9 +60,9 @@ export function noteFailure(username) {
 export const clearFailures = (username) => failures.delete(String(username).toLowerCase());
 
 /** Check username + password; returns the user or throws. */
-export function checkCredentials(username, password) {
+export async function checkCredentials(username, password) {
   checkThrottle(username);
-  const u = get('SELECT * FROM users WHERE username = ? AND active = 1', String(username || '').trim());
+  const u = await userByName(username);
   if (!u || !verifyPassword(password, u.password_hash)) {
     noteFailure(username);
     throw new HttpError(401, 'Wrong username or password');
@@ -61,28 +72,20 @@ export function checkCredentials(username, password) {
 }
 
 /* ---------------- signed tokens ----------------
- * Login sessions and admin approvals are self-contained signed tokens (payload + HMAC), so ANY copy of
- * the backend can check them without looking anything up. This matters on Vercel, where several copies
- * run at once and each has its own database: a login made on one copy must work on the next one.
- * - The user is named by username (the same on every copy), not by database id.
- * - Each user has a login version (users.token_version, the same on every copy); changing a password
- *   bumps it, which ends older logins.
- * - SESSION_SECRET (env) signs the tokens. Locally a random secret is kept in the database.
+ * Login sessions and admin approvals are self-contained signed tokens (payload + HMAC), so any copy of
+ * the backend can check them. Each user has a login version (users.token_version); changing a password
+ * bumps it, which ends older logins. SESSION_SECRET (env) signs the tokens; without it a random secret
+ * is kept in the database (shared by every copy, since they all use the same MongoDB).
  */
-function loadSecret() {
+async function loadSecret() {
   if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
-  if (process.env.VERCEL) {
-    console.warn('SESSION_SECRET is not set — using the built-in demo secret. Set it in Vercel → Settings → Environment Variables.');
-    return 'cargo-pos-demo-secret--set-SESSION_SECRET-on-vercel';
-  }
-  let s = get(`SELECT value FROM settings WHERE key = 'session_secret'`)?.value;
+  let s = (await getSettings()).session_secret;
   if (!s) {
     s = crypto.randomBytes(32).toString('hex');
-    run(`INSERT INTO settings (key, value) VALUES ('session_secret', ?)`, s);
+    await setSetting('session_secret', s);
   }
   return s;
 }
-const SECRET = loadSecret();
 const b64 = (buf) => Buffer.from(buf).toString('base64url');
 const mac = (data) => crypto.createHmac('sha256', SECRET).update(data).digest('base64url');
 
@@ -92,7 +95,7 @@ function sign(payload) {
 }
 function verify(token) {
   const [body, sig] = String(token || '').split('.');
-  if (!body || !sig) return null;
+  if (!body || !sig || !SECRET) return null;
   const good = Buffer.from(mac(body));
   const given = Buffer.from(sig);
   if (good.length !== given.length || !crypto.timingSafeEqual(good, given)) return null;
@@ -101,18 +104,16 @@ function verify(token) {
     return p.exp > Date.now() ? p : null;
   } catch { return null; }
 }
-const activeUser = (username) => get('SELECT * FROM users WHERE username = ? AND active = 1', username);
+const tokenId = (token) => crypto.createHash('sha256').update(String(token)).digest('base64url');
 
-// Logged-out tokens (kept on this copy until they would have expired anyway).
-const loggedOut = new Map();
-export function endSession(token) {
+/** Log out: the token is remembered as ended (in the database, so every copy knows) until it would expire. */
+export async function endSession(token) {
   const p = verify(token);
-  if (p) loggedOut.set(token, p.exp);
-  for (const [t, exp] of loggedOut) if (exp < Date.now()) loggedOut.delete(t);
+  if (p) await updateOne('revoked_tokens', { _id: tokenId(token) }, { $set: { exp: new Date(p.exp) } }, { upsert: true }).catch(() => {});
 }
 
-export function createSession(user) {
-  run('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', user.id);
+export async function createSession(user) {
+  await updateOne('users', { id: user.id }, { $set: { last_login: stamp() } });
   return sign({ t: 's', u: user.username, v: (user.token_version ?? 0), exp: Date.now() + SESSION_HOURS * 3600_000 });
 }
 
@@ -124,11 +125,15 @@ export function createApproval(approver, user, action) {
 }
 
 /* ---------------- middleware ---------------- */
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const header = req.get('Authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  const p = token && !loggedOut.has(token) ? verify(token) : null;
-  const user = p && p.t === 's' ? activeUser(p.u) : null;
+  const p = token ? verify(token) : null;
+  // is the login ended? + who is it? — read together (one round-trip)
+  const [revoked, found] = p && p.t === 's'
+    ? await inParallel(() => findOne('revoked_tokens', { _id: tokenId(token) }), () => userByName(p.u))
+    : [null, null];
+  const user = revoked ? null : found;
   if (!user || (user.token_version ?? 0) !== p.v) return res.status(401).json({ error: 'Please log in again' });
   req.user = user;
   req.token = token;
@@ -140,29 +145,26 @@ export function adminOnly(req, res, next) {
   next();
 }
 
-export function audit(user, action, approvedBy = null) {
-  run('INSERT INTO audit_log (user_id, username, action, approved_by) VALUES (?, ?, ?, ?)',
-    user?.id ?? null, user?.username ?? null, action, approvedBy);
-}
+export const audit = (user, action, approvedBy = null) =>
+  insert('audit_log', { at: stamp(), user_id: user?.id ?? null, username: user?.username ?? null, action, approved_by: approvedBy });
 
 /**
  * Protected change. A user at or above `level` passes straight through. Anyone else needs a one-time
  * approval token (header X-Approval) created with the password of someone at that level.
  * Without one, the API answers 403 { needApproval, level } and the app asks for those credentials.
- * level: 'admin' (most changes) or 'superadmin' (credit limits).
+ * level: 'admin' (most changes) or 'superadmin'.
+ * always: ask for the password even when the logged-in user already has the level (e.g. deleting a bill).
  */
-/** always: ask for the password even when the logged-in user already has the level (e.g. deleting a bill). */
-export function guard(req, action, level = 'admin', { always = false } = {}) {
+export async function guard(req, action, level = 'admin', { always = false } = {}) {
   if (!always && rankOf(req.user) >= RANK[level]) {
-    audit(req.user, action);
+    await audit(req.user, action);
     return;
   }
   const p = verify(req.get('X-Approval'));
-  const approver = p && p.t === 'a' && p.for === req.user.username ? activeUser(p.by) : null;
-  const ok = approver && (approver.token_version ?? 0) === p.v && rankOf(approver) >= RANK[level] && !usedApprovals.has(p.n);
+  const approver = p && p.t === 'a' && p.for === req.user.username ? await userByName(p.by) : null;
+  const used = approver ? await findOne('used_approvals', { _id: p.n }) : null;
+  const ok = approver && !used && (approver.token_version ?? 0) === p.v && rankOf(approver) >= RANK[level];
   if (!ok) throw new HttpError(403, `${ROLE_NAME[level]} approval needed: ${action}`, { needApproval: true, action, level });
-  usedApprovals.set(p.n, p.exp);   // one use only
-  for (const [n, exp] of usedApprovals) if (exp < Date.now()) usedApprovals.delete(n);
-  audit(req.user, action, approver.username);
+  await updateOne('used_approvals', { _id: p.n }, { $set: { exp: new Date(p.exp) } }, { upsert: true });   // one use only
+  await audit(req.user, action, approver.username);
 }
-const usedApprovals = new Map();

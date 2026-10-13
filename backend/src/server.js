@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
-import { get } from './db.js';
+import { setup } from './db.js';
 import suppliers from './routes/suppliers.js';
 import customers from './routes/customers.js';
 import products from './routes/products.js';
@@ -10,16 +10,14 @@ import grns from './routes/grns.js';
 import sales from './routes/sales.js';
 import reports from './routes/reports.js';
 import authRoutes from './routes/auth.js';
-import { requireAuth } from './auth.js';
+import { requireAuth, initAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
 import { setOnRateChange, startFxTimer } from './fx.js';
 import { revalueGrns } from './services.js';
 
-// Demo deployment on Vercel: each new instance starts with an empty /tmp database,
-// so fill it with the demo data (suppliers, stock, bills) instead of an empty shop.
-if (process.env.VERCEL && get('SELECT COUNT(*) AS n FROM products').n === 0) {
-  await import('./seed.js');
-}
+// Connect to MongoDB, create indexes / default settings / default logins (safe on every start).
+await setup();
+await initAuth();
 
 const app = express();
 app.use(cors());
@@ -58,5 +56,5 @@ app.listen(PORT, () => console.log(`Cargo POS API running on http://localhost:${
 
 // The live INR rate is shown on the dashboard only — costs always use the fixed costing rate (Settings).
 setOnRateChange((rate) => console.log(`Live INR rate now ${rate}`));
-revalueGrns();
-startFxTimer();
+revalueGrns().catch((e) => console.error('Re-costing GRNs failed:', e.message));
+if (!process.env.VERCEL) startFxTimer();   // on Vercel the rate is refreshed when the dashboard asks for it

@@ -1,9 +1,17 @@
 import { Router } from 'express';
-import { all, get, run, fail, round2, todayStr, addDays, getSettings, DB_FILE } from '../db.js';
-import { supplierBills, customerBills, revalueGrns } from '../services.js';
+import {
+  find, updateMany, fail, round2, sum, todayStr, addDays, getSettings, setSetting, DB_LABEL, COLLECTIONS, inParallel,
+} from '../db.js';
+import { supplierLedgers, customerLedgers, revalueGrns } from '../services.js';
 import { guard, audit } from '../auth.js';
 
 const r = Router();
+
+/** Settings without the secret that signs logins and approvals (never sent to the browser). */
+const publicSettings = async () => {
+  const { session_secret, ...rest } = await getSettings();
+  return rest;
+};
 
 /** Settings → Categories, products & sizes: keep it a tidy list of { name, sizes[], types[] }. */
 function cleanCatalog(raw) {
@@ -31,14 +39,15 @@ function cleanCatalog(raw) {
 }
 
 /* ---------------- settings ---------------- */
-r.get('/settings', (req, res) => res.json(getSettings()));
+r.get('/settings', async (req, res) => res.json(await publicSettings()));
+
 /** Receive Goods → "+ Add name": add one product name under a category's product (any signed-in user). */
-r.post('/catalog/names', (req, res) => {
+r.post('/catalog/names', async (req, res) => {
   const category = String(req.body?.category || '').trim();
   const product = String(req.body?.product || '').trim();
   const pname = String(req.body?.name || '').trim();
   if (!category || !product || !pname) fail('Choose the category and product, and type the product name');
-  const list = JSON.parse(getSettings().catalog || '[]');
+  const list = JSON.parse((await getSettings()).catalog || '[]');
   const cat = list.find((c) => c.name.toLowerCase() === category.toLowerCase());
   if (!cat) fail(`"${category}" is not in the category list`);
   const type = (cat.types || []).find((t) => t.toLowerCase() === product.toLowerCase());
@@ -48,207 +57,264 @@ r.post('/catalog/names', (req, res) => {
   const existing = names.find((x) => x.toLowerCase() === pname.toLowerCase());
   if (!existing) {
     names.push(pname);
-    run('UPDATE settings SET value = ? WHERE key = ?', cleanCatalog(list), 'catalog');
-    audit(req.user, `Added product name "${pname}" to ${cat.name} › ${type}`);
+    await setSetting('catalog', cleanCatalog(list));
+    await audit(req.user, `Added product name "${pname}" to ${cat.name} › ${type}`);
   }
-  res.json({ catalog: getSettings().catalog, name: existing || pname });
+  res.json({ catalog: (await getSettings()).catalog, name: existing || pname });
 });
 
 /** Receive Goods → "+ Add product": add one product to a category's list (any signed-in user). */
-r.post('/catalog/products', (req, res) => {
+r.post('/catalog/products', async (req, res) => {
   const category = String(req.body?.category || '').trim();
   const product = String(req.body?.product || '').trim();
   if (!category || !product) fail('Choose a category and type the product name');
-  const list = JSON.parse(getSettings().catalog || '[]');
+  const list = JSON.parse((await getSettings()).catalog || '[]');
   const cat = list.find((c) => c.name.toLowerCase() === category.toLowerCase());
   if (!cat) fail(`"${category}" is not in the category list`);
   cat.types = cat.types || [];
   const existing = cat.types.find((t) => t.toLowerCase() === product.toLowerCase());
   if (!existing) {
     cat.types.push(product);
-    run('UPDATE settings SET value = ? WHERE key = ?', cleanCatalog(list), 'catalog');
-    audit(req.user, `Added product "${product}" to ${cat.name}`);
+    await setSetting('catalog', cleanCatalog(list));
+    await audit(req.user, `Added product "${product}" to ${cat.name}`);
   }
-  res.json({ catalog: getSettings().catalog, product: existing || product });
+  res.json({ catalog: (await getSettings()).catalog, product: existing || product });
 });
 
-r.put('/settings', (req, res) => {
-  const old = getSettings();
-  // the exchange rate has its own endpoint (/api/fx); never overwrite it from here
-  for (const k of Object.keys(req.body || {})) if (k === 'default_exchange_rate' || k.startsWith('fx_')) delete req.body[k];
-  if ('catalog' in (req.body || {})) req.body.catalog = cleanCatalog(req.body.catalog);
-  if ('costing_rate' in (req.body || {}) && !(Number(req.body.costing_rate) > 0)) fail('The costing rate must be more than 0');
-  const changed = Object.keys(req.body || {}).filter((k) => String(req.body[k] ?? '') !== String(old[k] ?? ''));
-  if (!changed.length) return res.json(old);
-  guard(req, `Settings changed: ${changed.join(', ')}`);
-  for (const [k, v] of Object.entries(req.body || {})) {
-    run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, String(v ?? ''));
-  }
+r.put('/settings', async (req, res) => {
+  const old = await getSettings();
+  const body = { ...(req.body || {}) };
+  // the exchange rate has its own endpoint (/api/fx), and the token secret is never changed from here
+  for (const k of Object.keys(body)) if (k === 'default_exchange_rate' || k.startsWith('fx_') || k === 'session_secret') delete body[k];
+  if ('catalog' in body) body.catalog = cleanCatalog(body.catalog);
+  if ('costing_rate' in body && !(Number(body.costing_rate) > 0)) fail('The costing rate must be more than 0');
+  const changed = Object.keys(body).filter((k) => String(body[k] ?? '') !== String(old[k] ?? ''));
+  if (!changed.length) return res.json(await publicSettings());
+  await guard(req, `Settings changed: ${changed.join(', ')}`);
+  for (const [k, v] of Object.entries(body)) await setSetting(k, v);
   // a category's re-order level that changed applies to every product in that category
   if (changed.includes('catalog')) {
     let before = [];
     try { before = JSON.parse(old.catalog || '[]'); } catch { /* treat as empty */ }
-    for (const c of JSON.parse(req.body.catalog)) {
+    for (const c of JSON.parse(body.catalog)) {
       const prev = before.find((b) => b.name.toLowerCase() === c.name.toLowerCase());
       if (Number(prev?.reorder_sets || 0) === c.reorder_sets) continue;
-      run('UPDATE products SET reorder_sets = ? WHERE LOWER(category) = LOWER(?)', c.reorder_sets, c.name);
+      const exact = new RegExp(`^${c.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+      await updateMany('products', { category: exact }, { $set: { reorder_sets: c.reorder_sets } });
     }
   }
   // a new costing rate re-costs every GRN and product
-  if (changed.includes('costing_rate')) revalueGrns();
-  res.json(getSettings());
+  if (changed.includes('costing_rate')) await revalueGrns();
+  res.json(await publicSettings());
 });
 
 /* ---------------- payables / receivables ---------------- */
-function allPayables() {
-  return all('SELECT id FROM suppliers').flatMap((s) => supplierBills(s.id)).filter((b) => b.balance > 0.009);
-}
-function allReceivables() {
-  return all('SELECT id FROM customers').flatMap((c) => customerBills(c.id)).filter((b) => b.balance > 0.009);
-}
+const allPayables = async () => [...(await supplierLedgers()).values()].flat().filter((b) => b.balance > 0.009);
+const allReceivables = async () => [...(await customerLedgers()).values()].flat().filter((b) => b.balance > 0.009);
 const byDue = (a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999');
 
-r.get('/dues/payables', (req, res) => res.json(allPayables().sort(byDue)));
-r.get('/dues/receivables', (req, res) => res.json(allReceivables().sort(byDue)));
+r.get('/dues/payables', async (req, res) => res.json((await allPayables()).sort(byDue)));
+r.get('/dues/receivables', async (req, res) => res.json((await allReceivables()).sort(byDue)));
+
+/* ---------------- shared sums ---------------- */
+const inRange = (from, to) => ({ $gte: from, $lte: to });
+/** totals of completed bills: count, sales, profit, cash, credit */
+const billTotals = (sales) => ({
+  bills: sales.length,
+  sales: sum(sales, (s) => s.total),
+  profit: sum(sales, (s) => s.total - s.cost_total),
+  cash: sum(sales.filter((s) => s.payment_type === 'cash'), (s) => s.total),
+  credit: sum(sales.filter((s) => s.payment_type === 'credit'), (s) => s.total),
+});
+const desc = (key) => (a, b) => (b[key] || 0) - (a[key] || 0);
+const lowStock = (p) => p.stock_pcs < p.reorder_sets * p.pcs_per_set;
 
 /* ---------------- dashboard ---------------- */
-r.get('/dashboard', (req, res) => {
+r.get('/dashboard', async (req, res) => {
   const today = todayStr();
   const monthStart = today.slice(0, 8) + '01';
-  const sum = (from, to) => get(
-    `SELECT COUNT(*) AS bills, COALESCE(SUM(total), 0) AS sales, COALESCE(SUM(total - cost_total), 0) AS profit,
-            COALESCE(SUM(CASE WHEN payment_type = 'cash' THEN total END), 0) AS cash,
-            COALESCE(SUM(CASE WHEN payment_type = 'credit' THEN total END), 0) AS credit
-       FROM sales WHERE status = 'completed' AND date BETWEEN ? AND ?`, from, to);
+  const first = [monthStart, addDays(today, -6)].sort()[0];
+  // everything the dashboard needs, read together
+  const [sales, paysToday, payables, receivables, products, recentSales, recent] = await inParallel(
+    () => find('sales', { status: 'completed', date: inRange(first, today) }),
+    () => find('customer_payments', { date: today }, { project: { amount: 1 } }),
+    () => allPayables(),
+    () => allReceivables(),
+    () => find('products', { active: 1 }),
+    () => find('sales', {}, { sort: { id: -1 }, limit: 6, project: { id: 1, invoice_no: 1, date: 1, customer_name: 1, payment_type: 1, total: 1, status: 1 } }),
+    () => find('grns', {}, { sort: { id: -1 }, limit: 4, project: { id: 1, grn_no: 1, date: 1, bale_no: 1, cargo_name: 1, total_lkr: 1, supplier_id: 1 } }),
+  );
+  const between = (from, to) => sales.filter((s) => s.date >= from && s.date <= to);
 
-  const collectedToday = get(`SELECT COALESCE(SUM(amount), 0) AS s FROM customer_payments WHERE date = ?`, today).s
-    + get(`SELECT COALESCE(SUM(paid_at_sale), 0) AS s FROM sales WHERE status = 'completed' AND date = ?`, today).s;
+  const collectedToday = sum(paysToday, (p) => p.amount) + sum(between(today, today), (s) => s.paid_at_sale);
 
   const last7 = [];
   for (let i = 6; i >= 0; i--) {
     const d = addDays(today, -i);
-    const row = sum(d, d);
-    last7.push({ date: d, sales: row.sales, profit: row.profit });
+    const t = billTotals(between(d, d));
+    last7.push({ date: d, sales: t.sales, profit: t.profit });
   }
 
-  const payables = allPayables();
-  const receivables = allReceivables();
-  const stock = get(
-    `SELECT COALESCE(SUM(stock_pcs * cost_per_pcs), 0) AS cost_value,
-            COALESCE(SUM(stock_pcs * expected_per_set / pcs_per_set), 0) AS expected_value,
-            COALESCE(SUM(stock_pcs), 0) AS pcs, COUNT(*) AS products
-       FROM products WHERE active = 1 AND stock_pcs > 0`);
-  const lowStock = all(
-    `SELECT id, code, name, stock_pcs, pcs_per_set, reorder_sets FROM products
-      WHERE active = 1 AND stock_pcs < reorder_sets * pcs_per_set ORDER BY stock_pcs * 1.0 / (reorder_sets * pcs_per_set) LIMIT 8`);
-  const lowCount = get(`SELECT COUNT(*) AS n FROM products WHERE active = 1 AND stock_pcs < reorder_sets * pcs_per_set`).n;
-  const topProducts = all(
-    `SELECT si.product_id, si.name, SUM(si.pcs) AS pcs, SUM(si.line_total) AS amount
-       FROM sale_items si JOIN sales s ON s.id = si.sale_id
-      WHERE s.status = 'completed' AND s.date >= ? GROUP BY si.product_id ORDER BY amount DESC LIMIT 5`, monthStart);
-  const recentSales = all(
-    `SELECT id, invoice_no, date, customer_name, payment_type, total, status FROM sales ORDER BY id DESC LIMIT 6`);
-  const recentGrns = all(
-    `SELECT g.id, g.grn_no, g.date, g.bale_no, g.cargo_name, g.total_lkr, s.name AS supplier_name
-       FROM grns g JOIN suppliers s ON s.id = g.supplier_id ORDER BY g.id DESC LIMIT 4`);
+  const inStock = products.filter((p) => p.stock_pcs > 0);
+  const stock = {
+    cost_value: sum(inStock, (p) => p.stock_pcs * p.cost_per_pcs),
+    expected_value: sum(inStock, (p) => (p.stock_pcs * p.expected_per_set) / p.pcs_per_set),
+    pcs: sum(inStock, (p) => p.stock_pcs),
+    products: inStock.length,
+  };
+  const low = products.filter(lowStock);
+  const lowList = low
+    .map(({ id, code, name, stock_pcs, pcs_per_set, reorder_sets }) => ({ id, code, name, stock_pcs, pcs_per_set, reorder_sets }))
+    .sort((a, b) => a.stock_pcs / (a.reorder_sets * a.pcs_per_set) - b.stock_pcs / (b.reorder_sets * b.pcs_per_set))
+    .slice(0, 8);
+
+  const monthSales = between(monthStart, today);
+  const [monthLines, sList] = await inParallel(
+    () => (monthSales.length ? find('sale_items', { sale_id: { $in: monthSales.map((s) => s.id) } }) : []),
+    () => find('suppliers', { id: { $in: recent.map((g) => g.supplier_id) } }, { project: { id: 1, name: 1 } }),
+  );
+  const top = {};
+  for (const l of monthLines) {
+    const t = (top[l.product_id] ??= { product_id: l.product_id, name: l.name, pcs: 0, amount: 0 });
+    t.pcs += l.pcs;
+    t.amount += l.line_total;
+  }
+  const sNames = Object.fromEntries(sList.map((s) => [s.id, s.name]));
 
   const week = addDays(today, 7);
   res.json({
-    today: sum(today, today),
-    month: sum(monthStart, today),
+    today: billTotals(between(today, today)),
+    month: billTotals(monthSales),
     collectedToday: round2(collectedToday),
     last7,
     payables: {
-      total_inr: round2(payables.reduce((a, b) => a + b.balance, 0)),
-      overdue_inr: round2(payables.filter((b) => b.status === 'overdue').reduce((a, b) => a + b.balance, 0)),
+      total_inr: round2(sum(payables, (b) => b.balance)),
+      overdue_inr: round2(sum(payables.filter((b) => b.status === 'overdue'), (b) => b.balance)),
       upcoming: payables.filter((b) => b.due_date && b.due_date <= week).sort(byDue).slice(0, 6),
     },
     receivables: {
-      total: round2(receivables.reduce((a, b) => a + b.balance, 0)),
-      overdue: round2(receivables.filter((b) => b.status === 'overdue').reduce((a, b) => a + b.balance, 0)),
+      total: round2(sum(receivables, (b) => b.balance)),
+      overdue: round2(sum(receivables.filter((b) => b.status === 'overdue'), (b) => b.balance)),
       upcoming: receivables.filter((b) => b.status === 'overdue' || (b.due_date && b.due_date <= week)).sort(byDue).slice(0, 6),
     },
-    stock: { ...stock, cost_value: round2(stock.cost_value), expected_value: round2(stock.expected_value), low_count: lowCount },
-    lowStock,
-    topProducts,
+    stock: { ...stock, cost_value: round2(stock.cost_value), expected_value: round2(stock.expected_value), low_count: low.length },
+    lowStock: lowList,
+    topProducts: Object.values(top).sort(desc('amount')).slice(0, 5),
     recentSales,
-    recentGrns,
+    recentGrns: recent.filter((g) => sNames[g.supplier_id] !== undefined).map(({ supplier_id, ...g }) => ({ ...g, supplier_name: sNames[supplier_id] })),
   });
 });
 
 /* ---------------- reports ---------------- */
-r.get('/reports/sales', (req, res) => {
+r.get('/reports/sales', async (req, res) => {
   const from = req.query.from || todayStr();
   const to = req.query.to || todayStr();
-  const summary = get(
-    `SELECT COUNT(*) AS bills, COALESCE(SUM(total), 0) AS sales, COALESCE(SUM(cost_total), 0) AS cost,
-            COALESCE(SUM(total - cost_total), 0) AS profit, COALESCE(SUM(discount), 0) AS discount,
-            COALESCE(SUM(CASE WHEN payment_type = 'cash' THEN total END), 0) AS cash,
-            COALESCE(SUM(CASE WHEN payment_type = 'credit' THEN total END), 0) AS credit
-       FROM sales WHERE status = 'completed' AND date BETWEEN ? AND ?`, from, to);
-  summary.collections = get(`SELECT COALESCE(SUM(amount), 0) AS s FROM customer_payments WHERE date BETWEEN ? AND ?`, from, to).s;
-  summary.voided = get(`SELECT COUNT(*) AS n FROM sales WHERE status = 'void' AND date BETWEEN ? AND ?`, from, to).n;
-  const daily = all(
-    `SELECT date, COUNT(*) AS bills, SUM(total) AS sales, SUM(total - cost_total) AS profit,
-            SUM(CASE WHEN payment_type = 'cash' THEN total ELSE 0 END) AS cash,
-            SUM(CASE WHEN payment_type = 'credit' THEN total ELSE 0 END) AS credit
-       FROM sales WHERE status = 'completed' AND date BETWEEN ? AND ? GROUP BY date ORDER BY date`, from, to);
-  const products = all(
-    `SELECT si.product_id, si.code, si.name, SUM(si.pcs) AS pcs, SUM(si.line_total) AS amount,
-            SUM(si.line_total - si.cost_per_unit * si.qty) AS profit
-       FROM sale_items si JOIN sales s ON s.id = si.sale_id
-      WHERE s.status = 'completed' AND s.date BETWEEN ? AND ? GROUP BY si.product_id ORDER BY amount DESC`, from, to);
-  const customers = all(
-    `SELECT customer_id, customer_name, COUNT(*) AS bills, SUM(total) AS amount, SUM(total - cost_total) AS profit
-       FROM sales WHERE status = 'completed' AND date BETWEEN ? AND ? GROUP BY COALESCE(customer_id, customer_name) ORDER BY amount DESC`, from, to);
-  res.json({ from, to, summary, daily, products, customers });
+  const [all, payments] = await inParallel(
+    () => find('sales', { date: inRange(from, to) }),
+    () => find('customer_payments', { date: inRange(from, to) }, { project: { amount: 1 } }),
+  );
+  const sales = all.filter((s) => s.status === 'completed');
+  const t = billTotals(sales);
+  const summary = {
+    bills: t.bills, sales: t.sales, cost: sum(sales, (s) => s.cost_total), profit: t.profit, discount: sum(sales, (s) => s.discount),
+    cash: t.cash, credit: t.credit, collections: sum(payments, (p) => p.amount), voided: all.filter((s) => s.status === 'void').length,
+  };
+  const days = {};
+  for (const s of sales) (days[s.date] ??= []).push(s);
+  const daily = Object.keys(days).sort().map((date) => {
+    const d = billTotals(days[date]);
+    return { date, bills: d.bills, sales: d.sales, profit: d.profit, cash: d.cash, credit: d.credit };
+  });
+  const lines = sales.length ? await find('sale_items', { sale_id: { $in: sales.map((s) => s.id) } }) : [];
+  const prods = {};
+  for (const l of lines) {
+    const p = (prods[l.product_id] ??= { product_id: l.product_id, code: l.code, name: l.name, pcs: 0, amount: 0, profit: 0 });
+    p.pcs += l.pcs;
+    p.amount += l.line_total;
+    p.profit += l.line_total - l.cost_per_unit * l.qty;
+  }
+  const custs = {};
+  for (const s of sales) {
+    const key = s.customer_id ?? `name:${s.customer_name}`;
+    const c = (custs[key] ??= { customer_id: s.customer_id, customer_name: s.customer_name, bills: 0, amount: 0, profit: 0 });
+    c.bills++;
+    c.amount += s.total;
+    c.profit += s.total - s.cost_total;
+  }
+  res.json({ from, to, summary, daily, products: Object.values(prods).sort(desc('amount')), customers: Object.values(custs).sort(desc('amount')) });
 });
 
-r.get('/reports/stock', (req, res) => {
-  const categories = all(
-    `SELECT COALESCE(category, 'Uncategorised') AS category, COUNT(*) AS products, SUM(stock_pcs) AS pcs,
-            SUM(stock_pcs * cost_per_pcs) AS cost_value, SUM(stock_pcs * expected_per_set / pcs_per_set) AS expected_value,
-            SUM(stock_pcs * mrp_per_set / pcs_per_set) AS mrp_value
-       FROM products WHERE active = 1 AND stock_pcs > 0 GROUP BY COALESCE(category, 'Uncategorised') ORDER BY cost_value DESC`);
+r.get('/reports/stock', async (req, res) => {
+  const products = await find('products', { active: 1, stock_pcs: { $gt: 0 } });
+  const cats = {};
+  for (const p of products) {
+    const key = p.category ?? 'Uncategorised';
+    const c = (cats[key] ??= { category: key, products: 0, pcs: 0, cost_value: 0, expected_value: 0, mrp_value: 0 });
+    c.products++;
+    c.pcs += p.stock_pcs;
+    c.cost_value += p.stock_pcs * p.cost_per_pcs;
+    c.expected_value += (p.stock_pcs * p.expected_per_set) / p.pcs_per_set;
+    c.mrp_value += (p.stock_pcs * p.mrp_per_set) / p.pcs_per_set;
+  }
   // slow movers: in stock, nothing sold in 60 days
   const since = addDays(todayStr(), -60);
-  const slow = all(
-    `SELECT p.id, p.code, p.name, p.stock_pcs, p.pcs_per_set, ROUND(p.stock_pcs * p.cost_per_pcs, 2) AS cost_value,
-            (SELECT MAX(s.date) FROM sale_items si JOIN sales s ON s.id = si.sale_id WHERE si.product_id = p.id AND s.status = 'completed') AS last_sold
-       FROM products p WHERE p.active = 1 AND p.stock_pcs > 0
-        AND NOT EXISTS (SELECT 1 FROM sale_items si JOIN sales s ON s.id = si.sale_id
-                         WHERE si.product_id = p.id AND s.status = 'completed' AND s.date >= ?)
-      ORDER BY cost_value DESC LIMIT 50`, since);
-  res.json({ categories, slow });
+  const ids = products.map((p) => p.id);
+  const lines = ids.length ? await find('sale_items', { product_id: { $in: ids } }, { project: { sale_id: 1, product_id: 1 } }) : [];
+  const saleDates = Object.fromEntries((lines.length ? await find('sales', { id: { $in: [...new Set(lines.map((l) => l.sale_id))] }, status: 'completed' }, { project: { id: 1, date: 1 } }) : [])
+    .map((s) => [s.id, s.date]));
+  const lastSold = {};
+  for (const l of lines) {
+    const d = saleDates[l.sale_id];
+    if (d && (!lastSold[l.product_id] || d > lastSold[l.product_id])) lastSold[l.product_id] = d;
+  }
+  const slow = products
+    .filter((p) => !(lastSold[p.id] && lastSold[p.id] >= since))
+    .map((p) => ({ id: p.id, code: p.code, name: p.name, stock_pcs: p.stock_pcs, pcs_per_set: p.pcs_per_set, cost_value: round2(p.stock_pcs * p.cost_per_pcs), last_sold: lastSold[p.id] || null }))
+    .sort(desc('cost_value'))
+    .slice(0, 50);
+  res.json({ categories: Object.values(cats).sort(desc('cost_value')), slow });
 });
 
-r.get('/reports/shipments', (req, res) => {
+r.get('/reports/shipments', async (req, res) => {
   const from = req.query.from || addDays(todayStr(), -30);
   const to = req.query.to || todayStr();
-  const grns = all(
-    `SELECT g.*, s.name AS supplier_name FROM grns g JOIN suppliers s ON s.id = g.supplier_id
-      WHERE g.date BETWEEN ? AND ? ORDER BY g.date DESC`, from, to);
-  const byCargo = all(
-    `SELECT COALESCE(cargo_name, 'Not set') AS cargo_name, COUNT(*) AS shipments, SUM(goods_inr) AS goods_inr,
-            SUM(cargo_charge_inr) AS cargo_inr,
-            -- cargo paid in rupees on older GRNs + 'Cargo …' lines paid in LKR
-            SUM(cargo_charge_inr * exchange_rate + COALESCE((SELECT SUM(amount_lkr) FROM grn_expenses e WHERE e.grn_id = grns.id AND e.label LIKE 'Cargo%'), 0)) AS cargo_lkr,
-            SUM(expenses_lkr) AS expenses_lkr, SUM(total_lkr) AS total_lkr, SUM(total_pcs) AS pcs
-       FROM grns WHERE date BETWEEN ? AND ? GROUP BY COALESCE(cargo_name, 'Not set') ORDER BY total_lkr DESC`, from, to);
-  const bySupplier = all(
-    `SELECT s.name AS supplier_name, COUNT(*) AS shipments, SUM(g.goods_inr) AS goods_inr, SUM(g.total_lkr) AS total_lkr,
-            AVG(g.exchange_rate) AS avg_rate
-       FROM grns g JOIN suppliers s ON s.id = g.supplier_id WHERE g.date BETWEEN ? AND ? GROUP BY g.supplier_id ORDER BY total_lkr DESC`, from, to);
-  res.json({ from, to, grns, byCargo, bySupplier });
+  const list = await find('grns', { date: inRange(from, to) });
+  const names = Object.fromEntries((await find('suppliers', { id: { $in: [...new Set(list.map((g) => g.supplier_id))] } }, { project: { id: 1, name: 1 } })).map((s) => [s.id, s.name]));
+  const grns = list.filter((g) => names[g.supplier_id] !== undefined).map((g) => ({ ...g, supplier_name: names[g.supplier_id] }))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  // cargo paid in rupees on older GRNs + 'Cargo …' lines paid in LKR
+  const cargoLines = grns.length ? await find('grn_expenses', { grn_id: { $in: grns.map((g) => g.id) }, label: /^Cargo/i }) : [];
+  const cargoLkr = {};
+  for (const e of cargoLines) cargoLkr[e.grn_id] = (cargoLkr[e.grn_id] || 0) + e.amount_lkr;
+  const cargo = {};
+  const supp = {};
+  for (const g of grns) {
+    const key = g.cargo_name ?? 'Not set';
+    const c = (cargo[key] ??= { cargo_name: key, shipments: 0, goods_inr: 0, cargo_inr: 0, cargo_lkr: 0, expenses_lkr: 0, total_lkr: 0, pcs: 0 });
+    c.shipments++;
+    c.goods_inr += g.goods_inr;
+    c.cargo_inr += g.cargo_charge_inr;
+    c.cargo_lkr += g.cargo_charge_inr * g.exchange_rate + (cargoLkr[g.id] || 0);
+    c.expenses_lkr += g.expenses_lkr;
+    c.total_lkr += g.total_lkr;
+    c.pcs += g.total_pcs;
+    const s = (supp[g.supplier_id] ??= { supplier_name: g.supplier_name, shipments: 0, goods_inr: 0, total_lkr: 0, rates: 0 });
+    s.shipments++;
+    s.goods_inr += g.goods_inr;
+    s.total_lkr += g.total_lkr;
+    s.rates += g.exchange_rate;
+  }
+  const bySupplier = Object.values(supp).map(({ rates, ...s }) => ({ ...s, avg_rate: rates / s.shipments })).sort(desc('total_lkr'));
+  res.json({ from, to, grns, byCargo: Object.values(cargo).sort(desc('total_lkr')), bySupplier });
 });
 
 /* ---------------- backup ---------------- */
-r.get('/backup', (req, res) => {
-  guard(req, 'Download full backup');
-  const tables = ['settings', 'suppliers', 'customers', 'products', 'grns', 'grn_items', 'grn_expenses', 'supplier_payments',
-    'sales', 'sale_items', 'customer_payments', 'stock_moves'];
-  const dump = { app: 'cargo-pos', exported_at: new Date().toISOString(), db_file: DB_FILE };
-  for (const t of tables) dump[t] = all(`SELECT * FROM ${t}`);
+r.get('/backup', async (req, res) => {
+  await guard(req, 'Download full backup');
+  const dump = { app: 'cargo-pos', exported_at: new Date().toISOString(), database: DB_LABEL };
+  for (const name of COLLECTIONS.filter((c) => !['users', 'audit_log', 'fx_rates'].includes(c))) {
+    dump[name] = await find(name, name === 'settings' ? { key: { $ne: 'session_secret' } } : {}, name === 'settings' ? {} : { sort: { id: 1 } });
+  }
   res.setHeader('Content-Disposition', `attachment; filename="cargo-pos-backup-${todayStr()}.json"`);
   res.json(dump);
 });

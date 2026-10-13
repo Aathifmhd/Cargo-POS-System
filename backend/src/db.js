@@ -1,274 +1,169 @@
-import { DatabaseSync } from 'node:sqlite';
-import fs from 'node:fs';
+import { MongoClient } from 'mongodb';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
 
-// On Vercel the deployment is read-only and only /tmp can be written — and /tmp is wiped between
-// instances, so data there does NOT last. Set DATA_DIR (or move to a hosted database) for real use.
-const dataDir = path.resolve(
-  process.env.DATA_DIR || (process.env.VERCEL ? '/tmp/cargo-pos' : path.join(import.meta.dirname, '..', 'data'))
-);
-fs.mkdirSync(dataDir, { recursive: true });
+/*
+ * MongoDB data layer.
+ * Every table of the shop is a collection (suppliers, customers, products, grns, grn_items, sales, …).
+ * Documents keep a numeric `id` (from the `counters` collection) so bill / GRN / product numbers and
+ * links stay exactly as before. Multi-step changes (a GRN, a bill, a payment) run in a transaction.
+ *
+ * Connection: MONGODB_URI (and optional MONGODB_DB, default "cargo_pos").
+ * Locally they are read from backend/.env; on Vercel set them in Settings → Environment Variables.
+ */
+try { process.loadEnvFile(path.join(import.meta.dirname, '..', '.env')); } catch { /* no .env file — use the environment */ }
 
-export const DB_FILE = path.join(dataDir, 'cargo-pos.db');
-export const db = new DatabaseSync(DB_FILE);
+const URI = process.env.MONGODB_URI;
+const DB_NAME = process.env.MONGODB_DB || 'cargo_pos';
+export const DB_LABEL = `MongoDB (${DB_NAME})`;
 
-db.exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;`);
-
-db.exec(`
-CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT
-);
-
-CREATE TABLE IF NOT EXISTS suppliers (
-  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-  name                TEXT NOT NULL,
-  contact_person      TEXT,
-  phone               TEXT,
-  whatsapp            TEXT,
-  email               TEXT,
-  city                TEXT,
-  state               TEXT,
-  address             TEXT,
-  gst_no              TEXT,
-  bank_details        TEXT,
-  credit_days         INTEGER NOT NULL DEFAULT 30,
-  opening_balance_inr REAL NOT NULL DEFAULT 0,
-  notes               TEXT,
-  active              INTEGER NOT NULL DEFAULT 1,
-  created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS customers (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  name            TEXT NOT NULL,
-  shop_name       TEXT,
-  phone           TEXT,
-  whatsapp        TEXT,
-  city            TEXT,
-  address         TEXT,
-  credit_limit    REAL NOT NULL DEFAULT 0,
-  credit_days     INTEGER NOT NULL DEFAULT 30,
-  opening_balance REAL NOT NULL DEFAULT 0,
-  notes           TEXT,
-  active          INTEGER NOT NULL DEFAULT 1,
-  created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Prices are stored per SET (a pack). Stock is stored in PIECES so loose pieces can be sold too.
-CREATE TABLE IF NOT EXISTS products (
-  id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  code              TEXT NOT NULL UNIQUE,
-  name              TEXT NOT NULL,
-  category          TEXT,
-  pcs_per_set       INTEGER NOT NULL DEFAULT 1,
-  colors_count      INTEGER NOT NULL DEFAULT 0,
-  color_names       TEXT,
-  sizes             TEXT,
-  supplier_id       INTEGER REFERENCES suppliers(id),
-  cost_per_pcs      REAL NOT NULL DEFAULT 0,  -- weighted average landed cost (LKR)
-  last_cost_per_pcs REAL NOT NULL DEFAULT 0,  -- landed cost from latest GRN (LKR)
-  mrp_per_set       REAL NOT NULL DEFAULT 0,
-  expected_per_set  REAL NOT NULL DEFAULT 0,
-  stock_pcs         INTEGER NOT NULL DEFAULT 0,
-  reorder_sets      INTEGER NOT NULL DEFAULT 0,
-  active            INTEGER NOT NULL DEFAULT 1,
-  created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS grns (
-  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
-  grn_no                 TEXT NOT NULL UNIQUE,
-  date                   TEXT NOT NULL,
-  supplier_id            INTEGER NOT NULL REFERENCES suppliers(id),
-  supplier_invoice_no    TEXT,
-  cargo_name             TEXT,
-  bale_no                TEXT,
-  lr_no                  TEXT,
-  exchange_rate          REAL NOT NULL,
-  goods_inr              REAL NOT NULL DEFAULT 0,
-  cargo_charge_inr       REAL NOT NULL DEFAULT 0,
-  cargo_in_supplier_bill INTEGER NOT NULL DEFAULT 0,
-  payable_inr            REAL NOT NULL DEFAULT 0,
-  expenses_lkr           REAL NOT NULL DEFAULT 0,
-  total_lkr              REAL NOT NULL DEFAULT 0,
-  total_sets             INTEGER NOT NULL DEFAULT 0,
-  total_pcs              INTEGER NOT NULL DEFAULT 0,
-  payment_type           TEXT NOT NULL DEFAULT 'credit',
-  due_date               TEXT,
-  notes                  TEXT,
-  created_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS grn_expenses (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  grn_id     INTEGER NOT NULL REFERENCES grns(id) ON DELETE CASCADE,
-  label      TEXT NOT NULL,
-  amount_lkr REAL NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS grn_items (
-  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-  grn_id             INTEGER NOT NULL REFERENCES grns(id) ON DELETE CASCADE,
-  product_id         INTEGER NOT NULL REFERENCES products(id),
-  name               TEXT NOT NULL,
-  pcs_per_set        INTEGER NOT NULL DEFAULT 1,
-  colors_count       INTEGER NOT NULL DEFAULT 0,
-  color_names        TEXT,
-  sizes              TEXT,
-  sets               INTEGER NOT NULL,
-  cost_inr_per_set   REAL NOT NULL,
-  line_inr           REAL NOT NULL,
-  landed_lkr         REAL NOT NULL,
-  landed_per_set_lkr REAL NOT NULL,
-  landed_per_pcs_lkr REAL NOT NULL,
-  mrp_per_set        REAL NOT NULL DEFAULT 0,
-  expected_per_set   REAL NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS supplier_payments (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  supplier_id   INTEGER NOT NULL REFERENCES suppliers(id),
-  grn_id        INTEGER REFERENCES grns(id) ON DELETE CASCADE,
-  date          TEXT NOT NULL,
-  amount_inr    REAL NOT NULL,
-  exchange_rate REAL NOT NULL DEFAULT 0,
-  amount_lkr    REAL NOT NULL DEFAULT 0,
-  method        TEXT,
-  reference     TEXT,
-  notes         TEXT,
-  created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS sales (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  invoice_no    TEXT NOT NULL UNIQUE,
-  date          TEXT NOT NULL,
-  customer_id   INTEGER REFERENCES customers(id),
-  customer_name TEXT,
-  payment_type  TEXT NOT NULL,            -- cash | credit
-  subtotal      REAL NOT NULL,
-  discount      REAL NOT NULL DEFAULT 0,
-  total         REAL NOT NULL,
-  paid_at_sale  REAL NOT NULL DEFAULT 0,
-  cost_total    REAL NOT NULL DEFAULT 0,
-  due_date      TEXT,
-  notes         TEXT,
-  status        TEXT NOT NULL DEFAULT 'completed', -- completed | void
-  created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS sale_items (
-  id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  sale_id           INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
-  product_id        INTEGER NOT NULL REFERENCES products(id),
-  code              TEXT,
-  name              TEXT NOT NULL,
-  unit              TEXT NOT NULL,        -- set | pcs
-  qty               REAL NOT NULL,
-  pcs               INTEGER NOT NULL,
-  price             REAL NOT NULL,
-  mrp_per_unit      REAL NOT NULL DEFAULT 0,
-  expected_per_unit REAL NOT NULL DEFAULT 0,
-  cost_per_unit     REAL NOT NULL DEFAULT 0,
-  line_total        REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS customer_payments (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  customer_id INTEGER NOT NULL REFERENCES customers(id),
-  sale_id     INTEGER REFERENCES sales(id),
-  date        TEXT NOT NULL,
-  amount      REAL NOT NULL,
-  method      TEXT,
-  reference   TEXT,
-  notes       TEXT,
-  created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Every stock change is logged here so each product has a full stock card.
-CREATE TABLE IF NOT EXISTS stock_moves (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  product_id INTEGER NOT NULL REFERENCES products(id),
-  date       TEXT NOT NULL,
-  type       TEXT NOT NULL,   -- grn | grn-delete | sale | void | adjust
-  ref        TEXT,
-  pcs        INTEGER NOT NULL,
-  balance    INTEGER NOT NULL,
-  note       TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  name          TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL DEFAULT 'cashier',  -- admin | cashier
-  active        INTEGER NOT NULL DEFAULT 1,
-  last_login    TEXT,
-  created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-  token      TEXT PRIMARY KEY,
-  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires_at TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- One-time admin approvals given to a cashier for a protected action.
-CREATE TABLE IF NOT EXISTS approvals (
-  token       TEXT PRIMARY KEY,
-  approver_id INTEGER NOT NULL REFERENCES users(id),
-  user_id     INTEGER NOT NULL REFERENCES users(id),
-  action      TEXT,
-  used        INTEGER NOT NULL DEFAULT 0,
-  expires_at  TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS audit_log (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  user_id     INTEGER,
-  username    TEXT,
-  action      TEXT NOT NULL,
-  approved_by TEXT
-);
-
-CREATE TABLE IF NOT EXISTS fx_rates (
-  id     INTEGER PRIMARY KEY AUTOINCREMENT,
-  at     TEXT NOT NULL,
-  rate   REAL NOT NULL,
-  source TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date);
-CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id);
-CREATE INDEX IF NOT EXISTS idx_grns_supplier ON grns(supplier_id);
-CREATE INDEX IF NOT EXISTS idx_moves_product ON stock_moves(product_id);
-`);
-
-// Columns added after the first release — added in place so existing shop databases keep working.
-function addColumn(table, column, type) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
-  if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+// one client per running copy of the backend (serverless copies reuse it between requests)
+let client;
+let database;
+export async function connect() {
+  if (database) return database;
+  if (!URI) throw new Error('MONGODB_URI is not set. Put it in backend/.env (or the hosting environment variables).');
+  globalThis.__cargoMongo ??= new MongoClient(URI, { serverSelectionTimeoutMS: 15000, maxPoolSize: 25, minPoolSize: 2 }).connect();
+  client = await globalThis.__cargoMongo;
+  database = client.db(DB_NAME);
+  return database;
 }
-addColumn('grns', 'effective_rate', 'REAL');          // rate the goods really cost at (blends payments + today's rate while unpaid)
-addColumn('grns', 'settled_at', 'TEXT');              // when the supplier bill was fully paid; cost is fixed from then on
-addColumn('products', 'opening_pcs', 'INTEGER NOT NULL DEFAULT 0');
-addColumn('products', 'opening_cost_per_pcs', 'REAL NOT NULL DEFAULT 0');
-addColumn('sale_items', 'disc', 'REAL NOT NULL DEFAULT 0');      // line discount amount (Rs)
-addColumn('sale_items', 'disc_pct', 'REAL NOT NULL DEFAULT 0');
-addColumn('users', 'token_version', 'INTEGER NOT NULL DEFAULT 0');   // +1 on password change → older logins end
-addColumn('products', 'pname', 'TEXT');                               // product name within the product, e.g. Shirts → Kerala → "Royal Check"
-addColumn('products', 'subtype', 'TEXT');                             // product type within the category, e.g. T-shirts → "Collar"
-addColumn('grn_items', 'extra_sets', 'INTEGER NOT NULL DEFAULT 0');   // (older GRNs) free sets — not on the supplier's bill
-addColumn('grn_items', 'extra_pcs', 'INTEGER NOT NULL DEFAULT 0');    // extra pieces received — billed by the supplier
-addColumn('grn_items', 'short_sets', 'INTEGER NOT NULL DEFAULT 0');   // sets billed but missing from the bale
-addColumn('grn_items', 'short_pcs', 'INTEGER NOT NULL DEFAULT 0');    // pieces billed but missing from the bale
+export const close = async () => { if (client) await client.close(); globalThis.__cargoMongo = null; client = null; database = null; };
 
+const col = (name) => {
+  if (!database) throw new Error('Database not connected yet');
+  return database.collection(name);
+};
+
+/* ---------------- transactions ----------------
+ * tx(fn) runs fn inside a MongoDB transaction. Every helper below joins the current transaction by itself
+ * (it is carried by AsyncLocalStorage), so code reads the same inside and outside a transaction.
+ * Inside a transaction, run database calls one after another (not in parallel).
+ */
+const als = new AsyncLocalStorage();
+const opt = () => { const s = als.getStore(); return s ? { session: s } : {}; };
+
+export async function tx(fn) {
+  if (als.getStore()) return fn();   // already inside one
+  const session = client.startSession();
+  try {
+    let result;
+    await session.withTransaction(async () => { result = await als.run(session, fn); },
+      { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } });
+    return result;
+  } finally {
+    await session.endSession();
+  }
+}
+
+/**
+ * Run independent reads together: inParallel(() => find(...), () => findOne(...)).
+ * Outside a transaction they run at the same time (one network round-trip instead of several);
+ * inside one they run one after another, as MongoDB requires.
+ */
+export async function inParallel(...fns) {
+  if (als.getStore()) {
+    const out = [];
+    for (const fn of fns) out.push(await fn());
+    return out;
+  }
+  return Promise.all(fns.map((fn) => fn()));
+}
+
+/* ---------------- defaults for new documents (what the old table columns defaulted to) ---------------- */
+export const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');   // "YYYY-MM-DD HH:MM:SS" (UTC)
+const DEFAULTS = {
+  suppliers: { contact_person: null, phone: null, whatsapp: null, email: null, city: null, state: null, address: null, gst_no: null,
+    bank_details: null, credit_days: 30, opening_balance_inr: 0, notes: null, active: 1 },
+  customers: { shop_name: null, phone: null, whatsapp: null, city: null, address: null, credit_limit: 0, credit_days: 30,
+    opening_balance: 0, notes: null, active: 1 },
+  products: { category: null, subtype: null, pname: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, supplier_id: null,
+    cost_per_pcs: 0, last_cost_per_pcs: 0, mrp_per_set: 0, expected_per_set: 0, stock_pcs: 0, reorder_sets: 0, active: 1,
+    opening_pcs: 0, opening_cost_per_pcs: 0 },
+  grns: { supplier_invoice_no: null, cargo_name: null, bale_no: null, lr_no: null, goods_inr: 0, cargo_charge_inr: 0, cargo_in_supplier_bill: 0,
+    payable_inr: 0, expenses_lkr: 0, total_lkr: 0, total_sets: 0, total_pcs: 0, payment_type: 'credit', due_date: null, notes: null,
+    effective_rate: null, settled_at: null },
+  grn_expenses: { amount_lkr: 0 },
+  grn_items: { pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, mrp_per_set: 0, expected_per_set: 0,
+    extra_sets: 0, extra_pcs: 0, short_sets: 0, short_pcs: 0 },
+  supplier_payments: { grn_id: null, exchange_rate: 0, amount_lkr: 0, method: null, reference: null, notes: null },
+  sales: { customer_id: null, customer_name: null, discount: 0, paid_at_sale: 0, cost_total: 0, due_date: null, notes: null, status: 'completed' },
+  sale_items: { code: null, mrp_per_unit: 0, expected_per_unit: 0, cost_per_unit: 0, disc: 0, disc_pct: 0 },
+  customer_payments: { sale_id: null, method: null, reference: null, notes: null },
+  stock_moves: { ref: null, note: null },
+  users: { role: 'cashier', active: 1, last_login: null, token_version: 0 },
+  audit_log: { user_id: null, username: null, approved_by: null },
+  fx_rates: { source: null },
+};
+
+/* ---------------- query helpers (documents come back without MongoDB's _id) ---------------- */
+const NO_ID = { _id: 0 };
+export async function find(name, filter = {}, { sort, limit, project } = {}) {
+  let cur = col(name).find(filter, { ...opt(), projection: project ? { ...NO_ID, ...project } : NO_ID });
+  if (sort) cur = cur.sort(sort);
+  if (limit) cur = cur.limit(limit);
+  return cur.toArray();
+}
+export const findOne = (name, filter, { sort, project, collation } = {}) =>
+  col(name).findOne(filter, { ...opt(), projection: project ? { ...NO_ID, ...project } : NO_ID, sort, collation });
+export const count = (name, filter = {}) => col(name).countDocuments(filter, opt());
+export const distinct = (name, field, filter = {}) => col(name).distinct(field, filter, opt());
+export const aggregate = (name, pipeline) => col(name).aggregate(pipeline, opt()).toArray();
+export const updateOne = (name, filter, update, options = {}) => col(name).updateOne(filter, update, { ...opt(), ...options });
+export const updateMany = (name, filter, update, options = {}) => col(name).updateMany(filter, update, { ...opt(), ...options });
+export const deleteMany = (name, filter) => col(name).deleteMany(filter, opt());
+/** set fields on one document by id */
+export const setById = (name, id, fields) => updateOne(name, { id }, { $set: fields });
+
+async function nextId(name) {
+  const r = await col('counters').findOneAndUpdate({ _id: name }, { $inc: { seq: 1 } }, { ...opt(), upsert: true, returnDocument: 'after' });
+  return r.seq;
+}
+/** Insert one document with the next numeric id; returns the stored document (without _id). */
+export async function insert(name, doc) {
+  const id = await nextId(name);
+  const full = { ...DEFAULTS[name], created_at: stamp(), ...doc, id };
+  if (name === 'products') full.updated_at ??= full.created_at;
+  await col(name).insertOne({ ...full }, opt());
+  return full;
+}
+/** Make sure the id counter is at least `n` (used after copying data in). */
+export const bumpCounter = (name, n) => col('counters').updateOne({ _id: name }, { $max: { seq: n } }, { upsert: true });
+
+export const COLLECTIONS = ['settings', 'suppliers', 'customers', 'products', 'grns', 'grn_expenses', 'grn_items', 'supplier_payments',
+  'sales', 'sale_items', 'customer_payments', 'stock_moves', 'users', 'audit_log', 'fx_rates'];
+
+/* ---------------- errors & small helpers ---------------- */
+export class HttpError extends Error {
+  constructor(status, message, extra) {
+    super(message);
+    this.status = status;
+    this.extra = extra;
+  }
+}
+export const fail = (message, status = 400) => {
+  throw new HttpError(status, message);
+};
+
+export const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+export const num = (v, d = 0) => (v === '' || v == null || isNaN(Number(v)) ? d : Number(v));
+/** text for a "contains" search (like SQL LIKE '%q%'), case-insensitive */
+export const contains = (q) => new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+export const sum = (list, f) => list.reduce((s, x) => s + (Number(f(x)) || 0), 0);
+
+export function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+export function addDays(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + Number(days || 0));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+/** sort helper: by date, then by id (both ascending) */
+export const byDateId = (a, b) => (a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1);
+
+/* ---------------- settings ---------------- */
 /* The shop's catalogue: categories, the product types in each, and the sizes they come in.
    Editable in Settings → Categories, products & sizes (stored as JSON in settings.catalog). */
 const TOP_SIZES = ['S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
@@ -300,67 +195,61 @@ const DEFAULT_SETTINGS = {
   invoice_prefix: 'INV-',
   catalog: JSON.stringify(DEFAULT_CATALOG),
 };
-for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
-  db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(k, v);
+
+export async function getSettings() {
+  const rows = await find('settings');
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
+export const setSetting = (key, value) => col('settings').updateOne({ key }, { $set: { key, value: String(value ?? '') } }, { ...opt(), upsert: true });
 
-// ---------- helpers ----------
-export const all = (sql, ...p) => db.prepare(sql).all(...p);
-export const get = (sql, ...p) => db.prepare(sql).get(...p);
-export const run = (sql, ...p) => db.prepare(sql).run(...p);
-
-export function tx(fn) {
-  db.exec('BEGIN');
-  try {
-    const result = fn();
-    db.exec('COMMIT');
-    return result;
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
+/** First run (or after an upgrade): indexes, default settings. Safe to run every start. */
+export async function setup() {
+  await connect();
+  const existing = new Set((await database.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name));
+  for (const name of [...COLLECTIONS, 'counters', 'revoked_tokens', 'used_approvals']) {
+    if (!existing.has(name)) await database.createCollection(name).catch(() => {});
+  }
+  const ix = (name, keys, options = {}) => col(name).createIndex(keys, options).catch(() => {});
+  await Promise.all([
+    ix('settings', { key: 1 }, { unique: true }),
+    ...COLLECTIONS.filter((c) => c !== 'settings').map((c) => ix(c, { id: 1 }, { unique: true })),
+    ix('products', { code: 1 }, { unique: true }),
+    ix('grns', { grn_no: 1 }, { unique: true }),
+    ix('grns', { supplier_id: 1 }),
+    ix('grn_items', { grn_id: 1 }),
+    ix('grn_items', { product_id: 1 }),
+    ix('grn_expenses', { grn_id: 1 }),
+    ix('sales', { invoice_no: 1 }, { unique: true }),
+    ix('sales', { date: 1 }),
+    ix('sales', { customer_id: 1 }),
+    ix('sale_items', { sale_id: 1 }),
+    ix('sale_items', { product_id: 1 }),
+    ix('supplier_payments', { supplier_id: 1 }),
+    ix('customer_payments', { customer_id: 1 }),
+    ix('stock_moves', { product_id: 1 }),
+    ix('users', { username: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } }),
+    ix('revoked_tokens', { exp: 1 }, { expireAfterSeconds: 0 }),
+    ix('used_approvals', { exp: 1 }, { expireAfterSeconds: 0 }),
+  ]);
+  for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
+    await col('settings').updateOne({ key }, { $setOnInsert: { key, value } }, { upsert: true });
   }
 }
 
-export class HttpError extends Error {
-  constructor(status, message, extra) {
-    super(message);
-    this.status = status;
-    this.extra = extra;
-  }
-}
-export const fail = (message, status = 400) => {
-  throw new HttpError(status, message);
-};
-
-export const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
-export const num = (v, d = 0) => (v === '' || v == null || isNaN(Number(v)) ? d : Number(v));
-
-export function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-export function addDays(dateStr, days) {
-  const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() + Number(days || 0));
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-export function getSettings() {
-  return Object.fromEntries(all('SELECT key, value FROM settings').map((r) => [r.key, r.value]));
-}
-
-export function nextNo(table, col, prefix, pad) {
-  const row = get(`SELECT ${col} AS no FROM ${table} WHERE ${col} LIKE ? ORDER BY id DESC LIMIT 1`, prefix + '%');
-  const n = row ? parseInt(String(row.no).slice(prefix.length), 10) + 1 || 1 : 1;
+/* ---------------- numbering ---------------- */
+export async function nextNo(name, field, prefix, pad) {
+  const row = await findOne(name, { [field]: { $regex: '^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') } }, { sort: { id: -1 } });
+  const n = row ? parseInt(String(row[field]).slice(prefix.length), 10) + 1 || 1 : 1;
   return prefix + String(n).padStart(pad, '0');
 }
 
-export function nextProductCode() {
-  const row = get(`SELECT code FROM products WHERE code GLOB 'P[0-9]*' ORDER BY CAST(SUBSTR(code, 2) AS INTEGER) DESC LIMIT 1`);
-  const n = row ? parseInt(row.code.slice(1), 10) + 1 : 1;
+export async function nextProductCode() {
+  const codes = await distinct('products', 'code', { code: { $regex: /^P\d+$/ } });
+  const n = codes.reduce((m, c) => Math.max(m, parseInt(c.slice(1), 10) || 0), 0) + 1;
   return 'P' + String(n).padStart(4, '0');
 }
 
+/* ---------------- ledgers ---------------- */
 /**
  * Settle payments against bills oldest-first.
  * docs: [{ amount, linkedPaid, ... }] sorted oldest first.
@@ -388,18 +277,23 @@ export function dueStatus(balance, dueDate, today = todayStr()) {
   return 'open';
 }
 
+/* ---------------- stock ---------------- */
+export const grnItemPcs = (it) => Math.max(0, ((it.sets || 0) + (it.extra_sets || 0) - (it.short_sets || 0)) * (it.pcs_per_set || 1) + (it.extra_pcs || 0) - (it.short_pcs || 0));
+
 /**
  * Cost of the stock still on hand, first-in-first-out: the pieces left are taken to be the newest receipts
- * (GRN items, at their current — possibly revalued — landed cost), then any opening stock.
- * With nothing in stock, the latest receipt's cost is used.
+ * (GRN items, at their landed cost), then any opening stock. With nothing in stock, the latest receipt's cost is used.
  */
-export function recomputeProductCost(productId) {
-  const p = get('SELECT * FROM products WHERE id = ?', productId);
+export async function recomputeProductCost(productId) {
+  const p = await findOne('products', { id: productId });
   if (!p) return;
-  const receipts = all(
-    `SELECT MAX(0, (gi.sets + gi.extra_sets - gi.short_sets) * gi.pcs_per_set + gi.extra_pcs - gi.short_pcs) AS pcs, gi.landed_per_pcs_lkr AS cost
-       FROM grn_items gi JOIN grns g ON g.id = gi.grn_id
-      WHERE gi.product_id = ? ORDER BY g.date DESC, g.id DESC, gi.id DESC`, productId);
+  const items = await find('grn_items', { product_id: productId });
+  const grns = items.length ? await find('grns', { id: { $in: [...new Set(items.map((i) => i.grn_id))] } }, { project: { id: 1, date: 1 } }) : [];
+  const dateOf = Object.fromEntries(grns.map((g) => [g.id, g.date]));
+  const receipts = items
+    .filter((i) => dateOf[i.grn_id] !== undefined)
+    .sort((a, b) => (dateOf[a.grn_id] !== dateOf[b.grn_id] ? (dateOf[a.grn_id] < dateOf[b.grn_id] ? 1 : -1) : a.grn_id !== b.grn_id ? b.grn_id - a.grn_id : b.id - a.id))
+    .map((i) => ({ pcs: grnItemPcs(i), cost: i.landed_per_pcs_lkr }));
   if (p.opening_pcs > 0) receipts.push({ pcs: p.opening_pcs, cost: p.opening_cost_per_pcs });
   if (!receipts.length) return;
   let need = Math.max(0, p.stock_pcs);
@@ -413,18 +307,15 @@ export function recomputeProductCost(productId) {
     need -= take;
   }
   const cost = qty > 0 ? value / qty : receipts[0].cost;
-  run('UPDATE products SET cost_per_pcs = ?, last_cost_per_pcs = ? WHERE id = ?', round2(cost), round2(receipts[0].cost), productId);
+  await setById('products', productId, { cost_per_pcs: round2(cost), last_cost_per_pcs: round2(receipts[0].cost) });
 }
 
-export function moveStock(productId, pcs, type, ref, note, date = todayStr()) {
-  const p = get('SELECT stock_pcs FROM products WHERE id = ?', productId);
+/** Change a product's stock (in pieces) and log it on its stock card. */
+export async function moveStock(productId, pcs, type, ref, note, date = todayStr()) {
+  const p = await col('products').findOneAndUpdate({ id: productId }, { $inc: { stock_pcs: pcs }, $set: { updated_at: stamp() } },
+    { ...opt(), returnDocument: 'after', projection: NO_ID });
   if (!p) fail('Product not found', 404);
-  const balance = p.stock_pcs + pcs;
-  run(`UPDATE products SET stock_pcs = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, balance, productId);
-  run(
-    `INSERT INTO stock_moves (product_id, date, type, ref, pcs, balance, note) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    productId, date, type, ref ?? null, pcs, balance, note ?? null
-  );
-  recomputeProductCost(productId);
-  return balance;
+  await insert('stock_moves', { product_id: productId, date, type, ref: ref ?? null, pcs, balance: p.stock_pcs, note: note ?? null });
+  await recomputeProductCost(productId);
+  return p.stock_pcs;
 }

@@ -3,17 +3,19 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Cargo POS API - wholesale import (India -> Sri Lanka) POS backend",
+  "description": "Cargo POS API - wholesale import (India -> Sri Lanka) POS backend, data in MongoDB",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js --port=4000",
-    "seed": "node src/seed.js"
+    "seed": "node src/seed.js",
+    "migrate": "node src/migrate-sqlite.js"
   },
   "engines": {
     "node": ">=22.13"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "mongodb": "^6.21.0"
   }
 }

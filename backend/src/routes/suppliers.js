@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { all, get, run, fail, num, round2, todayStr } from '../db.js';
-import { supplierBills, supplierSummary, revalueGrns, costingRate } from '../services.js';
+import { find, findOne, insert, setById, updateMany, deleteMany, fail, num, round2, sum, todayStr, inParallel } from '../db.js';
+import { supplierLedgers, supplierBills, summarizeSupplier, revalueGrns, costingRate } from '../services.js';
 import { guard } from '../auth.js';
 
 const r = Router();
@@ -18,41 +18,50 @@ function clean(body) {
   };
 }
 
-r.get('/', (req, res) => {
-  const rows = all(
-    `SELECT s.*, (SELECT COUNT(*) FROM grns g WHERE g.supplier_id = s.id) AS grn_count,
-            (SELECT MAX(date) FROM grns g WHERE g.supplier_id = s.id) AS last_grn_date
-       FROM suppliers s ORDER BY s.active DESC, s.name`);
-  res.json(rows.map((s) => ({ ...s, ...supplierSummary(s.id) })));
+const byActiveName = (a, b) => (b.active - a.active) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
+r.get('/', async (req, res) => {
+  const [list, grns, ledgers] = await inParallel(
+    () => find('suppliers'),
+    () => find('grns', {}, { project: { supplier_id: 1, date: 1 } }),
+    () => supplierLedgers(),
+  );
+  const suppliers = list.sort(byActiveName);
+  const stats = {};
+  for (const g of grns) {
+    const t = (stats[g.supplier_id] ??= { grn_count: 0, last_grn_date: null });
+    t.grn_count++;
+    if (!t.last_grn_date || g.date > t.last_grn_date) t.last_grn_date = g.date;
+  }
+  res.json(suppliers.map((s) => ({ ...s, grn_count: 0, last_grn_date: null, ...stats[s.id], ...summarizeSupplier(ledgers.get(s.id) || []) })));
 });
 
-r.get('/:id', (req, res) => {
-  const s = get('SELECT * FROM suppliers WHERE id = ?', num(req.params.id));
+r.get('/:id', async (req, res) => {
+  const s = await findOne('suppliers', { id: num(req.params.id) });
   if (!s) fail('Supplier not found', 404);
-  const bills = supplierBills(s.id);
-  const payments = all(
-    `SELECT p.*, g.grn_no FROM supplier_payments p LEFT JOIN grns g ON g.id = p.grn_id
-      WHERE p.supplier_id = ? ORDER BY p.date DESC, p.id DESC`, s.id);
-  const totals = get(
-    `SELECT COUNT(*) AS grn_count, COALESCE(SUM(payable_inr), 0) AS purchased_inr, COALESCE(SUM(total_lkr), 0) AS landed_lkr
-       FROM grns WHERE supplier_id = ?`, s.id);
-  res.json({ ...s, ...supplierSummary(s.id), ...totals, bills, payments });
+  const [bills, payments, grns] = await inParallel(
+    () => supplierBills(s.id),
+    () => find('supplier_payments', { supplier_id: s.id }, { sort: { date: -1, id: -1 } }),
+    () => find('grns', { supplier_id: s.id }, { project: { id: 1, grn_no: 1, payable_inr: 1, total_lkr: 1 } }),
+  );
+  const grnNo = Object.fromEntries(grns.map((g) => [g.id, g.grn_no]));
+  const totals = { grn_count: grns.length, purchased_inr: sum(grns, (g) => g.payable_inr), landed_lkr: sum(grns, (g) => g.total_lkr) };
+  res.json({
+    ...s, ...summarizeSupplier(bills), ...totals, bills,
+    payments: payments.map((p) => ({ ...p, grn_no: p.grn_id != null ? grnNo[p.grn_id] ?? null : null })),
+  });
 });
 
-r.post('/', (req, res) => {
+r.post('/', async (req, res) => {
   const d = clean(req.body);
-  if (!d.name) fail('Enter the supplier name');
   // adding, editing or deleting a supplier always needs the Super Admin's password
-  guard(req, `New supplier ${d.name}${d.opening_balance_inr > 0 ? ` (old balance ₹${d.opening_balance_inr})` : ''}`, 'superadmin', { always: true });
-  const { lastInsertRowid } = run(
-    `INSERT INTO suppliers (${FIELDS.join(', ')}) VALUES (${FIELDS.map(() => '?').join(', ')})`,
-    ...FIELDS.map((f) => d[f]));
-  res.json(get('SELECT * FROM suppliers WHERE id = ?', lastInsertRowid));
+  await guard(req, `New supplier ${d.name}${d.opening_balance_inr > 0 ? ` (old balance ₹${d.opening_balance_inr})` : ''}`, 'superadmin', { always: true });
+  res.json(await insert('suppliers', Object.fromEntries(FIELDS.map((f) => [f, d[f]]))));
 });
 
-r.put('/:id', (req, res) => {
+r.put('/:id', async (req, res) => {
   const d = clean(req.body);
-  const old = get('SELECT * FROM suppliers WHERE id = ?', num(req.params.id));
+  const old = await findOne('suppliers', { id: num(req.params.id) });
   if (!old) fail('Supplier not found', 404);
   const changes = [];
   if (old.name !== d.name) changes.push(`name "${old.name}" → "${d.name}"`);
@@ -60,47 +69,45 @@ r.put('/:id', (req, res) => {
   if (old.opening_balance_inr !== d.opening_balance_inr) changes.push(`old balance ₹${old.opening_balance_inr} → ₹${d.opening_balance_inr}`);
   if (old.active !== d.active) changes.push(d.active ? 'made active' : 'made inactive');
   if ((old.bank_details || null) !== d.bank_details) changes.push('bank details changed');
-  guard(req, `Edit supplier ${old.name}${changes.length ? `: ${changes.join(', ')}` : ''}`, 'superadmin', { always: true });
-  run(`UPDATE suppliers SET ${FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`, ...FIELDS.map((f) => d[f]), num(req.params.id));
-  res.json(get('SELECT * FROM suppliers WHERE id = ?', num(req.params.id)));
+  await guard(req, `Edit supplier ${old.name}${changes.length ? `: ${changes.join(', ')}` : ''}`, 'superadmin', { always: true });
+  await setById('suppliers', old.id, Object.fromEntries(FIELDS.map((f) => [f, d[f]])));
+  res.json(await findOne('suppliers', { id: old.id }));
 });
 
-r.delete('/:id', (req, res) => {
+r.delete('/:id', async (req, res) => {
   const id = num(req.params.id);
-  if (get('SELECT id FROM grns WHERE supplier_id = ? LIMIT 1', id) || get('SELECT id FROM supplier_payments WHERE supplier_id = ? LIMIT 1', id)) {
+  if (await findOne('grns', { supplier_id: id }) || await findOne('supplier_payments', { supplier_id: id })) {
     fail('This supplier has GRNs or payments. Mark them inactive instead of deleting.');
   }
-  guard(req, `Delete supplier ${get('SELECT name FROM suppliers WHERE id = ?', id)?.name || `#${id}`}`, 'superadmin', { always: true });
-  run('UPDATE products SET supplier_id = NULL WHERE supplier_id = ?', id);
-  run('DELETE FROM suppliers WHERE id = ?', id);
+  await guard(req, `Delete supplier ${(await findOne('suppliers', { id }))?.name || `#${id}`}`, 'superadmin', { always: true });
+  await updateMany('products', { supplier_id: id }, { $set: { supplier_id: null } });
+  await deleteMany('suppliers', { id });
   res.json({ ok: true });
 });
 
 /* ---------- supplier payments ---------- */
-r.post('/:id/payments', (req, res) => {
-  const s = get('SELECT * FROM suppliers WHERE id = ?', num(req.params.id));
+r.post('/:id/payments', async (req, res) => {
+  const s = await findOne('suppliers', { id: num(req.params.id) });
   if (!s) fail('Supplier not found', 404);
   const amount = round2(num(req.body.amount_inr));
   if (amount <= 0) fail('Enter the amount paid (INR)');
-  const rate = costingRate();   // payments are recorded at the same fixed rate as the costs
+  const rate = await costingRate();   // payments are recorded at the same fixed rate as the costs
   const grnId = req.body.grn_id ? num(req.body.grn_id) : null;
-  if (grnId && !get('SELECT id FROM grns WHERE id = ? AND supplier_id = ?', grnId, s.id)) fail('That GRN does not belong to this supplier');
-  const lkr = round2(amount * rate);
-  const { lastInsertRowid } = run(
-    `INSERT INTO supplier_payments (supplier_id, grn_id, date, amount_inr, exchange_rate, amount_lkr, method, reference, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    s.id, grnId, req.body.date || todayStr(), amount, rate, round2(lkr), req.body.method || null,
-    req.body.reference || null, req.body.notes || null);
-  revalueGrns();   // notes when the bill becomes fully paid
-  res.json(get('SELECT * FROM supplier_payments WHERE id = ?', lastInsertRowid));
+  if (grnId && !(await findOne('grns', { id: grnId, supplier_id: s.id }))) fail('That GRN does not belong to this supplier');
+  const p = await insert('supplier_payments', {
+    supplier_id: s.id, grn_id: grnId, date: req.body.date || todayStr(), amount_inr: amount, exchange_rate: rate,
+    amount_lkr: round2(amount * rate), method: req.body.method || null, reference: req.body.reference || null, notes: req.body.notes || null,
+  });
+  await revalueGrns();   // notes when the bill becomes fully paid
+  res.json(p);
 });
 
-r.delete('/:id/payments/:pid', (req, res) => {
-  const p = get('SELECT * FROM supplier_payments WHERE id = ? AND supplier_id = ?', num(req.params.pid), num(req.params.id));
+r.delete('/:id/payments/:pid', async (req, res) => {
+  const p = await findOne('supplier_payments', { id: num(req.params.pid), supplier_id: num(req.params.id) });
   if (!p) fail('Payment not found', 404);
-  guard(req, `Delete supplier payment of ₹${p.amount_inr} (${p.date})`);
-  run('DELETE FROM supplier_payments WHERE id = ? AND supplier_id = ?', num(req.params.pid), num(req.params.id));
-  revalueGrns();
+  await guard(req, `Delete supplier payment of ₹${p.amount_inr} (${p.date})`);
+  await deleteMany('supplier_payments', { id: p.id, supplier_id: p.supplier_id });
+  await revalueGrns();
   res.json({ ok: true });
 });
 

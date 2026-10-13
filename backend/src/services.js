@@ -1,6 +1,6 @@
 import {
-  all, get, run, tx, fail, round2, num, todayStr, addDays, getSettings,
-  nextNo, nextProductCode, allocate, dueStatus, moveStock, recomputeProductCost,
+  find, findOne, insert, setById, updateOne, updateMany, deleteMany, tx, fail, round2, num, sum, todayStr, addDays, getSettings,
+  nextNo, nextProductCode, allocate, dueStatus, moveStock, recomputeProductCost, grnItemPcs, byDateId, stamp, inParallel,
 } from './db.js';
 
 /* =========================================================
@@ -9,8 +9,6 @@ import {
    spread over items by their share of the INR goods value.
    ========================================================= */
 export function computeLanding({ items, exchange_rate, cargo_charge_inr, expenses, goods_rate, cargo_rate }) {
-  // goods_rate / cargo_rate let a credit GRN be revalued: goods at the rate actually paid (or today's rate
-  // while unpaid), cargo at the rate it was paid at. Both default to the GRN's own rate.
   const baseRate = num(exchange_rate);
   const rate = num(goods_rate) || baseRate;
   const cRate = num(cargo_rate) || baseRate;
@@ -40,176 +38,173 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   const total_pcs = lines.reduce((s, l) => s + l.pcs, 0);
   const total_sets = lines.reduce((s, l) => s + Math.max(0, l.sets + l.extra_sets - l.short_sets), 0);
 
-  // a line's landed cost is spread over every piece received (billed + free), so free pieces lower the cost per piece
+  // a line's landed cost is spread over every piece received, so free pieces lower the cost per piece
   const out = lines.map((l) => {
     const share = goods_inr > 0 ? l.line_inr / goods_inr : total_pcs > 0 ? l.pcs / total_pcs : 0;
     const landed = l.line_inr * rate + share * overhead_lkr;
     const perPcs = l.pcs ? landed / l.pcs : 0;
-    return {
-      ...l,
-      landed_lkr: round2(landed),
-      landed_per_set_lkr: round2(perPcs * l.pcs_per_set),
-      landed_per_pcs_lkr: round2(perPcs),
-    };
+    return { ...l, landed_lkr: round2(landed), landed_per_set_lkr: round2(perPcs * l.pcs_per_set), landed_per_pcs_lkr: round2(perPcs) };
   });
-  return {
-    items: out,
-    goods_inr,
-    cargo_inr,
-    expenses_lkr,
-    total_sets,
-    total_pcs,
-    total_lkr: round2(goods_inr * rate + cargo_inr * cRate + expenses_lkr),
-  };
+  return { items: out, goods_inr, cargo_inr, expenses_lkr, total_sets, total_pcs, total_lkr: round2(goods_inr * rate + cargo_inr * cRate + expenses_lkr) };
 }
 
-/* =========================================================
-   EXCHANGE-RATE SETTLEMENT OF SUPPLIER BILLS
-   Each GRN's payable INR is settled by payments, each made at its own rate.
-   Paid part  → fixed at the rates actually paid.
-   Unpaid part → today's rate, so the cost of credit goods moves day by day until the bill is settled.
-   ========================================================= */
-export function grnSettlements(supplierId, todayRate) {
-  const s = get('SELECT * FROM suppliers WHERE id = ?', supplierId);
-  const grns = all('SELECT * FROM grns WHERE supplier_id = ? ORDER BY date, id', supplierId);
-  const docs = [];
-  if (s?.opening_balance_inr > 0) docs.push({ id: null, payable: s.opening_balance_inr, paidInr: 0, paidLkr: 0 });
-  for (const g of grns) docs.push({ id: g.id, grn: g, payable: g.payable_inr, paidInr: 0, paidLkr: 0 });
-  const byId = Object.fromEntries(docs.filter((d) => d.id).map((d) => [d.id, d]));
-  const pays = all('SELECT * FROM supplier_payments WHERE supplier_id = ? ORDER BY date, id', supplierId);
-  const rateOf = (p) => (p.amount_inr > 0 && p.amount_lkr > 0 ? p.amount_lkr / p.amount_inr : p.exchange_rate || todayRate);
+/** The one rate every cost is worked out at (Settings → Exchange rate, 3.5 by default). The live rate never changes costs. */
+export const costingRate = async () => num((await getSettings()).costing_rate) || 3.5;
 
-  const queue = []; // [inr, rate] still to place, oldest bill first
+/* =========================================================
+   SUPPLIER BILL SETTLEMENT — how much of each GRN is paid (oldest bills first for unlinked payments)
+   ========================================================= */
+function settle(supplier, grns, pays, rate) {
+  const docs = [];
+  if (supplier?.opening_balance_inr > 0) docs.push({ id: null, payable: supplier.opening_balance_inr, paidInr: 0 });
+  for (const g of grns) docs.push({ id: g.id, grn: g, payable: g.payable_inr, paidInr: 0 });
+  const byId = Object.fromEntries(docs.filter((d) => d.id).map((d) => [d.id, d]));
+  const queue = [];
   for (const p of pays) {
     const d = p.grn_id && byId[p.grn_id];
-    if (!d) { queue.push([p.amount_inr, rateOf(p)]); continue; }
+    if (!d) { queue.push(p.amount_inr); continue; }
     const take = Math.min(p.amount_inr, Math.max(0, d.payable - d.paidInr));
     d.paidInr += take;
-    d.paidLkr += take * rateOf(p);
-    if (p.amount_inr - take > 0.009) queue.push([p.amount_inr - take, rateOf(p)]); // overpaid → goes to older bills
+    if (p.amount_inr - take > 0.009) queue.push(p.amount_inr - take); // overpaid → goes to older bills
   }
-  for (let [inr, rate] of queue) {
+  for (let inr of queue) {
     for (const d of docs) {
       if (inr <= 0.009) break;
       const take = Math.min(inr, Math.max(0, d.payable - d.paidInr));
       if (take <= 0) continue;
       d.paidInr += take;
-      d.paidLkr += take * rate;
       inr -= take;
     }
   }
-  return docs.filter((d) => d.id).map((d) => {
-    const unpaid = Math.max(0, d.payable - d.paidInr);
-    const effective = d.payable > 0 ? (d.paidLkr + unpaid * todayRate) / d.payable : d.grn.exchange_rate;
-    return { grn: d.grn, paid_inr: round2(d.paidInr), unpaid_inr: round2(unpaid), effective_rate: Math.round(effective * 10000) / 10000, settled: unpaid <= 0.009 };
-  });
+  return docs.filter((d) => d.id).map((d) => ({ grn: d.grn, settled: Math.max(0, d.payable - d.paidInr) <= 0.009, rate }));
 }
-
-/** The one rate every cost is worked out at (Settings → Exchange rate, 3.5 by default). The live rate never changes costs. */
-export const costingRate = () => num(getSettings().costing_rate) || 3.5;
 
 /**
  * Keeps every GRN costed at the costing rate: re-costs any GRN (and the products in it) whose rate differs,
  * e.g. after the costing rate is changed in Settings. Also records when a supplier bill becomes fully paid.
  */
-export function revalueGrns() {
-  const rate = costingRate();
-  let changed = 0;
-  tx(() => {
-    const touched = new Set();
-    for (const { supplier_id } of all('SELECT DISTINCT supplier_id FROM grns')) {
-      for (const st of grnSettlements(supplier_id, rate)) {
-        const g = st.grn;
-        const settledAt = st.settled ? g.settled_at || new Date().toISOString() : null;
-        const sameRate = Math.abs((g.exchange_rate || 0) - rate) < 0.00005 && Math.abs((g.effective_rate ?? 0) - rate) < 0.00005;
-        if (sameRate && (g.settled_at || null) === settledAt) continue;
-        if (sameRate) { run('UPDATE grns SET settled_at = ? WHERE id = ?', settledAt, g.id); continue; }
-        const items = all('SELECT * FROM grn_items WHERE grn_id = ? ORDER BY id', g.id);
-        const expenses = all('SELECT amount_lkr FROM grn_expenses WHERE grn_id = ?', g.id);
-        const calc = computeLanding({ items, expenses, exchange_rate: rate, cargo_charge_inr: g.cargo_charge_inr });
-        calc.items.forEach((it, i) => {
-          run('UPDATE grn_items SET landed_lkr = ?, landed_per_set_lkr = ?, landed_per_pcs_lkr = ? WHERE id = ?',
-            it.landed_lkr, it.landed_per_set_lkr, it.landed_per_pcs_lkr, items[i].id);
-          touched.add(items[i].product_id);
-        });
-        run('UPDATE grns SET exchange_rate = ?, effective_rate = ?, total_lkr = ?, settled_at = ? WHERE id = ?', rate, rate, calc.total_lkr, settledAt, g.id);
-        changed++;
-      }
+export async function revalueGrns() {
+  const rate = await costingRate();
+  const [suppliers, grnList, payList] = await inParallel(() => find('suppliers'), () => find('grns'), () => find('supplier_payments'));
+  const grns = grnList.sort(byDateId);
+  const pays = payList.sort(byDateId);
+  const actions = [];
+  for (const s of suppliers) {
+    const mine = grns.filter((g) => g.supplier_id === s.id);
+    if (!mine.length) continue;
+    for (const st of settle(s, mine, pays.filter((p) => p.supplier_id === s.id), rate)) {
+      const g = st.grn;
+      const settledAt = st.settled ? g.settled_at || new Date().toISOString() : null;
+      const sameRate = Math.abs((g.exchange_rate || 0) - rate) < 0.00005 && Math.abs((g.effective_rate ?? 0) - rate) < 0.00005;
+      if (sameRate && (g.settled_at || null) === settledAt) continue;
+      actions.push({ g, settledAt, recost: !sameRate });
     }
-    for (const pid of touched) recomputeProductCost(pid);
+  }
+  if (!actions.length) return 0;
+  await tx(async () => {
+    const touched = new Set();
+    for (const { g, settledAt, recost } of actions) {
+      if (!recost) { await setById('grns', g.id, { settled_at: settledAt }); continue; }
+      const items = await find('grn_items', { grn_id: g.id }, { sort: { id: 1 } });
+      const expenses = await find('grn_expenses', { grn_id: g.id });
+      const calc = computeLanding({ items, expenses, exchange_rate: rate, cargo_charge_inr: g.cargo_charge_inr });
+      for (let i = 0; i < calc.items.length; i++) {
+        const it = calc.items[i];
+        await setById('grn_items', items[i].id, { landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr });
+        touched.add(items[i].product_id);
+      }
+      await setById('grns', g.id, { exchange_rate: rate, effective_rate: rate, total_lkr: calc.total_lkr, settled_at: settledAt });
+    }
+    for (const pid of touched) await recomputeProductCost(pid);
   });
-  return changed;
+  return actions.length;
 }
 
 /* =========================================================
    LEDGERS (supplier payables in INR, customer receivables in LKR)
+   Worked out for many suppliers / customers at once, with a few reads.
    ========================================================= */
-export function supplierBills(supplierId) {
-  const s = get('SELECT * FROM suppliers WHERE id = ?', supplierId);
-  if (!s) return [];
-  const grns = all(
-    `SELECT id, grn_no, date, due_date, payable_inr AS amount, bale_no, lr_no, cargo_name, exchange_rate
-       FROM grns WHERE supplier_id = ? ORDER BY date, id`, supplierId);
-  const linked = Object.fromEntries(
-    all(`SELECT grn_id, SUM(amount_inr) AS s FROM supplier_payments WHERE supplier_id = ? AND grn_id IS NOT NULL GROUP BY grn_id`, supplierId)
-      .map((r) => [r.grn_id, r.s]));
-  const unlinked = get(`SELECT COALESCE(SUM(amount_inr), 0) AS s FROM supplier_payments WHERE supplier_id = ? AND grn_id IS NULL`, supplierId).s;
-  const docs = [];
-  if (s.opening_balance_inr > 0) {
-    docs.push({ id: null, grn_no: 'Opening balance', date: s.created_at.slice(0, 10), due_date: null, amount: s.opening_balance_inr, linkedPaid: 0 });
-  }
-  for (const g of grns) docs.push({ ...g, linkedPaid: linked[g.id] || 0 });
+
+/** Map of supplier id → its bills (GRNs and old balance) with paid / balance / status. */
+export async function supplierLedgers(ids = null) {
+  const of = ids ? { supplier_id: { $in: ids } } : {};
+  const [suppliers, grnList, pays] = await inParallel(
+    () => find('suppliers', ids ? { id: { $in: ids } } : {}),
+    () => find('grns', of, { project: { id: 1, grn_no: 1, date: 1, due_date: 1, payable_inr: 1, bale_no: 1, lr_no: 1, cargo_name: 1, exchange_rate: 1, supplier_id: 1 } }),
+    () => find('supplier_payments', of, { project: { supplier_id: 1, grn_id: 1, amount_inr: 1 } }),
+  );
+  const grns = grnList.sort(byDateId);
   const today = todayStr();
-  return allocate(docs, unlinked).map((d) => ({
-    ...d,
-    supplier_id: s.id,
-    supplier_name: s.name,
-    status: dueStatus(d.balance, d.due_date, today),
-  }));
-}
-
-export function supplierSummary(supplierId) {
-  const bills = supplierBills(supplierId);
-  return {
-    balance_inr: round2(bills.reduce((a, b) => a + b.balance, 0)),
-    overdue_inr: round2(bills.filter((b) => b.status === 'overdue').reduce((a, b) => a + b.balance, 0)),
-    next_due: bills.filter((b) => b.balance > 0 && b.due_date).map((b) => b.due_date).sort()[0] || null,
-  };
-}
-
-export function customerBills(customerId) {
-  const c = get('SELECT * FROM customers WHERE id = ?', customerId);
-  if (!c) return [];
-  const sales = all(
-    `SELECT id, invoice_no, date, due_date, total, paid_at_sale, ROUND(total - paid_at_sale, 2) AS amount, payment_type
-       FROM sales WHERE customer_id = ? AND status = 'completed' AND total - paid_at_sale > 0.009
-      ORDER BY date, id`, customerId);
-  const linked = Object.fromEntries(
-    all(`SELECT sale_id, SUM(amount) AS s FROM customer_payments WHERE customer_id = ? AND sale_id IS NOT NULL GROUP BY sale_id`, customerId)
-      .map((r) => [r.sale_id, r.s]));
-  const unlinked = get(`SELECT COALESCE(SUM(amount), 0) AS s FROM customer_payments WHERE customer_id = ? AND sale_id IS NULL`, customerId).s;
-  const docs = [];
-  if (c.opening_balance > 0) {
-    docs.push({ id: null, invoice_no: 'Opening balance', date: c.created_at.slice(0, 10), due_date: null, amount: c.opening_balance, linkedPaid: 0 });
+  const out = new Map();
+  for (const s of suppliers) {
+    const myPays = pays.filter((p) => p.supplier_id === s.id);
+    const linked = {};
+    let unlinked = 0;
+    for (const p of myPays) {
+      if (p.grn_id != null) linked[p.grn_id] = (linked[p.grn_id] || 0) + p.amount_inr;
+      else unlinked += p.amount_inr;
+    }
+    const docs = [];
+    if (s.opening_balance_inr > 0) {
+      docs.push({ id: null, grn_no: 'Opening balance', date: String(s.created_at).slice(0, 10), due_date: null, amount: s.opening_balance_inr, linkedPaid: 0 });
+    }
+    for (const g of grns.filter((x) => x.supplier_id === s.id)) {
+      const { supplier_id, payable_inr, ...rest } = g;
+      docs.push({ ...rest, amount: payable_inr, linkedPaid: linked[g.id] || 0 });
+    }
+    out.set(s.id, allocate(docs, unlinked).map((d) => ({ ...d, supplier_id: s.id, supplier_name: s.name, status: dueStatus(d.balance, d.due_date, today) })));
   }
-  for (const s of sales) docs.push({ ...s, linkedPaid: linked[s.id] || 0 });
-  const today = todayStr();
-  return allocate(docs, unlinked).map((d) => ({
-    ...d,
-    customer_id: c.id,
-    customer_name: c.name,
-    customer_phone: c.phone,
-    status: dueStatus(d.balance, d.due_date, today),
-  }));
+  return out;
 }
+export const supplierBills = async (supplierId) => (await supplierLedgers([supplierId])).get(supplierId) || [];
+export const summarizeSupplier = (bills) => ({
+  balance_inr: round2(sum(bills, (b) => b.balance)),
+  overdue_inr: round2(sum(bills.filter((b) => b.status === 'overdue'), (b) => b.balance)),
+  next_due: bills.filter((b) => b.balance > 0 && b.due_date).map((b) => b.due_date).sort()[0] || null,
+});
+export const supplierSummary = async (supplierId) => summarizeSupplier(await supplierBills(supplierId));
 
-export function customerSummary(customerId) {
-  const bills = customerBills(customerId);
-  return {
-    balance: round2(bills.reduce((a, b) => a + b.balance, 0)),
-    overdue: round2(bills.filter((b) => b.status === 'overdue').reduce((a, b) => a + b.balance, 0)),
-  };
+/** Map of customer id → its unpaid-able bills (credit balances and old balance) with paid / balance / status. */
+export async function customerLedgers(ids = null) {
+  const of = ids ? { customer_id: { $in: ids } } : { customer_id: { $ne: null } };
+  const [customers, saleList, pays] = await inParallel(
+    () => find('customers', ids ? { id: { $in: ids } } : {}),
+    () => find('sales', { ...of, status: 'completed', $expr: { $gt: [{ $subtract: ['$total', '$paid_at_sale'] }, 0.009] } },
+      { project: { id: 1, invoice_no: 1, date: 1, due_date: 1, total: 1, paid_at_sale: 1, payment_type: 1, customer_id: 1 } }),
+    () => find('customer_payments', of, { project: { customer_id: 1, sale_id: 1, amount: 1 } }),
+  );
+  const sales = saleList.sort(byDateId);
+  const today = todayStr();
+  const out = new Map();
+  for (const c of customers) {
+    const linked = {};
+    let unlinked = 0;
+    for (const p of pays.filter((x) => x.customer_id === c.id)) {
+      if (p.sale_id != null) linked[p.sale_id] = (linked[p.sale_id] || 0) + p.amount;
+      else unlinked += p.amount;
+    }
+    const docs = [];
+    if (c.opening_balance > 0) {
+      docs.push({ id: null, invoice_no: 'Opening balance', date: String(c.created_at).slice(0, 10), due_date: null, amount: c.opening_balance, linkedPaid: 0 });
+    }
+    for (const s of sales.filter((x) => x.customer_id === c.id)) {
+      docs.push({
+        id: s.id, invoice_no: s.invoice_no, date: s.date, due_date: s.due_date, total: s.total, paid_at_sale: s.paid_at_sale,
+        amount: round2(s.total - s.paid_at_sale), payment_type: s.payment_type, linkedPaid: linked[s.id] || 0,
+      });
+    }
+    out.set(c.id, allocate(docs, unlinked).map((d) => ({
+      ...d, customer_id: c.id, customer_name: c.name, customer_phone: c.phone, status: dueStatus(d.balance, d.due_date, today),
+    })));
+  }
+  return out;
 }
+export const customerBills = async (customerId) => (await customerLedgers([customerId])).get(customerId) || [];
+export const summarizeCustomer = (bills) => ({
+  balance: round2(sum(bills, (b) => b.balance)),
+  overdue: round2(sum(bills.filter((b) => b.status === 'overdue'), (b) => b.balance)),
+});
+export const customerSummary = async (customerId) => summarizeCustomer(await customerBills(customerId));
 
 /* =========================================================
    GRN (goods received)
@@ -218,16 +213,16 @@ export const createGrn = (body) => saveGrn(body);
 /** Edit a GRN that was entered wrongly: same GRN number; stock is moved by the difference only. */
 export const updateGrn = (id, body) => saveGrn(body, id);
 
-function saveGrn(body, editId = null) {
-  const settings = getSettings();
-  const old = editId ? getGrn(editId) : null;
+async function saveGrn(body, editId = null) {
+  const settings = await getSettings();
+  const old = editId ? await getGrn(editId) : null;
   // a new product takes its re-order level from its category (Settings → Categories & products)
   let catalog = [];
   try { catalog = JSON.parse(settings.catalog || '[]'); } catch { /* keep empty */ }
   const reorderOf = (category) => Math.round(num(catalog.find((c) => c.name.toLowerCase() === String(category || '').trim().toLowerCase())?.reorder_sets));
-  const supplier = get('SELECT * FROM suppliers WHERE id = ?', num(body.supplier_id));
+  const supplier = await findOne('suppliers', { id: num(body.supplier_id) });
   if (!supplier) fail('Please choose a supplier');
-  const rate = costingRate();   // fixed — the live rate does not change costs
+  const rate = num(settings.costing_rate) || 3.5;   // fixed — the live rate does not change costs
   const rawItems = (body.items || []).filter((i) => (i.product_id || String(i.name || '').trim()) && (num(i.sets) > 0 || num(i.extra_pcs) > 0));
   if (!rawItems.length) fail('Add at least one item with a quantity');
   const expenses = (body.expenses || []).filter((e) => String(e.label || '').trim() && num(e.amount_lkr) !== 0);
@@ -238,70 +233,63 @@ function saveGrn(body, editId = null) {
   const payable_inr = round2(calc.goods_inr + (cargoInBill ? calc.cargo_inr : 0));
   const paymentType = body.payment_type === 'paid' ? 'paid' : 'credit';
   const due_date = paymentType === 'credit' ? body.due_date || addDays(date, supplier.credit_days) : date;
+  const head = {
+    date, supplier_id: supplier.id, supplier_invoice_no: body.supplier_invoice_no || null, cargo_name: (body.cargo_name || '').trim() || null,
+    exchange_rate: rate, goods_inr: calc.goods_inr, cargo_charge_inr: calc.cargo_inr, cargo_in_supplier_bill: cargoInBill, payable_inr,
+    expenses_lkr: calc.expenses_lkr, total_lkr: calc.total_lkr, total_sets: calc.total_sets, total_pcs: calc.total_pcs,
+    payment_type: paymentType, due_date, notes: body.notes || null, effective_rate: rate,
+  };
 
-  const id = tx(() => {
+  const id = await tx(async () => {
     let grnId;
     let grn_no;
     if (old) {
       // same GRN, new details: the old lines and charges are replaced below
       grnId = old.id;
       grn_no = old.grn_no;
-      run(
-        `UPDATE grns SET date = ?, supplier_id = ?, supplier_invoice_no = ?, cargo_name = ?, exchange_rate = ?,
-           goods_inr = ?, cargo_charge_inr = ?, cargo_in_supplier_bill = ?, payable_inr = ?, expenses_lkr = ?, total_lkr = ?, total_sets = ?, total_pcs = ?,
-           payment_type = ?, due_date = ?, notes = ?, effective_rate = ? WHERE id = ?`,
-        date, supplier.id, body.supplier_invoice_no || null, (body.cargo_name || '').trim() || null, rate,
-        calc.goods_inr, calc.cargo_inr, cargoInBill, payable_inr, calc.expenses_lkr, calc.total_lkr, calc.total_sets, calc.total_pcs,
-        paymentType, due_date, body.notes || null, rate, grnId);
-      run('DELETE FROM grn_expenses WHERE grn_id = ?', grnId);
-      run('DELETE FROM grn_items WHERE grn_id = ?', grnId);
+      await setById('grns', grnId, head);
+      await deleteMany('grn_expenses', { grn_id: grnId });
+      await deleteMany('grn_items', { grn_id: grnId });
     } else {
-      grn_no = nextNo('grns', 'grn_no', settings.grn_prefix || 'GRN-', 4);
-      grnId = run(
-        `INSERT INTO grns (grn_no, date, supplier_id, supplier_invoice_no, cargo_name, exchange_rate,
-           goods_inr, cargo_charge_inr, cargo_in_supplier_bill, payable_inr, expenses_lkr, total_lkr, total_sets, total_pcs,
-           payment_type, due_date, notes, effective_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        grn_no, date, supplier.id, body.supplier_invoice_no || null, (body.cargo_name || '').trim() || null, rate,
-        calc.goods_inr, calc.cargo_inr, cargoInBill, payable_inr, calc.expenses_lkr, calc.total_lkr, calc.total_sets, calc.total_pcs,
-        paymentType, due_date, body.notes || null, rate).lastInsertRowid;
+      grn_no = await nextNo('grns', 'grn_no', settings.grn_prefix || 'GRN-', 4);
+      grnId = (await insert('grns', { grn_no, ...head })).id;
     }
     const newPcs = new Map(); // product id → pieces this GRN now brings in
 
-    for (const e of expenses) {
-      run(`INSERT INTO grn_expenses (grn_id, label, amount_lkr) VALUES (?, ?, ?)`, grnId, e.label.trim(), round2(e.amount_lkr));
-    }
+    for (const e of expenses) await insert('grn_expenses', { grn_id: grnId, label: e.label.trim(), amount_lkr: round2(e.amount_lkr) });
 
     for (const it of calc.items) {
-      let product = it.product_id ? get('SELECT * FROM products WHERE id = ?', num(it.product_id)) : null;
+      let product = it.product_id ? await findOne('products', { id: num(it.product_id) }) : null;
       if (!product) {
-        const code = String(it.code || '').trim() || nextProductCode();
-        if (get('SELECT id FROM products WHERE code = ?', code)) fail(`Product code "${code}" already exists`);
-        const { lastInsertRowid } = run(
-          `INSERT INTO products (code, name, category, subtype, pname, pcs_per_set, colors_count, color_names, sizes, supplier_id, reorder_sets)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          code, String(it.name).trim(), (it.category || '').trim() || null, (it.subtype || '').trim() || null, (it.pname || '').trim() || null, it.pcs_per_set, Math.round(num(it.colors_count)),
-          it.color_names || null, it.sizes || null, supplier.id, Math.round(num(it.reorder_sets)) || reorderOf(it.category));
-        product = get('SELECT * FROM products WHERE id = ?', lastInsertRowid);
+        const code = String(it.code || '').trim() || await nextProductCode();
+        if (await findOne('products', { code })) fail(`Product code "${code}" already exists`);
+        product = await insert('products', {
+          code, name: String(it.name).trim(), category: (it.category || '').trim() || null, subtype: (it.subtype || '').trim() || null,
+          pname: (it.pname || '').trim() || null, pcs_per_set: it.pcs_per_set, colors_count: Math.round(num(it.colors_count)),
+          color_names: it.color_names || null, sizes: it.sizes || null, supplier_id: supplier.id,
+          reorder_sets: Math.round(num(it.reorder_sets)) || reorderOf(it.category),
+        });
       }
 
       // cost is worked out from the receipts by recomputeProductCost (called from moveStock below)
       const mrp = num(it.mrp_per_set) || product.mrp_per_set;
       const expected = num(it.expected_per_set) || product.expected_per_set;
-      run(
-        `UPDATE products SET pcs_per_set = ?, colors_count = ?, color_names = COALESCE(?, color_names), sizes = COALESCE(?, sizes),
-           category = COALESCE(?, category), subtype = COALESCE(?, subtype), pname = COALESCE(?, pname), supplier_id = ?, mrp_per_set = ?, expected_per_set = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        it.pcs_per_set, Math.round(num(it.colors_count)) || product.colors_count, it.color_names || null, it.sizes || null,
-        (it.category || '').trim() || null, (it.subtype || '').trim() || null, (it.pname || '').trim() || null, supplier.id, round2(mrp), round2(expected), product.id);
+      const keep = (v, cur) => v || cur;   // like COALESCE: only replace when a new value is given
+      await setById('products', product.id, {
+        pcs_per_set: it.pcs_per_set, colors_count: Math.round(num(it.colors_count)) || product.colors_count,
+        color_names: keep(it.color_names || null, product.color_names), sizes: keep(it.sizes || null, product.sizes),
+        category: keep((it.category || '').trim() || null, product.category), subtype: keep((it.subtype || '').trim() || null, product.subtype),
+        pname: keep((it.pname || '').trim() || null, product.pname), supplier_id: supplier.id,
+        mrp_per_set: round2(mrp), expected_per_set: round2(expected), updated_at: stamp(),
+      });
 
-      run(
-        `INSERT INTO grn_items (grn_id, product_id, name, pcs_per_set, colors_count, color_names, sizes, sets, cost_inr_per_set,
-           line_inr, landed_lkr, landed_per_set_lkr, landed_per_pcs_lkr, mrp_per_set, expected_per_set, extra_sets, extra_pcs, short_sets, short_pcs)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        grnId, product.id, product.name, it.pcs_per_set, Math.round(num(it.colors_count)), it.color_names || null, it.sizes || null,
-        it.sets, it.cost_inr_per_set, it.line_inr, it.landed_lkr, it.landed_per_set_lkr, it.landed_per_pcs_lkr, round2(mrp), round2(expected),
-        it.extra_sets, it.extra_pcs, it.short_sets, it.short_pcs);
+      await insert('grn_items', {
+        grn_id: grnId, product_id: product.id, name: product.name, pcs_per_set: it.pcs_per_set, colors_count: Math.round(num(it.colors_count)),
+        color_names: it.color_names || null, sizes: it.sizes || null, sets: it.sets, cost_inr_per_set: it.cost_inr_per_set,
+        line_inr: it.line_inr, landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr,
+        mrp_per_set: round2(mrp), expected_per_set: round2(expected),
+        extra_sets: it.extra_sets, extra_pcs: it.extra_pcs, short_sets: it.short_sets, short_pcs: it.short_pcs,
+      });
 
       const notes = [
         it.extra_pcs && `+${it.extra_pcs} extra pcs`,
@@ -309,82 +297,97 @@ function saveGrn(body, editId = null) {
         it.short_pcs && `${it.short_pcs} pcs short`,
       ].filter(Boolean);
       if (old) newPcs.set(product.id, (newPcs.get(product.id) || 0) + it.pcs);
-      else moveStock(product.id, it.pcs, 'grn', grn_no, `Received ${it.sets} sets${notes.length ? ` (${notes.join(', ')})` : ''}`, date);
+      else await moveStock(product.id, it.pcs, 'grn', grn_no, `Received ${it.sets} sets${notes.length ? ` (${notes.join(', ')})` : ''}`, date);
     }
 
+    const autoNote = `Paid with ${grn_no}`;
     if (old) {
       // stock moves by the difference only — and can't take back pieces that are already sold
       const oldPcs = new Map();
-      for (const it of old.items) {
-        const pcs = Math.max(0, (it.sets + it.extra_sets - it.short_sets) * it.pcs_per_set + it.extra_pcs - it.short_pcs);
-        oldPcs.set(it.product_id, (oldPcs.get(it.product_id) || 0) + pcs);
-      }
+      for (const it of old.items) oldPcs.set(it.product_id, (oldPcs.get(it.product_id) || 0) + grnItemPcs(it));
       for (const pid of new Set([...oldPcs.keys(), ...newPcs.keys()])) {
         const diff = (newPcs.get(pid) || 0) - (oldPcs.get(pid) || 0);
-        if (!diff) { recomputeProductCost(pid); continue; }
-        const p = get('SELECT name, stock_pcs FROM products WHERE id = ?', pid);
+        if (!diff) { await recomputeProductCost(pid); continue; }
+        const p = await findOne('products', { id: pid });
         if (p.stock_pcs + diff < 0) fail(`Cannot save: "${p.name}" from this GRN is already sold — only ${p.stock_pcs} pcs are left to take back.`);
-        moveStock(pid, diff, 'grn-edit', grn_no, `GRN edited (${diff > 0 ? '+' : ''}${diff} pcs)`, date);
+        await moveStock(pid, diff, 'grn-edit', grn_no, `GRN edited (${diff > 0 ? '+' : ''}${diff} pcs)`, date);
       }
       // a GRN paid at receipt: its payment follows the new total; switching to credit removes it
-      const auto = get('SELECT id FROM supplier_payments WHERE grn_id = ? AND notes = ?', grnId, `Paid with ${grn_no}`);
-      if (auto && (paymentType !== 'paid' || payable_inr <= 0)) run('DELETE FROM supplier_payments WHERE id = ?', auto.id);
+      const auto = await findOne('supplier_payments', { grn_id: grnId, notes: autoNote });
+      if (auto && (paymentType !== 'paid' || payable_inr <= 0)) await deleteMany('supplier_payments', { id: auto.id });
       if (auto && paymentType === 'paid' && payable_inr > 0) {
-        run('UPDATE supplier_payments SET supplier_id = ?, date = ?, amount_inr = ?, exchange_rate = ?, amount_lkr = ?, method = COALESCE(?, method) WHERE id = ?',
-          supplier.id, date, payable_inr, rate, round2(payable_inr * rate), body.payment_method || null, auto.id);
+        await setById('supplier_payments', auto.id, {
+          supplier_id: supplier.id, date, amount_inr: payable_inr, exchange_rate: rate, amount_lkr: round2(payable_inr * rate),
+          ...(body.payment_method ? { method: body.payment_method } : {}),
+        });
       }
       if (!auto && paymentType === 'paid' && payable_inr > 0) {
-        run(
-          `INSERT INTO supplier_payments (supplier_id, grn_id, date, amount_inr, exchange_rate, amount_lkr, method, reference, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          supplier.id, grnId, date, payable_inr, rate, round2(payable_inr * rate), body.payment_method || 'Bank transfer',
-          body.payment_reference || null, `Paid with ${grn_no}`);
+        await insert('supplier_payments', {
+          supplier_id: supplier.id, grn_id: grnId, date, amount_inr: payable_inr, exchange_rate: rate, amount_lkr: round2(payable_inr * rate),
+          method: body.payment_method || 'Bank transfer', reference: body.payment_reference || null, notes: autoNote,
+        });
       }
       return grnId;
     }
 
     if (paymentType === 'paid' && payable_inr > 0) {
-      run(
-        `INSERT INTO supplier_payments (supplier_id, grn_id, date, amount_inr, exchange_rate, amount_lkr, method, reference, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        supplier.id, grnId, date, payable_inr, rate, round2(payable_inr * rate), body.payment_method || 'Bank transfer',
-        body.payment_reference || null, `Paid with ${grn_no}`);
+      await insert('supplier_payments', {
+        supplier_id: supplier.id, grn_id: grnId, date, amount_inr: payable_inr, exchange_rate: rate, amount_lkr: round2(payable_inr * rate),
+        method: body.payment_method || 'Bank transfer', reference: body.payment_reference || null, notes: autoNote,
+      });
     }
     return grnId;
   });
-  revalueGrns();
+  await revalueGrns();
   return getGrn(id);
 }
 
+/** Products by id (for joining onto GRN / sale lines). */
+export async function productsById(ids, project) {
+  const list = ids.length ? await find('products', { id: { $in: [...new Set(ids)] } }, project ? { project: { id: 1, ...project } } : {}) : [];
+  return Object.fromEntries(list.map((p) => [p.id, p]));
+}
 
-export function getGrn(id) {
-  const g = get(
-    `SELECT g.*, s.name AS supplier_name, s.phone AS supplier_phone, s.city AS supplier_city
-       FROM grns g JOIN suppliers s ON s.id = g.supplier_id WHERE g.id = ?`, id);
+export async function getGrn(id) {
+  const g = await findOne('grns', { id });
   if (!g) fail('GRN not found', 404);
-  g.items = all(
-    `SELECT gi.*, p.code, p.category, p.subtype, p.pname FROM grn_items gi JOIN products p ON p.id = gi.product_id WHERE gi.grn_id = ? ORDER BY gi.id`, id);
-  g.expenses = all('SELECT * FROM grn_expenses WHERE grn_id = ? ORDER BY id', id);
-  g.payments = all('SELECT * FROM supplier_payments WHERE grn_id = ? ORDER BY date, id', id);
-  const bill = supplierBills(g.supplier_id).find((b) => b.id === g.id);
+  const [s, items, expenses, payments, bills] = await inParallel(
+    () => findOne('suppliers', { id: g.supplier_id }),
+    () => find('grn_items', { grn_id: id }, { sort: { id: 1 } }),
+    () => find('grn_expenses', { grn_id: id }, { sort: { id: 1 } }),
+    () => find('supplier_payments', { grn_id: id }, { sort: { date: 1, id: 1 } }),
+    () => supplierBills(g.supplier_id),
+  );
+  if (!s) fail('GRN not found', 404);
+  Object.assign(g, { supplier_name: s.name, supplier_phone: s.phone, supplier_city: s.city });
+  const prods = await productsById(items.map((i) => i.product_id), { code: 1, category: 1, subtype: 1, pname: 1 });
+  g.items = items.filter((i) => prods[i.product_id]).map((i) => {
+    const p = prods[i.product_id];
+    return { ...i, code: p.code, category: p.category ?? null, subtype: p.subtype ?? null, pname: p.pname ?? null };
+  });
+  g.expenses = expenses;
+  g.payments = payments;
+  const bill = bills.find((b) => b.id === g.id);
   g.paid_inr = bill ? bill.paid : 0;
   g.balance_inr = bill ? bill.balance : 0;
   g.pay_status = bill ? bill.status : 'paid';
   return g;
 }
 
-export function deleteGrn(id) {
-  const g = getGrn(id);
-  return tx(() => {
+export async function deleteGrn(id) {
+  const g = await getGrn(id);
+  return tx(async () => {
     for (const it of g.items) {
-      const pcs = Math.max(0, (it.sets + it.extra_sets - it.short_sets) * it.pcs_per_set + it.extra_pcs - it.short_pcs);
-      const p = get('SELECT stock_pcs, name FROM products WHERE id = ?', it.product_id);
+      const pcs = grnItemPcs(it);
+      const p = await findOne('products', { id: it.product_id });
       if (p.stock_pcs < pcs) fail(`Cannot delete: "${p.name}" from this GRN is already sold (only ${p.stock_pcs} pcs left).`);
-      moveStock(it.product_id, -pcs, 'grn-delete', g.grn_no, 'GRN deleted');
+      await moveStock(it.product_id, -pcs, 'grn-delete', g.grn_no, 'GRN deleted');
     }
-    run('DELETE FROM supplier_payments WHERE grn_id = ?', id);
-    run('DELETE FROM grns WHERE id = ?', id);
-    for (const pid of new Set(g.items.map((i) => i.product_id))) recomputeProductCost(pid);
+    await deleteMany('supplier_payments', { grn_id: id });
+    await deleteMany('grn_items', { grn_id: id });
+    await deleteMany('grn_expenses', { grn_id: id });
+    await deleteMany('grns', { id });
+    for (const pid of new Set(g.items.map((i) => i.product_id))) await recomputeProductCost(pid);
     return { ok: true };
   });
 }
@@ -392,43 +395,42 @@ export function deleteGrn(id) {
 /* =========================================================
    SALES
    ========================================================= */
-/** approve(action) is called when the bill needs an admin's OK (below cost / over credit limit). */
-export function createSale(body, approve) {
-  const settings = getSettings();
+/** approve(action) is called when the bill needs an admin's OK (below cost). */
+export async function createSale(body, approve) {
+  const settings = await getSettings();
   const items = (body.items || []).filter((i) => num(i.qty) > 0);
   if (!items.length) fail('The bill is empty');
   const paymentType = body.payment_type === 'credit' ? 'credit' : 'cash';
-  const customer = body.customer_id ? get('SELECT * FROM customers WHERE id = ?', num(body.customer_id)) : null;
+  const customer = body.customer_id ? await findOne('customers', { id: num(body.customer_id) }) : null;
   if (paymentType === 'credit' && !customer) fail('Choose a customer for a credit bill');
   const date = body.date || todayStr();
 
-  return tx(() => {
-    const lines = items.map((i) => {
-      const p = get('SELECT * FROM products WHERE id = ?', num(i.product_id));
+  return tx(async () => {
+    const lines = [];
+    for (const i of items) {
+      const p = await findOne('products', { id: num(i.product_id) });
       if (!p) fail('Product not found');
       const unit = i.unit === 'pcs' ? 'pcs' : 'set';
       const per = unit === 'set' ? p.pcs_per_set : 1;
       const qty = num(i.qty);
       const pcs = Math.round(qty * per);
-      if (pcs > p.stock_pcs) {
-        fail(`Not enough stock for "${p.name}". Available: ${Math.floor(p.stock_pcs / p.pcs_per_set)} sets + ${p.stock_pcs % p.pcs_per_set} pcs`);
-      }
+      if (pcs > p.stock_pcs) fail(`Not enough stock for "${p.name}". Available: ${p.stock_pcs} pcs`);
       const price = num(i.price);
       const disc_pct = Math.min(100, Math.max(0, num(i.disc_pct)));
       const disc = round2((qty * price * disc_pct) / 100);
-      return {
+      lines.push({
         p, unit, qty, pcs, price, disc, disc_pct,
         net: qty ? round2((qty * price - disc) / qty) : price,     // price per unit after the line discount
         mrp: round2(p.mrp_per_set / (unit === 'set' ? 1 : p.pcs_per_set)),
         expected: round2(p.expected_per_set / (unit === 'set' ? 1 : p.pcs_per_set)),
         cost: round2(p.cost_per_pcs * per),
         line_total: round2(qty * price - disc),
-      };
-    });
-    const subtotal = round2(lines.reduce((s, l) => s + l.line_total, 0));
+      });
+    }
+    const subtotal = round2(sum(lines, (l) => l.line_total));
     const discount = Math.min(round2(num(body.discount)), subtotal);
     const total = round2(subtotal - discount);
-    const cost_total = round2(lines.reduce((s, l) => s + l.cost * l.qty, 0));
+    const cost_total = round2(sum(lines, (l) => l.cost * l.qty));
     const paid = paymentType === 'cash' ? total : Math.min(round2(num(body.paid_amount)), total);
     const due_date = paymentType === 'credit' ? body.due_date || addDays(date, customer.credit_days) : null;
 
@@ -436,45 +438,48 @@ export function createSale(body, approve) {
     const below = lines.filter((l) => l.cost > 0 && l.net < l.cost);
     if (below.length) reasons.push(`Sell below cost: ${below.map((l) => `${l.p.name} at Rs ${l.net} (cost Rs ${l.cost})`).join('; ')}`);
     if (paymentType === 'credit' && customer.credit_limit > 0) {
-      const after = round2(customerSummary(customer.id).balance + total - paid);
+      const after = round2((await customerSummary(customer.id)).balance + total - paid);
       // not approvable here: the Super Admin has to raise the limit first, then the bill goes through
       if (after > customer.credit_limit) {
         fail(`${customer.name} would owe Rs ${after}, over the credit limit of Rs ${customer.credit_limit}. Raise the credit limit first.`, 409);
       }
     }
-    if (reasons.length && approve) approve(reasons.join(' · '));
+    if (reasons.length && approve) await approve(reasons.join(' · '));
 
-    const invoice_no = nextNo('sales', 'invoice_no', settings.invoice_prefix || 'INV-', 5);
-
-    const { lastInsertRowid: saleId } = run(
-      `INSERT INTO sales (invoice_no, date, customer_id, customer_name, payment_type, subtotal, discount, total, paid_at_sale, cost_total, due_date, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      invoice_no, date, customer?.id ?? null, customer?.name || (body.customer_name || '').trim() || 'Walk-in customer',
-      paymentType, subtotal, discount, total, paid, cost_total, due_date, body.notes || null);
-
+    const invoice_no = await nextNo('sales', 'invoice_no', settings.invoice_prefix || 'INV-', 5);
+    const sale = await insert('sales', {
+      invoice_no, date, customer_id: customer?.id ?? null, customer_name: customer?.name || (body.customer_name || '').trim() || 'Walk-in customer',
+      payment_type: paymentType, subtotal, discount, total, paid_at_sale: paid, cost_total, due_date, notes: body.notes || null,
+    });
     for (const l of lines) {
-      run(
-        `INSERT INTO sale_items (sale_id, product_id, code, name, unit, qty, pcs, price, mrp_per_unit, expected_per_unit, cost_per_unit, line_total, disc, disc_pct)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        saleId, l.p.id, l.p.code, l.p.name, l.unit, l.qty, l.pcs, l.price, l.mrp, l.expected, l.cost, l.line_total, l.disc, l.disc_pct);
-      moveStock(l.p.id, -l.pcs, 'sale', invoice_no, `${l.qty} ${l.unit}`, date);
+      await insert('sale_items', {
+        sale_id: sale.id, product_id: l.p.id, code: l.p.code, name: l.p.name, unit: l.unit, qty: l.qty, pcs: l.pcs, price: l.price,
+        mrp_per_unit: l.mrp, expected_per_unit: l.expected, cost_per_unit: l.cost, line_total: l.line_total, disc: l.disc, disc_pct: l.disc_pct,
+      });
+      await moveStock(l.p.id, -l.pcs, 'sale', invoice_no, `${l.qty} ${l.unit}`, date);
     }
-    return getSale(saleId);
-  });
+    return sale.id;
+  }).then((saleId) => getSale(saleId));
 }
 
-export function getSale(id) {
-  const s = get(
-    `SELECT s.*, c.phone AS customer_phone, c.address AS customer_address, c.shop_name AS customer_shop
-       FROM sales s LEFT JOIN customers c ON c.id = s.customer_id WHERE s.id = ?`, id);
+export async function getSale(id) {
+  const s = await findOne('sales', { id });
   if (!s) fail('Bill not found', 404);
-  s.items = all('SELECT * FROM sale_items WHERE sale_id = ? ORDER BY id', id);
-  s.payments = all('SELECT * FROM customer_payments WHERE sale_id = ? ORDER BY date, id', id);
-  if (s.customer_id && s.status === 'completed') {
-    const bill = customerBills(s.customer_id).find((b) => b.id === s.id);
+  const withBills = s.customer_id && s.status === 'completed';
+  const [c, items, payments, bills] = await inParallel(
+    () => (s.customer_id ? findOne('customers', { id: s.customer_id }) : null),
+    () => find('sale_items', { sale_id: id }, { sort: { id: 1 } }),
+    () => find('customer_payments', { sale_id: id }, { sort: { date: 1, id: 1 } }),
+    () => (withBills ? customerBills(s.customer_id) : null),
+  );
+  Object.assign(s, { customer_phone: c?.phone ?? null, customer_address: c?.address ?? null, customer_shop: c?.shop_name ?? null });
+  s.items = items;
+  s.payments = payments;
+  if (withBills) {
+    const bill = bills.find((b) => b.id === s.id);
     s.balance = bill ? bill.balance : 0;
     s.pay_status = bill ? bill.status : 'paid';
-    s.customer_balance = customerSummary(s.customer_id).balance;
+    s.customer_balance = summarizeCustomer(bills).balance;
   } else {
     s.balance = 0;
     s.pay_status = s.status === 'void' ? 'void' : 'paid';
@@ -487,25 +492,27 @@ export function getSale(id) {
  * Deletes a bill for good (Super Admin only). Its stock goes back (unless it was already cancelled),
  * and any payments recorded against it stay with the customer as money on account.
  */
-export function deleteSale(id) {
-  const s = getSale(id);
-  return tx(() => {
-    if (s.status !== 'void') for (const it of s.items) moveStock(it.product_id, it.pcs, 'void', s.invoice_no, 'Bill deleted');
-    run('UPDATE customer_payments SET sale_id = NULL WHERE sale_id = ?', id);
-    run('DELETE FROM sale_items WHERE sale_id = ?', id);
-    run('DELETE FROM sales WHERE id = ?', id);
+export async function deleteSale(id) {
+  const s = await getSale(id);
+  return tx(async () => {
+    if (s.status !== 'void') for (const it of s.items) await moveStock(it.product_id, it.pcs, 'void', s.invoice_no, 'Bill deleted');
+    await updateMany('customer_payments', { sale_id: id }, { $set: { sale_id: null } });
+    await deleteMany('sale_items', { sale_id: id });
+    await deleteMany('sales', { id });
     return { ok: true, invoice_no: s.invoice_no, payments_kept: s.payments.length };
   });
 }
 
-export function voidSale(id, reason) {
-  const s = getSale(id);
+export async function voidSale(id, reason) {
+  const s = await getSale(id);
   if (s.status === 'void') fail('This bill is already cancelled');
   if (s.payments.length) fail('This bill has payments recorded against it. Delete those payments first.');
-  return tx(() => {
-    for (const it of s.items) moveStock(it.product_id, it.pcs, 'void', s.invoice_no, 'Bill cancelled');
-    run(`UPDATE sales SET status = 'void', notes = TRIM(COALESCE(notes, '') || ' [Cancelled: ' || ? || ']') WHERE id = ?`,
-      reason || 'no reason', id);
-    return getSale(id);
+  await tx(async () => {
+    for (const it of s.items) await moveStock(it.product_id, it.pcs, 'void', s.invoice_no, 'Bill cancelled');
+    await setById('sales', id, { status: 'void', notes: `${s.notes || ''} [Cancelled: ${reason || 'no reason'}]`.trim() });
   });
+  return getSale(id);
 }
+
+/* re-export for routes */
+export { updateOne };

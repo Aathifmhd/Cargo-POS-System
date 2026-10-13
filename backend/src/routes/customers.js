@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { all, get, run, fail, num, round2, todayStr } from '../db.js';
-import { customerBills, customerSummary } from '../services.js';
+import { find, findOne, insert, setById, deleteMany, fail, num, round2, sum, todayStr, inParallel } from '../db.js';
+import { customerLedgers, customerBills, summarizeCustomer } from '../services.js';
 import { guard } from '../auth.js';
 
 const r = Router();
@@ -19,45 +19,59 @@ function clean(body) {
   };
 }
 
-r.get('/', (req, res) => {
-  const rows = all(
-    `SELECT c.*,
-            (SELECT COUNT(*) FROM sales s WHERE s.customer_id = c.id AND s.status = 'completed') AS bill_count,
-            (SELECT COALESCE(SUM(total), 0) FROM sales s WHERE s.customer_id = c.id AND s.status = 'completed') AS total_bought,
-            (SELECT MAX(date) FROM sales s WHERE s.customer_id = c.id AND s.status = 'completed') AS last_sale_date
-       FROM customers c ORDER BY c.active DESC, c.name`);
-  res.json(rows.map((c) => ({ ...c, ...customerSummary(c.id) })));
+const byActiveName = (a, b) => (b.active - a.active) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
+r.get('/', async (req, res) => {
+  const [list, sales, ledgers] = await inParallel(
+    () => find('customers'),
+    () => find('sales', { status: 'completed', customer_id: { $ne: null } }, { project: { customer_id: 1, total: 1, date: 1 } }),
+    () => customerLedgers(),
+  );
+  const customers = list.sort(byActiveName);
+  const stats = {};
+  for (const s of sales) {
+    const t = (stats[s.customer_id] ??= { bill_count: 0, total_bought: 0, last_sale_date: null });
+    t.bill_count++;
+    t.total_bought += s.total;
+    if (!t.last_sale_date || s.date > t.last_sale_date) t.last_sale_date = s.date;
+  }
+  res.json(customers.map((c) => ({
+    ...c, bill_count: 0, total_bought: 0, last_sale_date: null, ...stats[c.id],
+    ...summarizeCustomer(ledgers.get(c.id) || []),
+  })));
 });
 
-r.get('/:id', (req, res) => {
-  const c = get('SELECT * FROM customers WHERE id = ?', num(req.params.id));
+r.get('/:id', async (req, res) => {
+  const c = await findOne('customers', { id: num(req.params.id) });
   if (!c) fail('Customer not found', 404);
-  const sales = all(
-    `SELECT id, invoice_no, date, payment_type, total, paid_at_sale, status, due_date
-       FROM sales WHERE customer_id = ? ORDER BY date DESC, id DESC LIMIT 200`, c.id);
-  const payments = all(
-    `SELECT p.*, s.invoice_no FROM customer_payments p LEFT JOIN sales s ON s.id = p.sale_id
-      WHERE p.customer_id = ? ORDER BY p.date DESC, p.id DESC`, c.id);
-  const totals = get(
-    `SELECT COUNT(*) AS bill_count, COALESCE(SUM(total), 0) AS total_bought, COALESCE(SUM(total - cost_total), 0) AS profit
-       FROM sales WHERE customer_id = ? AND status = 'completed'`, c.id);
-  res.json({ ...c, ...customerSummary(c.id), ...totals, bills: customerBills(c.id), sales, payments });
+  const [sales, payments, done, bills] = await inParallel(
+    () => find('sales', { customer_id: c.id }, {
+      sort: { date: -1, id: -1 }, limit: 200, project: { id: 1, invoice_no: 1, date: 1, payment_type: 1, total: 1, paid_at_sale: 1, status: 1, due_date: 1 },
+    }),
+    () => find('customer_payments', { customer_id: c.id }, { sort: { date: -1, id: -1 } }),
+    () => find('sales', { customer_id: c.id, status: 'completed' }, { project: { total: 1, cost_total: 1 } }),
+    () => customerBills(c.id),
+  );
+  const saleNo = Object.fromEntries((await find('sales', { id: { $in: payments.map((p) => p.sale_id).filter((x) => x != null) } }, { project: { id: 1, invoice_no: 1 } }))
+    .map((s) => [s.id, s.invoice_no]));
+  const totals = { bill_count: done.length, total_bought: sum(done, (s) => s.total), profit: sum(done, (s) => s.total - s.cost_total) };
+  res.json({
+    ...c, ...summarizeCustomer(bills), ...totals, bills, sales,
+    payments: payments.map((p) => ({ ...p, invoice_no: p.sale_id != null ? saleNo[p.sale_id] ?? null : null })),
+  });
 });
 
-r.post('/', (req, res) => {
+r.post('/', async (req, res) => {
   const d = clean(req.body);
-  if (!d.name) fail('Enter the customer name');
   // adding, editing or deleting a customer always needs the Super Admin's password
-  guard(req, `New customer ${d.name} (credit limit Rs ${d.credit_limit}, old balance Rs ${d.opening_balance})`, 'superadmin', { always: true });
-  const { lastInsertRowid } = run(
-    `INSERT INTO customers (${FIELDS.join(', ')}) VALUES (${FIELDS.map(() => '?').join(', ')})`,
-    ...FIELDS.map((f) => d[f]));
-  res.json({ ...get('SELECT * FROM customers WHERE id = ?', lastInsertRowid), balance: d.opening_balance, overdue: 0 });
+  await guard(req, `New customer ${d.name} (credit limit Rs ${d.credit_limit}, old balance Rs ${d.opening_balance})`, 'superadmin', { always: true });
+  const c = await insert('customers', Object.fromEntries(FIELDS.map((f) => [f, d[f]])));
+  res.json({ ...c, balance: d.opening_balance, overdue: 0 });
 });
 
-r.put('/:id', (req, res) => {
+r.put('/:id', async (req, res) => {
   const d = clean(req.body);
-  const old = get('SELECT * FROM customers WHERE id = ?', num(req.params.id));
+  const old = await findOne('customers', { id: num(req.params.id) });
   if (!old) fail('Customer not found', 404);
   const changes = [];
   if (old.name !== d.name) changes.push(`name "${old.name}" → "${d.name}"`);
@@ -65,52 +79,54 @@ r.put('/:id', (req, res) => {
   if (old.credit_days !== d.credit_days) changes.push(`credit days ${old.credit_days} → ${d.credit_days}`);
   if (old.opening_balance !== d.opening_balance) changes.push(`old balance Rs ${old.opening_balance} → Rs ${d.opening_balance}`);
   if (old.active !== d.active) changes.push(d.active ? 'made active' : 'made inactive');
-  guard(req, `Edit customer ${old.name}${changes.length ? `: ${changes.join(', ')}` : ''}`, 'superadmin', { always: true });
-  run(`UPDATE customers SET ${FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`, ...FIELDS.map((f) => d[f]), num(req.params.id));
-  res.json(get('SELECT * FROM customers WHERE id = ?', num(req.params.id)));
+  await guard(req, `Edit customer ${old.name}${changes.length ? `: ${changes.join(', ')}` : ''}`, 'superadmin', { always: true });
+  await setById('customers', old.id, Object.fromEntries(FIELDS.map((f) => [f, d[f]])));
+  res.json(await findOne('customers', { id: old.id }));
 });
 
 /** Raise (or set) just the credit limit — used from the till when a credit bill would go over it. Super Admin only. */
-r.put('/:id/credit-limit', (req, res) => {
-  const c = get('SELECT * FROM customers WHERE id = ?', num(req.params.id));
+r.put('/:id/credit-limit', async (req, res) => {
+  const c = await findOne('customers', { id: num(req.params.id) });
   if (!c) fail('Customer not found', 404);
   const limit = round2(num(req.body.credit_limit));
   if (limit < 0) fail('Credit limit cannot be negative');
-  if (limit === c.credit_limit) return res.json({ ...c, ...customerSummary(c.id) });
-  guard(req, `Customer ${c.name}: credit limit Rs ${c.credit_limit} → Rs ${limit}${req.body.reason ? ` (${req.body.reason})` : ''}`, 'superadmin');
-  run('UPDATE customers SET credit_limit = ? WHERE id = ?', limit, c.id);
-  res.json({ ...get('SELECT * FROM customers WHERE id = ?', c.id), ...customerSummary(c.id) });
+  const summary = async () => summarizeCustomer(await customerBills(c.id));
+  if (limit === c.credit_limit) return res.json({ ...c, ...(await summary()) });
+  await guard(req, `Customer ${c.name}: credit limit Rs ${c.credit_limit} → Rs ${limit}${req.body.reason ? ` (${req.body.reason})` : ''}`, 'superadmin');
+  await setById('customers', c.id, { credit_limit: limit });
+  res.json({ ...(await findOne('customers', { id: c.id })), ...(await summary()) });
 });
 
-r.delete('/:id', (req, res) => {
+r.delete('/:id', async (req, res) => {
   const id = num(req.params.id);
-  if (get('SELECT id FROM sales WHERE customer_id = ? LIMIT 1', id) || get('SELECT id FROM customer_payments WHERE customer_id = ? LIMIT 1', id)) {
+  if (await findOne('sales', { customer_id: id }) || await findOne('customer_payments', { customer_id: id })) {
     fail('This customer has bills or payments. Mark them inactive instead of deleting.');
   }
-  guard(req, `Delete customer ${get('SELECT name FROM customers WHERE id = ?', id)?.name || `#${id}`}`, 'superadmin', { always: true });
-  run('DELETE FROM customers WHERE id = ?', id);
+  await guard(req, `Delete customer ${(await findOne('customers', { id }))?.name || `#${id}`}`, 'superadmin', { always: true });
+  await deleteMany('customers', { id });
   res.json({ ok: true });
 });
 
 /* ---------- customer payments (collections) ---------- */
-r.post('/:id/payments', (req, res) => {
-  const c = get('SELECT * FROM customers WHERE id = ?', num(req.params.id));
+r.post('/:id/payments', async (req, res) => {
+  const c = await findOne('customers', { id: num(req.params.id) });
   if (!c) fail('Customer not found', 404);
   const amount = round2(num(req.body.amount));
   if (amount <= 0) fail('Enter the amount received');
   const saleId = req.body.sale_id ? num(req.body.sale_id) : null;
-  if (saleId && !get('SELECT id FROM sales WHERE id = ? AND customer_id = ?', saleId, c.id)) fail('That bill does not belong to this customer');
-  const { lastInsertRowid } = run(
-    `INSERT INTO customer_payments (customer_id, sale_id, date, amount, method, reference, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    c.id, saleId, req.body.date || todayStr(), amount, req.body.method || 'Cash', req.body.reference || null, req.body.notes || null);
-  res.json({ ...get('SELECT * FROM customer_payments WHERE id = ?', lastInsertRowid), ...customerSummary(c.id) });
+  if (saleId && !(await findOne('sales', { id: saleId, customer_id: c.id }))) fail('That bill does not belong to this customer');
+  const p = await insert('customer_payments', {
+    customer_id: c.id, sale_id: saleId, date: req.body.date || todayStr(), amount, method: req.body.method || 'Cash',
+    reference: req.body.reference || null, notes: req.body.notes || null,
+  });
+  res.json({ ...p, ...summarizeCustomer(await customerBills(c.id)) });
 });
 
-r.delete('/:id/payments/:pid', (req, res) => {
-  const p = get('SELECT * FROM customer_payments WHERE id = ? AND customer_id = ?', num(req.params.pid), num(req.params.id));
+r.delete('/:id/payments/:pid', async (req, res) => {
+  const p = await findOne('customer_payments', { id: num(req.params.pid), customer_id: num(req.params.id) });
   if (!p) fail('Payment not found', 404);
-  guard(req, `Delete customer payment of Rs ${p.amount} (${p.date})`);
-  run('DELETE FROM customer_payments WHERE id = ? AND customer_id = ?', num(req.params.pid), num(req.params.id));
+  await guard(req, `Delete customer payment of Rs ${p.amount} (${p.date})`);
+  await deleteMany('customer_payments', { id: p.id, customer_id: p.customer_id });
   res.json({ ok: true });
 });
 

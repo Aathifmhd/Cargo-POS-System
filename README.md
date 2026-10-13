@@ -3,11 +3,18 @@
 Point-of-sale and back office for a **wholesale business that imports goods from India and sells them in Sri Lanka**.
 
 - **frontend/**: React 18 + Vite + plain CSS
-- **backend/**: Node.js + Express, with data in SQLite through Node's built-in `node:sqlite`, so there is nothing native to compile
+- **backend/**: Node.js + Express, with the data in **MongoDB** (MongoDB Atlas or any MongoDB 6+ replica set; transactions are used for bills, GRNs and payments)
 
 ## Quick start
 
-Needs Node.js **22.13 or newer** (24 recommended).
+Needs Node.js **22.13 or newer** (24 recommended) and a MongoDB database.
+
+Put the connection in `backend/.env` (copy `backend/.env.example`; this file is never committed):
+
+```
+MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>/?retryWrites=true&w=majority
+MONGODB_DB=cargo_pos
+```
 
 ```bash
 npm run setup      # installs root, backend and frontend packages
@@ -30,7 +37,17 @@ npm start          # backend serves the API and the app on http://localhost:4000
 
 Other computers on the shop network can open `http://<this-pc-ip>:4000`.
 
-The data lives in `backend/data/cargo-pos.db`. To back it up, copy that file, or go to **Settings → Download backup**.
+The data lives in MongoDB (database `cargo_pos`, one collection per kind of record: products, grns, sales, …). Atlas keeps its own backups; you can also download a copy any time from **Settings → Download backup**.
+
+### Moving from the old SQLite version
+
+Earlier versions kept the data in `backend/data/cargo-pos.db`. To copy it into MongoDB once (every id and number is kept):
+
+```bash
+npm --prefix backend run migrate -- --replace
+```
+
+`--replace` empties the MongoDB collections first; leave it out to stop if MongoDB already has data.
 
 ## Deploying to Vercel (demo)
 
@@ -43,17 +60,19 @@ The data lives in `backend/data/cargo-pos.db`. To back it up, copy that file, or
 
 There are no service bindings, because the browser calls `/api` directly and the services never call each other.
 
-> **Demo only. Data is not kept on Vercel.** The backend uses a SQLite file, and on Vercel the only writable place is `/tmp`, which is wiped whenever a new instance starts and isn't shared between instances. Each new instance therefore loads the demo data again. Bills, stock and payments made on the demo can vanish, and you may occasionally be logged out. For real shop use, move the data to a hosted database such as Turso/libSQL, or run the backend on a server with a disk.
+Every running copy of the backend uses the same MongoDB database, so the data is kept and shared on Vercel. In MongoDB Atlas → **Network Access**, allow `0.0.0.0/0` (Vercel has no fixed address).
 
 The live INR rate refreshes when the dashboard asks for it and the stored rate is older than 5 minutes, because background timers don't run reliably on serverless hosting.
 
-Logins are signed tokens that any running copy can check, so you stay signed in even when Vercel spreads requests across several copies. Set one environment variable in Vercel → Settings → Environment Variables:
+Set these in Vercel → Settings → Environment Variables (Production and Preview), then redeploy:
 
 | Name | Value |
 |---|---|
-| `SESSION_SECRET` | any long random text (keep it private) |
+| `MONGODB_URI` | the Atlas connection string (with the database user's password) |
+| `MONGODB_DB` | `cargo_pos` |
+| `SESSION_SECRET` | optional: any long random text. Without it, a random secret is created once and kept in the database. |
 
-Without it, a built-in demo secret is used. That works, but anyone who reads this code could forge a login, so set it.
+Logins are signed tokens that any running copy can check; logging out and one-time approvals are recorded in the database, so they hold across copies too.
 
 Test locally with `vercel dev`, then deploy by importing the GitHub repo at vercel.com/new.
 

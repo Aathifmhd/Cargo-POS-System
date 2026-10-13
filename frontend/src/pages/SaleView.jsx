@@ -64,7 +64,7 @@ function SaleDetails({ s }) {
                 <Link to={`/customers/${s.customer_id}`} className="strong">{s.customer_name}</Link>
                 {s.customer_shop && <span className="muted">{s.customer_shop}</span>}
                 {s.customer_phone && <span className="row gap-s"><Icon name="phone" size={14} /> {s.customer_phone}</span>}
-                {s.customer_balance != null && <span>Total they owe now: <b className={s.customer_balance > 0 ? 'text-red' : ''}>{lkr(s.customer_balance)}</b></span>}
+                {s.customer_balance != null && <span>Total due now: <b className={s.customer_balance > 0 ? 'text-red' : ''}>{lkr(s.customer_balance)}</b></span>}
               </div>
             </Card>
           )}

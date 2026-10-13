@@ -269,6 +269,8 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .toolbar .search { position: relative; flex: 1; min-width: 220px; max-width: 420px; }
 .toolbar .search .icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted); }
 .toolbar .search .input { padding-left: 34px; }
+.es-toolbar .es-supplier { width: auto; min-width: 170px; }
+.es-stats { margin-bottom: 18px; }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .tabs button {

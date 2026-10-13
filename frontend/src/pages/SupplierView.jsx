@@ -43,7 +43,7 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
 
   const body = <>
     <div className="stats mb">
-      <Stat icon="wallet" tone={s.overdue_inr > 0 ? 'red' : 'amber'} label="We owe" value={inr(s.balance_inr)} sub={s.overdue_inr > 0 ? `${inr(s.overdue_inr)} overdue` : s.next_due ? dueText(s.next_due) : 'All settled'} />
+      <Stat icon="wallet" tone={s.overdue_inr > 0 ? 'red' : 'amber'} label="To pay" value={inr(s.balance_inr)} sub={s.overdue_inr > 0 ? `${inr(s.overdue_inr)} overdue` : s.next_due ? dueText(s.next_due) : 'All settled'} />
       <Stat icon="layers" label="Total purchased" value={inr(s.purchased_inr)} sub={`${s.grn_count} shipments`} />
       <Stat icon="truck" tone="blue" label="Total cost" value={lkr(s.landed_lkr)} />
       <Stat icon="clock" tone="violet" label="Credit period" value={`${s.credit_days} days`} />

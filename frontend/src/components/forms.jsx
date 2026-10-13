@@ -38,7 +38,7 @@ export function CustomerForm({ customer, initialName = '', onClose, onSaved }) {
         <Field label="Address"><input className="input" value={f.address || ''} onChange={set('address')} /></Field>
         <Field label={<>Credit limit (Rs) {lockedLimit && <Icon name="shield" size={12} />}</>} hint={lockedLimit ? 'Changing this needs the Super Admin password' : '0 = no limit set'}><NumInput value={f.credit_limit} onChange={set('credit_limit')} /></Field>
         <Field label={<>Credit period (days) {locked && <Icon name="lock" size={12} />}</>} hint={locked ? 'Changing this needs an admin password' : 'Used to set the due date on credit bills'}><NumInput value={f.credit_days} onChange={set('credit_days')} /></Field>
-        {!customer && <Field label="Old balance they owe (Rs)" hint="Amount owed before starting this system"><NumInput value={f.opening_balance} onChange={set('opening_balance')} /></Field>}
+        {!customer && <Field label="Old balance due (Rs)" hint="Amount due before starting this system"><NumInput value={f.opening_balance} onChange={set('opening_balance')} /></Field>}
         <Field label="Notes" className={customer ? 'span-2' : ''}><input className="input" value={f.notes || ''} onChange={set('notes')} /></Field>
         {customer && <label className="check"><input type="checkbox" checked={!!f.active} onChange={set('active')} /> Active customer</label>}
       </form>
@@ -75,7 +75,7 @@ export function SupplierForm({ supplier, initialName = '', onClose, onSaved }) {
         <Field label="Address" className="span-2"><input className="input" value={f.address || ''} onChange={set('address')} /></Field>
         <Field label="Credit period (days)" hint="Default time to pay each GRN"><NumInput value={f.credit_days} onChange={set('credit_days')} /></Field>
         <Field label="Bank / payment details" className="span-2"><textarea className="input" rows={2} value={f.bank_details || ''} onChange={set('bank_details')} placeholder="Bank, A/C no, IFSC, UPI…" /></Field>
-        {!supplier ? <Field label="Old balance we owe (₹ INR)" hint="Before starting this system"><NumInput value={f.opening_balance_inr} onChange={set('opening_balance_inr')} /></Field> : <div />}
+        {!supplier ? <Field label="Old balance to pay (₹ INR)" hint="Before starting this system"><NumInput value={f.opening_balance_inr} onChange={set('opening_balance_inr')} /></Field> : <div />}
         <Field label="Notes" className="span-2"><input className="input" value={f.notes || ''} onChange={set('notes')} /></Field>
         {supplier && <label className="check"><input type="checkbox" checked={!!f.active} onChange={set('active')} /> Active supplier</label>}
       </form>
@@ -157,7 +157,7 @@ export function CustomerPaymentModal({ customer, bills = [], defaultSaleId, onCl
   };
 
   return (
-    <Modal title={`Receive payment — ${customer.name}`} subtitle={`They owe: ${lkr(total)}`} onClose={onClose}
+    <Modal title={`Receive payment — ${customer.name}`} subtitle={`Due: ${lkr(total)}`} onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="cp-form" disabled={busy}>Save payment</button></>}>
       <form id="cp-form" onSubmit={save} className="grid grid-2">
         <Field label="For which bill?" className="span-2" hint="'Oldest first' settles the oldest bills automatically">

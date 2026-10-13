@@ -13,7 +13,7 @@ export function whatsappReminder(c, amount, shop) {
 }
 
 /**
- * One customer: what they owe, their bills, payments and details.
+ * One customer: their dues, their bills, payments and details.
  * Shown as a page (/customers/:id) or, with `modal`, as a pop-up over the Customers list.
  */
 function CustomerScreen({ id, modal, onClose, onChanged }) {
@@ -54,7 +54,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
 
   const body = <>
     <div className="stats mb">
-      <Stat icon="wallet" tone={c.overdue > 0 ? 'red' : 'blue'} label="Owes us" value={lkr(c.balance)} sub={c.overdue > 0 ? `${lkr(c.overdue)} overdue` : 'Nothing overdue'} />
+      <Stat icon="wallet" tone={c.overdue > 0 ? 'red' : 'blue'} label="To collect" value={lkr(c.balance)} sub={c.overdue > 0 ? `${lkr(c.overdue)} overdue` : 'Nothing overdue'} />
       <Stat icon="receipt" label="Total bought" value={lkr(c.total_bought)} sub={`${c.bill_count} bills`} />
       <Stat icon="chart" tone="green" label="Profit from customer" value={lkr(c.profit)} />
       <Stat icon="clock" tone="violet" label="Credit limit" value={c.credit_limit > 0 ? lkr(c.credit_limit) : 'No limit'} sub={c.credit_limit > 0 ? `${limitUsed.toFixed(0)}% used · ${c.credit_days} days` : `${c.credit_days} days credit`} />

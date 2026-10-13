@@ -43,9 +43,9 @@ export default function Dashboard() {
       </div>
 
       <div className="stats mt">
-        <Stat icon="users" tone={d.receivables.overdue > 0 ? 'red' : 'default'} label="Customers owe us" value={lkr(d.receivables.total)}
+        <Stat icon="users" tone={d.receivables.overdue > 0 ? 'red' : 'default'} label="To collect" value={lkr(d.receivables.total)}
           sub={d.receivables.overdue > 0 ? `${lkr(d.receivables.overdue)} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=receivables')} />
-        <Stat icon="factory" tone={d.payables.overdue_inr > 0 ? 'red' : 'amber'} label="We owe suppliers" value={inr(d.payables.total_inr)}
+        <Stat icon="factory" tone={d.payables.overdue_inr > 0 ? 'red' : 'amber'} label="To pay suppliers" value={inr(d.payables.total_inr)}
           sub={d.payables.overdue_inr > 0 ? `${inr(d.payables.overdue_inr)} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=payables')} />
         <Stat icon="box" label="Stock value (cost)" value={lkr(d.stock.cost_value)} sub={`Can sell for ${lkr(d.stock.expected_value)}`} onClick={() => navigate('/stock')} />
         <Stat icon="alert" tone={d.stock.low_count ? 'amber' : 'green'} label="Low stock items" value={int(d.stock.low_count)}

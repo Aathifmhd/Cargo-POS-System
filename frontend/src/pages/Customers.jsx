@@ -19,23 +19,23 @@ export default function Customers() {
 
   return (
     <div>
-      <PageHeader title="Customers" subtitle="Shops that buy from you, what they owe, and their credit limits."
+      <PageHeader title="Customers" subtitle="Shops that buy from you, their dues, and their credit limits."
         actions={<button className="btn btn-primary" onClick={() => setAdding(true)}><Icon name="plus" /> Add customer</button>} />
       <div className="stats mb">
         <Stat icon="users" label="Customers" value={(data || []).filter((c) => c.active).length} />
-        <Stat icon="cash" tone="blue" label="Customers owe us" value={lkr(owed)} />
+        <Stat icon="cash" tone="blue" label="To collect" value={lkr(owed)} />
         <Stat icon="alert" tone={overdue > 0 ? 'red' : 'green'} label="Overdue" value={lkr(overdue)} />
       </div>
       <div className="toolbar">
         <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Search name, shop, city, phone…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-        <label className="check"><input type="checkbox" checked={onlyOwing} onChange={(e) => setOnlyOwing(e.target.checked)} /> Only customers who owe</label>
+        <label className="check"><input type="checkbox" checked={onlyOwing} onChange={(e) => setOnlyOwing(e.target.checked)} /> Only with dues</label>
       </div>
       <ErrorBox error={error} onRetry={reload} />
       <Card pad={false}>
         {loading && !data ? <Loading /> : rows.length === 0 ? <Empty icon="users" title="No customers found" action={<button className="btn btn-primary" onClick={() => setAdding(true)}>Add customer</button>} /> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Customer</th><th>Phone</th><th className="right">Bills</th><th className="right">Total bought</th><th>Last bill</th><th className="right">Credit limit</th><th className="right">Owes</th></tr></thead>
+              <thead><tr><th>Customer</th><th>Phone</th><th className="right">Bills</th><th className="right">Total bought</th><th>Last bill</th><th className="right">Credit limit</th><th className="right">Due</th></tr></thead>
               <tbody>{rows.map((c) => (
                 <tr key={c.id} className="click" onClick={() => setOpenId(c.id)}>
                   <td><b>{c.name}</b> {!c.active && <Badge>Inactive</Badge>}<div className="sub">{[c.shop_name, c.city].filter(Boolean).join(' · ') || '—'}</div></td>

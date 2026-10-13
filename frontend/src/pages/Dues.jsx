@@ -34,14 +34,14 @@ export default function Dues() {
 
   return (
     <div>
-      <PageHeader title="Payments Due" subtitle="Money customers owe you, and money you owe suppliers in India — sorted by due date." />
+      <PageHeader title="Payments Due" subtitle="Money to collect from customers, and money to pay suppliers in India — sorted by due date." />
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[
         { value: 'receivables', label: 'To collect from customers', count: rec.data?.length },
         { value: 'payables', label: 'To pay suppliers', count: pay.data?.length },
       ]} />
 
       <div className="stats mb">
-        <Stat icon="wallet" tone="blue" label={isPay ? 'Total we owe' : 'Total to collect'} value={fmt(sum())} />
+        <Stat icon="wallet" tone="blue" label={isPay ? 'Total to pay' : 'Total to collect'} value={fmt(sum())} />
         <Stat icon="alert" tone="red" label="Overdue" value={fmt(sum('overdue'))} />
         <Stat icon="clock" tone="amber" label="Due in 7 days" value={fmt(sum('due-soon'))} />
         <Stat icon="check" tone="green" label="Not due yet" value={fmt(sum('open'))} />
@@ -49,7 +49,7 @@ export default function Dues() {
 
       <ErrorBox error={src.error} onRetry={src.reload} />
       {src.loading && !src.data ? <Loading /> : rows.length === 0 ? (
-        <Card><Empty icon="check" title={isPay ? 'You owe nothing to suppliers' : 'No customer owes you money'} text="Everything is settled. 🎉" /></Card>
+        <Card><Empty icon="check" title={isPay ? 'Nothing to pay suppliers' : 'No customer has dues'} text="Everything is settled. 🎉" /></Card>
       ) : (
         <div className="stack">
           {GROUPS.map((g) => {

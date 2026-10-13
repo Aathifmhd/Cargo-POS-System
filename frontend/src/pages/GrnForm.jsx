@@ -319,7 +319,7 @@ export default function GrnForm() {
             <div className="grid grid-3">
               <Field label="Supplier" required className="span-2">
                 <Combobox items={suppliers} value={g.supplier_id} onSelect={(s) => set('supplier_id')(s.id)} placeholder="Search supplier…"
-                  getSub={(s) => [s.city, s.balance_inr > 0 ? `owe ${inr(s.balance_inr)}` : ''].filter(Boolean).join(' · ')}
+                  getSub={(s) => [s.city, s.balance_inr > 0 ? `to pay ${inr(s.balance_inr)}` : ''].filter(Boolean).join(' · ')}
                   onCreate={(name) => setNewSupplier(name)} createLabel={(q) => `Add new supplier “${q}”`} />
               </Field>
               <Field label="Date received"><input type="date" className="input" value={g.date} onChange={set('date')} /></Field>

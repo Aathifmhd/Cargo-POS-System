@@ -71,15 +71,22 @@ export default function ExtraShort() {
   const { data, error, loading, reload } = useApi(`/grns/extra-short${qs ? `?${qs}` : ''}`);
 
   const [q, setQ] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  // the suppliers that have extra or short lines, for the filter
+  const suppliers = useMemo(() => [...new Map((data || []).map((r) => [r.supplier_id, r.supplier_name])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1])), [data]);
   const [open, setOpen] = useState(null);   // the line shown in the pop-up
   const rows = useMemo(() => {
-    const words = q.trim().toLowerCase().split(/s+/).filter(Boolean);
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return (data || []).map((r) => ({ ...r, f: lineFigures(r) })).filter((r) => {
+      if (supplierId && String(r.supplier_id) !== supplierId) return false;
       if (!words.length) return true;
       const text = [r.grn_no, r.supplier_name, r.name, r.code, r.cargo_name, r.sizes].join(' ').toLowerCase();
       return words.every((w) => text.includes(w));
     });
-  }, [data, q]);
+  }, [data, q, supplierId]);
+  const filtered = Boolean(q || supplierId || from || to || kind !== 'all');
+  const clearAll = () => { setQ(''); setSupplierId(''); setFrom(''); setTo(''); setKind('all'); };
   const totals = rows.reduce((t, r) => ({
     extraPcs: t.extraPcs + r.f.extraPcs, shortPcs: t.shortPcs + r.f.shortPcs,
     extraInr: t.extraInr + r.f.extraInr, shortInr: t.shortInr + r.f.shortInr, shortLkr: t.shortLkr + r.f.shortLkr,
@@ -89,22 +96,10 @@ export default function ExtraShort() {
   return (
     <div>
       <PageHeader title="Extra & Short" subtitle="Bales that didn't match the supplier's bill: extra pieces received, or pieces missing." />
-      <div className="toolbar wrap">
-        <Segmented value={kind} onChange={setKind} options={[
-          { value: 'all', label: 'All' },
-          { value: 'extra', label: 'Extra', icon: 'plus' },
-          { value: 'short', label: 'Short', icon: 'minus' },
-        ]} />
-        <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Search GRN, product, supplier or cargo…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-        <span className="spacer" />
-        <label className="row gap-s small muted">From <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label className="row gap-s small muted">To <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} /></label>
-        {(from || to) && <button className="btn btn-ghost" onClick={() => { setFrom(''); setTo(''); }}>Clear dates</button>}
-      </div>
       <ErrorBox error={error} onRetry={reload} />
 
       {data && rows.length > 0 && (
-        <div className="stats">
+        <div className="stats es-stats">
           <Stat icon="layers" label="GRNs affected" value={int(grnCount)} sub={`${rows.length} product lines`} />
           <Stat icon="plus" tone="green" label="Extra pieces" value={`${int(totals.extraPcs)} pcs`} sub={`${inr(totals.extraInr)} added to bills`} />
           <Stat icon="minus" tone="red" label="Short pieces" value={`${int(totals.shortPcs)} pcs`} sub={`${inr(totals.shortInr)} paid, not received`} />
@@ -112,9 +107,25 @@ export default function ExtraShort() {
         </div>
       )}
 
+      <div className="toolbar wrap es-toolbar">
+        <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Search GRN, product, supplier or cargo…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <Segmented value={kind} onChange={setKind} options={[
+          { value: 'all', label: 'All' },
+          { value: 'extra', label: 'Extra', icon: 'plus' },
+          { value: 'short', label: 'Short', icon: 'minus' },
+        ]} />
+        <select className="input es-supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+          <option value="">All suppliers</option>
+          {suppliers.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
+        </select>
+        <label className="row gap-s small muted">From <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label className="row gap-s small muted">To <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        {filtered && <button className="btn btn-ghost" onClick={clearAll}>Clear filters</button>}
+      </div>
+
       <Card pad={false}>
-        {loading && !data ? <Loading /> : !rows.length && q ? (
-          <Empty icon="search" title="Nothing matches your search" text={`No extra or short line for "${q}".`} action={<button className="btn" onClick={() => setQ('')}>Clear search</button>} />
+        {loading && !data ? <Loading /> : !rows.length && filtered ? (
+          <Empty icon="search" title="Nothing matches" text={q ? `No extra or short line for "${q}" with these filters.` : 'No extra or short line with these filters.'} action={<button className="btn" onClick={clearAll}>Clear filters</button>} />
         ) : !rows.length ? (
           <Empty icon="layers" title="Nothing extra or short" text="When a shipment has extra pieces, or pieces are missing, enter them on Receive Goods. They will be listed here."
             action={<Link to="/grn/new" className="btn btn-primary">Receive goods</Link>} />

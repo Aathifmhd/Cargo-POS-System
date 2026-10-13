@@ -18,11 +18,11 @@ export default function Suppliers() {
 
   return (
     <div>
-      <PageHeader title="Suppliers" subtitle="Your suppliers in India and how much you owe each of them."
+      <PageHeader title="Suppliers" subtitle="Your suppliers in India and how much is to pay to each of them."
         actions={<button className="btn btn-primary" onClick={() => setAdding(true)}><Icon name="plus" /> Add supplier</button>} />
       <div className="stats mb">
         <Stat icon="factory" label="Suppliers" value={(data || []).filter((s) => s.active).length} />
-        <Stat icon="wallet" tone="amber" label="Total we owe" value={inr(owe)} />
+        <Stat icon="wallet" tone="amber" label="Total to pay" value={inr(owe)} />
         <Stat icon="alert" tone={overdue > 0 ? 'red' : 'green'} label="Overdue" value={inr(overdue)} />
       </div>
       <div className="toolbar"><div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Search supplier, city, phone…" value={q} onChange={(e) => setQ(e.target.value)} /></div></div>
@@ -31,7 +31,7 @@ export default function Suppliers() {
         {loading && !data ? <Loading /> : rows.length === 0 ? <Empty icon="factory" title="No suppliers yet" text="Add the companies in India you buy from." action={<button className="btn btn-primary" onClick={() => setAdding(true)}>Add supplier</button>} /> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Supplier</th><th>Contact</th><th className="right">GRNs</th><th>Last shipment</th><th className="right">We owe (INR)</th><th>Next due</th></tr></thead>
+              <thead><tr><th>Supplier</th><th>Contact</th><th className="right">GRNs</th><th>Last shipment</th><th className="right">To pay (INR)</th><th>Next due</th></tr></thead>
               <tbody>{rows.map((s) => (
                 <tr key={s.id} className="click" onClick={() => setOpenId(s.id)}>
                   <td><b>{s.name}</b> {!s.active && <Badge>Inactive</Badge>}<div className="sub">{[s.city, s.state].filter(Boolean).join(', ') || '—'} · {s.credit_days} days credit</div></td>

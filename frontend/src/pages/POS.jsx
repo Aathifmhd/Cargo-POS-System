@@ -368,7 +368,7 @@ export default function POS() {
         <div className={`till-who ${customer ? 'named' : ''}`} role="button" onClick={() => { setAfter(null); setModal('customer'); }} title="Change customer (F4)">
           <b>{customer ? customer.name.toUpperCase() : 'WALK-IN CUSTOMER'}</b>
           <em>{customer
-            ? <>{customer.shop_name ? `${customer.shop_name} · ` : ''}{customer.phone || 'no phone'} · owes {money(owed)}{customer.credit_limit > 0 ? ` of ${money(customer.credit_limit)}` : ''}{overLimit ? ' · OVER LIMIT' : ''}</>
+            ? <>{customer.shop_name ? `${customer.shop_name} · ` : ''}{customer.phone || 'no phone'} · due {money(owed)}{customer.credit_limit > 0 ? ` of ${money(customer.credit_limit)}` : ''}{overLimit ? ' · OVER LIMIT' : ''}</>
             : 'no account · press F4 to choose'}</em>
           <span>cashier <b>{user.name}</b></span>
           <span className="till-whobtn">{customer ? 'Change' : 'Choose'} customer <i>F4</i></span>
@@ -498,7 +498,7 @@ export default function POS() {
           </div>
           <div className="sum-net"><span>NET TOTAL</span><b>{money(T.net)}</b></div>
           {showCost && lines.length > 0 && <div className={`sum-gp ${T.gp < 0 ? 'neg' : ''}`}><span>GP</span><b>{money(T.gp)}</b><i>{pct(margin(T.net, T.cost))}</i></div>}
-          {overLimit && <div className="sum-over">Over their limit — owes {money(owed)} of {money(customer.credit_limit)}. To bill on credit, the Super Admin must raise the limit.</div>}
+          {overLimit && <div className="sum-over">Over their limit — due {money(owed)} of {money(customer.credit_limit)}. To bill on credit, the Super Admin must raise the limit.</div>}
           <div className="sum-acts">
             <button className="sum-pay" onClick={openPay} disabled={!lines.length}><b>TAKE PAYMENT</b><span>{lkr(T.net)} · Enter Enter · cash or credit</span></button>
             <div className="sum-more">
@@ -594,7 +594,7 @@ function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose
         {list.map((c, i) => (
           <button key={c.id ?? 'walk'} className={`pick-row ${i === hi ? 'on' : ''} ${c.id === current ? 'cur' : ''}`} onMouseEnter={() => setHi(i)} onClick={() => onPick(c.id)}>
             <span><b>{c.name}</b>{!c.walk && <small>{[c.shop_name, c.city, c.phone].filter(Boolean).join(' · ')}</small>}</span>
-            {!c.walk && <span className="right">{c.balance > 0 ? <b className="text-red">owes {money(c.balance)}</b> : <small>nothing owed</small>}{c.credit_limit > 0 && <small>limit {money(c.credit_limit)}</small>}</span>}
+            {!c.walk && <span className="right">{c.balance > 0 ? <b className="text-red">due {money(c.balance)}</b> : <small>no dues</small>}{c.credit_limit > 0 && <small>limit {money(c.credit_limit)}</small>}</span>}
           </button>
         ))}
       </div>
@@ -696,8 +696,8 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
           </div>
         )}
         <dl className="kv">
-          <dt>Owes now</dt><dd>{lkr(customer.balance)}</dd>
-          <dt>Will owe after this bill</dt><dd className={over ? 'text-red' : ''}>{lkr(after)}</dd>
+          <dt>Due now</dt><dd>{lkr(customer.balance)}</dd>
+          <dt>Due after this bill</dt><dd className={over ? 'text-red' : ''}>{lkr(after)}</dd>
           <dt>Credit limit</dt><dd>{customer.credit_limit > 0 ? lkr(customer.credit_limit) : 'No limit set'}</dd>
         </dl>
         {over && !raising && (

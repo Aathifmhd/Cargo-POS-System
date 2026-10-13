@@ -41,7 +41,9 @@ r.get('/:id', (req, res) => {
 
 r.post('/', (req, res) => {
   const d = clean(req.body);
-  if (d.opening_balance_inr > 0) guard(req, `New supplier ${d.name} with old balance ₹${d.opening_balance_inr}`);
+  if (!d.name) fail('Enter the supplier name');
+  // adding, editing or deleting a supplier always needs the Super Admin's password
+  guard(req, `New supplier ${d.name}${d.opening_balance_inr > 0 ? ` (old balance ₹${d.opening_balance_inr})` : ''}`, 'superadmin', { always: true });
   const { lastInsertRowid } = run(
     `INSERT INTO suppliers (${FIELDS.join(', ')}) VALUES (${FIELDS.map(() => '?').join(', ')})`,
     ...FIELDS.map((f) => d[f]));
@@ -53,11 +55,12 @@ r.put('/:id', (req, res) => {
   const old = get('SELECT * FROM suppliers WHERE id = ?', num(req.params.id));
   if (!old) fail('Supplier not found', 404);
   const changes = [];
+  if (old.name !== d.name) changes.push(`name "${old.name}" → "${d.name}"`);
   if (old.credit_days !== d.credit_days) changes.push(`credit days ${old.credit_days} → ${d.credit_days}`);
   if (old.opening_balance_inr !== d.opening_balance_inr) changes.push(`old balance ₹${old.opening_balance_inr} → ₹${d.opening_balance_inr}`);
   if (old.active !== d.active) changes.push(d.active ? 'made active' : 'made inactive');
   if ((old.bank_details || null) !== d.bank_details) changes.push('bank details changed');
-  if (changes.length) guard(req, `Supplier ${old.name}: ${changes.join(', ')}`);
+  guard(req, `Edit supplier ${old.name}${changes.length ? `: ${changes.join(', ')}` : ''}`, 'superadmin', { always: true });
   run(`UPDATE suppliers SET ${FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`, ...FIELDS.map((f) => d[f]), num(req.params.id));
   res.json(get('SELECT * FROM suppliers WHERE id = ?', num(req.params.id)));
 });
@@ -67,7 +70,7 @@ r.delete('/:id', (req, res) => {
   if (get('SELECT id FROM grns WHERE supplier_id = ? LIMIT 1', id) || get('SELECT id FROM supplier_payments WHERE supplier_id = ? LIMIT 1', id)) {
     fail('This supplier has GRNs or payments. Mark them inactive instead of deleting.');
   }
-  guard(req, `Delete supplier #${id}`);
+  guard(req, `Delete supplier ${get('SELECT name FROM suppliers WHERE id = ?', id)?.name || `#${id}`}`, 'superadmin', { always: true });
   run('UPDATE products SET supplier_id = NULL WHERE supplier_id = ?', id);
   run('DELETE FROM suppliers WHERE id = ?', id);
   res.json({ ok: true });

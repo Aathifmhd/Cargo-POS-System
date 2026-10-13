@@ -46,10 +46,9 @@ r.get('/:id', (req, res) => {
 
 r.post('/', (req, res) => {
   const d = clean(req.body);
-  if (d.credit_limit > 0 || d.opening_balance > 0) {
-    // a credit limit is the Super Admin's call; an old balance alone needs an admin
-    guard(req, `New customer ${d.name}: credit limit Rs ${d.credit_limit}, old balance Rs ${d.opening_balance}`, d.credit_limit > 0 ? 'superadmin' : 'admin');
-  }
+  if (!d.name) fail('Enter the customer name');
+  // adding, editing or deleting a customer always needs the Super Admin's password
+  guard(req, `New customer ${d.name} (credit limit Rs ${d.credit_limit}, old balance Rs ${d.opening_balance})`, 'superadmin', { always: true });
   const { lastInsertRowid } = run(
     `INSERT INTO customers (${FIELDS.join(', ')}) VALUES (${FIELDS.map(() => '?').join(', ')})`,
     ...FIELDS.map((f) => d[f]));
@@ -61,11 +60,12 @@ r.put('/:id', (req, res) => {
   const old = get('SELECT * FROM customers WHERE id = ?', num(req.params.id));
   if (!old) fail('Customer not found', 404);
   const changes = [];
+  if (old.name !== d.name) changes.push(`name "${old.name}" → "${d.name}"`);
   if (old.credit_limit !== d.credit_limit) changes.push(`credit limit Rs ${old.credit_limit} → Rs ${d.credit_limit}`);
   if (old.credit_days !== d.credit_days) changes.push(`credit days ${old.credit_days} → ${d.credit_days}`);
   if (old.opening_balance !== d.opening_balance) changes.push(`old balance Rs ${old.opening_balance} → Rs ${d.opening_balance}`);
   if (old.active !== d.active) changes.push(d.active ? 'made active' : 'made inactive');
-  if (changes.length) guard(req, `Customer ${old.name}: ${changes.join(', ')}`, old.credit_limit !== d.credit_limit ? 'superadmin' : 'admin');
+  guard(req, `Edit customer ${old.name}${changes.length ? `: ${changes.join(', ')}` : ''}`, 'superadmin', { always: true });
   run(`UPDATE customers SET ${FIELDS.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`, ...FIELDS.map((f) => d[f]), num(req.params.id));
   res.json(get('SELECT * FROM customers WHERE id = ?', num(req.params.id)));
 });
@@ -87,7 +87,7 @@ r.delete('/:id', (req, res) => {
   if (get('SELECT id FROM sales WHERE customer_id = ? LIMIT 1', id) || get('SELECT id FROM customer_payments WHERE customer_id = ? LIMIT 1', id)) {
     fail('This customer has bills or payments. Mark them inactive instead of deleting.');
   }
-  guard(req, `Delete customer #${id}`);
+  guard(req, `Delete customer ${get('SELECT name FROM customers WHERE id = ?', id)?.name || `#${id}`}`, 'superadmin', { always: true });
   run('DELETE FROM customers WHERE id = ?', id);
   res.json({ ok: true });
 });

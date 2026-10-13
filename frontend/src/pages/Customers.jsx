@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useApi, lkr, niceDate } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, Stat } from '../components/ui.jsx';
 import { CustomerForm } from '../components/forms.jsx';
+import { CustomerModal } from './CustomerView.jsx';
 
 export default function Customers() {
-  const navigate = useNavigate();
+  const [openId, setOpenId] = useState(null);   // the one shown in the pop-up
   const { data, error, loading, reload } = useApi('/customers');
   const [q, setQ] = useState('');
   const [onlyOwing, setOnlyOwing] = useState(false);
@@ -37,7 +37,7 @@ export default function Customers() {
             <table className="table">
               <thead><tr><th>Customer</th><th>Phone</th><th className="right">Bills</th><th className="right">Total bought</th><th>Last bill</th><th className="right">Credit limit</th><th className="right">Owes</th></tr></thead>
               <tbody>{rows.map((c) => (
-                <tr key={c.id} className="click" onClick={() => navigate(`/customers/${c.id}`)}>
+                <tr key={c.id} className="click" onClick={() => setOpenId(c.id)}>
                   <td><b>{c.name}</b> {!c.active && <Badge>Inactive</Badge>}<div className="sub">{[c.shop_name, c.city].filter(Boolean).join(' · ') || '—'}</div></td>
                   <td>{c.phone || '—'}</td>
                   <td className="right">{c.bill_count}</td>
@@ -51,7 +51,8 @@ export default function Customers() {
           </div>
         )}
       </Card>
-      {adding && <CustomerForm onClose={() => setAdding(false)} onSaved={(c) => { setAdding(false); navigate(`/customers/${c.id}`); }} />}
+      {adding && <CustomerForm onClose={() => setAdding(false)} onSaved={(c) => { setAdding(false); reload(); setOpenId(c.id); }} />}
+      {openId && <CustomerModal id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
     </div>
   );
 }

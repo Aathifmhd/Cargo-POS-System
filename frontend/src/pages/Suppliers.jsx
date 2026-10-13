@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useApi, inr, niceDate, dueText } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, Stat } from '../components/ui.jsx';
 import { SupplierForm } from '../components/forms.jsx';
+import { SupplierModal } from './SupplierView.jsx';
 
 export default function Suppliers() {
-  const navigate = useNavigate();
+  const [openId, setOpenId] = useState(null);   // the one shown in the pop-up
   const { data, error, loading, reload } = useApi('/suppliers');
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
@@ -33,7 +33,7 @@ export default function Suppliers() {
             <table className="table">
               <thead><tr><th>Supplier</th><th>Contact</th><th className="right">GRNs</th><th>Last shipment</th><th className="right">We owe (INR)</th><th>Next due</th></tr></thead>
               <tbody>{rows.map((s) => (
-                <tr key={s.id} className="click" onClick={() => navigate(`/suppliers/${s.id}`)}>
+                <tr key={s.id} className="click" onClick={() => setOpenId(s.id)}>
                   <td><b>{s.name}</b> {!s.active && <Badge>Inactive</Badge>}<div className="sub">{[s.city, s.state].filter(Boolean).join(', ') || '—'} · {s.credit_days} days credit</div></td>
                   <td>{s.contact_person || '—'}<div className="sub">{s.phone}</div></td>
                   <td className="right">{s.grn_count}</td>
@@ -46,7 +46,8 @@ export default function Suppliers() {
           </div>
         )}
       </Card>
-      {adding && <SupplierForm onClose={() => setAdding(false)} onSaved={(s) => { setAdding(false); navigate(`/suppliers/${s.id}`); }} />}
+      {adding && <SupplierForm onClose={() => setAdding(false)} onSaved={(s) => { setAdding(false); reload(); setOpenId(s.id); }} />}
+      {openId && <SupplierModal id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
     </div>
   );
 }

@@ -214,8 +214,13 @@ export function customerSummary(customerId) {
 /* =========================================================
    GRN (goods received)
    ========================================================= */
-export function createGrn(body) {
+export const createGrn = (body) => saveGrn(body);
+/** Edit a GRN that was entered wrongly: same GRN number; stock is moved by the difference only. */
+export const updateGrn = (id, body) => saveGrn(body, id);
+
+function saveGrn(body, editId = null) {
   const settings = getSettings();
+  const old = editId ? getGrn(editId) : null;
   // a new product takes its re-order level from its category (Settings → Categories & products)
   let catalog = [];
   try { catalog = JSON.parse(settings.catalog || '[]'); } catch { /* keep empty */ }
@@ -226,7 +231,7 @@ export function createGrn(body) {
   const rawItems = (body.items || []).filter((i) => (i.product_id || String(i.name || '').trim()) && (num(i.sets) > 0 || num(i.extra_pcs) > 0));
   if (!rawItems.length) fail('Add at least one item with a quantity');
   const expenses = (body.expenses || []).filter((e) => String(e.label || '').trim() && num(e.amount_lkr) !== 0);
-  const date = body.date || todayStr();
+  const date = body.date || (old ? old.date : todayStr());
 
   const calc = computeLanding({ items: rawItems, exchange_rate: rate, cargo_charge_inr: body.cargo_charge_inr, expenses });
   const cargoInBill = body.cargo_in_supplier_bill ? 1 : 0;
@@ -235,16 +240,33 @@ export function createGrn(body) {
   const due_date = paymentType === 'credit' ? body.due_date || addDays(date, supplier.credit_days) : date;
 
   const id = tx(() => {
-    const grn_no = nextNo('grns', 'grn_no', settings.grn_prefix || 'GRN-', 4);
-    const { lastInsertRowid: grnId } = run(
-      `INSERT INTO grns (grn_no, date, supplier_id, supplier_invoice_no, cargo_name, bale_no, lr_no, exchange_rate,
-         goods_inr, cargo_charge_inr, cargo_in_supplier_bill, payable_inr, expenses_lkr, total_lkr, total_sets, total_pcs,
-         payment_type, due_date, notes, effective_rate)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      grn_no, date, supplier.id, body.supplier_invoice_no || null, (body.cargo_name || '').trim() || null,
-      (body.bale_no || '').trim() || null, (body.lr_no || '').trim() || null, rate,
-      calc.goods_inr, calc.cargo_inr, cargoInBill, payable_inr, calc.expenses_lkr, calc.total_lkr, calc.total_sets, calc.total_pcs,
-      paymentType, due_date, body.notes || null, rate);
+    let grnId;
+    let grn_no;
+    if (old) {
+      // same GRN, new details: the old lines and charges are replaced below
+      grnId = old.id;
+      grn_no = old.grn_no;
+      run(
+        `UPDATE grns SET date = ?, supplier_id = ?, supplier_invoice_no = ?, cargo_name = ?, exchange_rate = ?,
+           goods_inr = ?, cargo_charge_inr = ?, cargo_in_supplier_bill = ?, payable_inr = ?, expenses_lkr = ?, total_lkr = ?, total_sets = ?, total_pcs = ?,
+           payment_type = ?, due_date = ?, notes = ?, effective_rate = ? WHERE id = ?`,
+        date, supplier.id, body.supplier_invoice_no || null, (body.cargo_name || '').trim() || null, rate,
+        calc.goods_inr, calc.cargo_inr, cargoInBill, payable_inr, calc.expenses_lkr, calc.total_lkr, calc.total_sets, calc.total_pcs,
+        paymentType, due_date, body.notes || null, rate, grnId);
+      run('DELETE FROM grn_expenses WHERE grn_id = ?', grnId);
+      run('DELETE FROM grn_items WHERE grn_id = ?', grnId);
+    } else {
+      grn_no = nextNo('grns', 'grn_no', settings.grn_prefix || 'GRN-', 4);
+      grnId = run(
+        `INSERT INTO grns (grn_no, date, supplier_id, supplier_invoice_no, cargo_name, exchange_rate,
+           goods_inr, cargo_charge_inr, cargo_in_supplier_bill, payable_inr, expenses_lkr, total_lkr, total_sets, total_pcs,
+           payment_type, due_date, notes, effective_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        grn_no, date, supplier.id, body.supplier_invoice_no || null, (body.cargo_name || '').trim() || null, rate,
+        calc.goods_inr, calc.cargo_inr, cargoInBill, payable_inr, calc.expenses_lkr, calc.total_lkr, calc.total_sets, calc.total_pcs,
+        paymentType, due_date, body.notes || null, rate).lastInsertRowid;
+    }
+    const newPcs = new Map(); // product id → pieces this GRN now brings in
 
     for (const e of expenses) {
       run(`INSERT INTO grn_expenses (grn_id, label, amount_lkr) VALUES (?, ?, ?)`, grnId, e.label.trim(), round2(e.amount_lkr));
@@ -286,7 +308,39 @@ export function createGrn(body) {
         it.short_sets && `${it.short_sets} sets short`,
         it.short_pcs && `${it.short_pcs} pcs short`,
       ].filter(Boolean);
-      moveStock(product.id, it.pcs, 'grn', grn_no, `Received ${it.sets} sets${notes.length ? ` (${notes.join(', ')})` : ''}`, date);
+      if (old) newPcs.set(product.id, (newPcs.get(product.id) || 0) + it.pcs);
+      else moveStock(product.id, it.pcs, 'grn', grn_no, `Received ${it.sets} sets${notes.length ? ` (${notes.join(', ')})` : ''}`, date);
+    }
+
+    if (old) {
+      // stock moves by the difference only — and can't take back pieces that are already sold
+      const oldPcs = new Map();
+      for (const it of old.items) {
+        const pcs = Math.max(0, (it.sets + it.extra_sets - it.short_sets) * it.pcs_per_set + it.extra_pcs - it.short_pcs);
+        oldPcs.set(it.product_id, (oldPcs.get(it.product_id) || 0) + pcs);
+      }
+      for (const pid of new Set([...oldPcs.keys(), ...newPcs.keys()])) {
+        const diff = (newPcs.get(pid) || 0) - (oldPcs.get(pid) || 0);
+        if (!diff) { recomputeProductCost(pid); continue; }
+        const p = get('SELECT name, stock_pcs FROM products WHERE id = ?', pid);
+        if (p.stock_pcs + diff < 0) fail(`Cannot save: "${p.name}" from this GRN is already sold — only ${p.stock_pcs} pcs are left to take back.`);
+        moveStock(pid, diff, 'grn-edit', grn_no, `GRN edited (${diff > 0 ? '+' : ''}${diff} pcs)`, date);
+      }
+      // a GRN paid at receipt: its payment follows the new total; switching to credit removes it
+      const auto = get('SELECT id FROM supplier_payments WHERE grn_id = ? AND notes = ?', grnId, `Paid with ${grn_no}`);
+      if (auto && (paymentType !== 'paid' || payable_inr <= 0)) run('DELETE FROM supplier_payments WHERE id = ?', auto.id);
+      if (auto && paymentType === 'paid' && payable_inr > 0) {
+        run('UPDATE supplier_payments SET supplier_id = ?, date = ?, amount_inr = ?, exchange_rate = ?, amount_lkr = ?, method = COALESCE(?, method) WHERE id = ?',
+          supplier.id, date, payable_inr, rate, round2(payable_inr * rate), body.payment_method || null, auto.id);
+      }
+      if (!auto && paymentType === 'paid' && payable_inr > 0) {
+        run(
+          `INSERT INTO supplier_payments (supplier_id, grn_id, date, amount_inr, exchange_rate, amount_lkr, method, reference, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          supplier.id, grnId, date, payable_inr, rate, round2(payable_inr * rate), body.payment_method || 'Bank transfer',
+          body.payment_reference || null, `Paid with ${grn_no}`);
+      }
+      return grnId;
     }
 
     if (paymentType === 'paid' && payable_inr > 0) {
@@ -309,7 +363,7 @@ export function getGrn(id) {
        FROM grns g JOIN suppliers s ON s.id = g.supplier_id WHERE g.id = ?`, id);
   if (!g) fail('GRN not found', 404);
   g.items = all(
-    `SELECT gi.*, p.code FROM grn_items gi JOIN products p ON p.id = gi.product_id WHERE gi.grn_id = ? ORDER BY gi.id`, id);
+    `SELECT gi.*, p.code, p.category, p.subtype, p.pname FROM grn_items gi JOIN products p ON p.id = gi.product_id WHERE gi.grn_id = ? ORDER BY gi.id`, id);
   g.expenses = all('SELECT * FROM grn_expenses WHERE grn_id = ? ORDER BY id', id);
   g.payments = all('SELECT * FROM supplier_payments WHERE grn_id = ? ORDER BY date, id', id);
   const bill = supplierBills(g.supplier_id).find((b) => b.id === g.id);

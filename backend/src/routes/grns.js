@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { all, num } from '../db.js';
-import { createGrn, getGrn, deleteGrn, supplierBills, computeLanding } from '../services.js';
+import { createGrn, updateGrn, getGrn, deleteGrn, supplierBills, computeLanding } from '../services.js';
 import { guard } from '../auth.js';
 
 const r = Router();
@@ -62,9 +62,15 @@ r.get('/extra-short', (req, res) => {
 
 r.get('/:id', (req, res) => res.json(getGrn(num(req.params.id))));
 r.post('/', (req, res) => res.json(createGrn(req.body)));
+// fixing a GRN that was entered wrongly always needs the Super Admin's password
+r.put('/:id', (req, res) => {
+  const g = getGrn(num(req.params.id));
+  guard(req, `Edit ${g.grn_no} (${g.supplier_name})`, 'superadmin', { always: true });
+  res.json(updateGrn(g.id, req.body));
+});
 r.delete('/:id', (req, res) => {
   const g = getGrn(num(req.params.id));
-  guard(req, `Delete ${g.grn_no} (${g.supplier_name}, bale ${g.bale_no || '—'})`);
+  guard(req, `Delete ${g.grn_no} (${g.supplier_name})`);
   res.json(deleteGrn(g.id));
 });
 

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { GrnModal } from './GrnView.jsx';
 import { useApi, lkr, inr, niceDate, int, dueText } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, StatusBadge } from '../components/ui.jsx';
 
 export default function GrnList() {
-  const navigate = useNavigate();
+  const [openId, setOpenId] = useState(null);   // the GRN shown in the pop-up
   const [q, setQ] = useState('');
   const { data, error, loading, reload } = useApi(`/grns?q=${encodeURIComponent(q)}`);
 
@@ -26,7 +27,7 @@ export default function GrnList() {
               <thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Cargo</th><th className="right">Rate</th><th className="right">Goods (INR)</th><th className="right">Cost (LKR)</th><th className="right">To pay (INR)</th><th>Payment</th></tr></thead>
               <tbody>
                 {data.map((g) => (
-                  <tr key={g.id} className="click" onClick={() => navigate(`/grn/${g.id}`)}>
+                  <tr key={g.id} className="click" onClick={() => setOpenId(g.id)}>
                     <td className="strong">{g.grn_no}</td>
                     <td className="nowrap">{niceDate(g.date)}</td>
                     <td>{g.supplier_name}<div className="sub">{int(g.total_sets)} sets · {int(g.total_pcs)} pcs</div></td>
@@ -43,6 +44,7 @@ export default function GrnList() {
           </div>
         )}
       </Card>
+      {openId && <GrnModal id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
     </div>
   );
 }

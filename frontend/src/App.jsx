@@ -102,6 +102,7 @@ export default function App() {
                   <Route path="/sales/:id" element={<SaleView />} />
                   <Route path="/grn" element={<GrnList />} />
                   <Route path="/grn/new" element={<GrnForm />} />
+                  <Route path="/grn/:id/edit" element={<GrnForm key="edit" />} />
                   <Route path="/grn/:id" element={<GrnView />} />
                   <Route path="/extra-short" element={<ExtraShort />} />
                   <Route path="/stock" element={<Stock />} />

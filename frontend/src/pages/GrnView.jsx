@@ -1,36 +1,44 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, useApi, lkr, inr, money, niceDate, int, dueText, margin, pct } from '../lib.js';
-import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, useToast } from '../components/ui.jsx';
+import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, Modal, useToast } from '../components/ui.jsx';
 import { SupplierPaymentModal } from '../components/forms.jsx';
 
-export default function GrnView() {
-  const { id } = useParams();
+/**
+ * One GRN: items, costs, cargo charge and the supplier account.
+ * Shown as a page (/grn/:id) or, with `modal`, as a pop-up over the Shipments (GRN) list.
+ */
+function GrnScreen({ id, modal, onClose, onChanged }) {
   const toast = useToast();
   const navigate = useNavigate();
   const { data: g, error, reload } = useApi(`/grns/${id}`);
   const [paying, setPaying] = useState(null);
+  const changed = () => { reload(); onChanged?.(); };
 
-  if (error) return <ErrorBox error={error} onRetry={reload} />;
-  if (!g) return <Loading />;
+  if (error) return modal ? <Modal title="GRN" onClose={onClose}><ErrorBox error={error} onRetry={reload} /></Modal> : <ErrorBox error={error} onRetry={reload} />;
+  if (!g) return modal ? <Modal title="GRN" onClose={onClose}><Loading /></Modal> : <Loading />;
 
   const del = async () => {
     if (!confirm(`Delete ${g.grn_no}? Its stock will be removed and its payments deleted. This cannot be undone.`)) return;
-    try { await api.del(`/grns/${g.id}`); toast(`${g.grn_no} deleted`); navigate('/grn'); } catch (e) { toast(e.message, 'error'); }
+    try {
+      await api.del(`/grns/${g.id}`);
+      toast(`${g.grn_no} deleted`);
+      if (modal) { onChanged?.(); onClose?.(); } else navigate('/grn');
+    } catch (e) { toast(e.message, 'error'); }
   };
   const pay = async () => setPaying(await api.get(`/suppliers/${g.supplier_id}`));
   const expectedValue = g.items.reduce((s, i) => s + (i.expected_per_set / (i.pcs_per_set || 1)) * Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + i.extra_pcs - i.short_pcs), 0);
 
-  return (
-    <div>
-      <PageHeader back="/grn" title={`${g.grn_no} — ${g.supplier_name}`}
-        subtitle={<>Received {niceDate(g.date)} · <StatusBadge status={g.pay_status} /> {g.balance_inr > 0 && dueText(g.due_date)}</>}
-        actions={<>
-          {g.balance_inr > 0 && <button className="btn btn-primary" onClick={pay}><Icon name="wallet" /> Pay supplier</button>}
-          <button className="btn" onClick={() => window.open(`/print/grn/${g.id}`, '_blank')}><Icon name="print" /> Print GRN</button>
-          <button className="btn btn-danger" onClick={del}><Icon name="trash" /> Delete</button>
-        </>} />
+  const title = `${g.grn_no} — ${g.supplier_name}`;
+  const subtitle = <>Received {niceDate(g.date)} · <StatusBadge status={g.pay_status} /> {g.balance_inr > 0 && dueText(g.due_date)}</>;
+  const actions = <>
+    <button className="btn btn-danger" onClick={del}><Icon name="trash" /> Delete</button>
+    <button className="btn" onClick={() => navigate(`/grn/${g.id}/edit`)} title="Fix a GRN entered wrongly (Super Admin)"><Icon name="edit" /> Edit GRN</button>
+    <button className="btn" onClick={() => window.open(`/print/grn/${g.id}`, '_blank')}><Icon name="print" /> Print GRN</button>
+    {g.balance_inr > 0 && <button className="btn btn-primary" onClick={pay}><Icon name="wallet" /> Pay supplier</button>}
+  </>;
 
+  const body = <>
       <div className="stats mb">
         <div className="stat"><div className="stat-text"><div className="stat-label">Cargo</div><div className="stat-value" style={{ fontSize: 17 }}>{g.cargo_name || '—'}</div></div></div>
         <div className="stat"><div className="stat-text"><div className="stat-label">Costing rate</div><div className="stat-value" style={{ fontSize: 17 }}>1 ₹ = Rs {g.exchange_rate.toFixed(4)}</div></div></div>
@@ -114,7 +122,31 @@ export default function GrnView() {
         </div>
       </div>
 
-      {paying && <SupplierPaymentModal supplier={paying} bills={paying.bills} defaultGrnId={g.id} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); reload(); }} />}
+      {paying && <SupplierPaymentModal supplier={paying} bills={paying.bills} defaultGrnId={g.id} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); changed(); }} />}
+  </>;
+
+  if (modal) {
+    return (
+      <Modal size="xl" title={title} subtitle={subtitle} onClose={onClose}
+        footer={<><button className="btn" onClick={onClose}>Close</button><span className="spacer" />{actions}</>}>
+        {body}
+      </Modal>
+    );
+  }
+  return (
+    <div>
+      <PageHeader back="/grn" title={title} subtitle={subtitle} actions={actions} />
+      {body}
     </div>
   );
+}
+
+/** Pop-up used by the Shipments (GRN) list. onChanged refreshes the list after a payment or delete. */
+export function GrnModal({ id, onClose, onChanged }) {
+  return <GrnScreen id={id} modal onClose={onClose} onChanged={onChanged} />;
+}
+
+export default function GrnView() {
+  const { id } = useParams();
+  return <GrnScreen id={id} />;
 }

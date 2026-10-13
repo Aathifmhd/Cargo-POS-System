@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api, n, r2, lkr, inr, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
 import { PageHeader, Card, Icon, Field, NumInput, Combobox, Segmented, useToast, Loading } from '../components/ui.jsx';
 import { SupplierForm } from '../components/forms.jsx';
@@ -23,6 +23,9 @@ export default function GrnForm() {
   const { settings, reload: reloadSettings } = useSettings();
   const toast = useToast();
   const navigate = useNavigate();
+  // /grn/:id/edit — fixing a GRN that was entered wrongly (saving needs the Super Admin's password)
+  const { id: editId } = useParams();
+  const [editing, setEditing] = useState(editId ? null : false); // null while the GRN loads, then its GRN number
   const [suppliers, setSuppliers] = useState(null);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -31,6 +34,7 @@ export default function GrnForm() {
   const [busy, setBusy] = useState(false);
 
   const initial = useMemo(() => {
+    if (editId) return { items: [], entry: blankItem(), editingKey: null, expenses: [{ label: 'Cargo charge', amount_lkr: '' }] };
     try {
       const d = JSON.parse(localStorage.getItem(DRAFT));
       if (d && Array.isArray(d.items)) {
@@ -53,7 +57,31 @@ export default function GrnForm() {
   const [g, setG] = useState(initial);
   const set = (k) => (v) => setG((x) => ({ ...x, [k]: v && v.target ? (v.target.type === 'checkbox' ? v.target.checked : v.target.value) : v }));
 
-  useEffect(() => { localStorage.setItem(DRAFT, JSON.stringify(g)); }, [g]);
+  useEffect(() => { if (!editId) localStorage.setItem(DRAFT, JSON.stringify(g)); }, [g, editId]);   // edits are not kept as a draft
+
+  // editing: load the GRN into the form, keeping its prices as they were
+  useEffect(() => {
+    if (!editId) return;
+    api.get(`/grns/${editId}`).then((d) => {
+      const pp = (v, pps) => (n(v) > 0 ? r2(n(v) / Math.max(1, n(pps) || 1)) : '');
+      setG({
+        date: d.date, supplier_id: d.supplier_id, supplier_invoice_no: d.supplier_invoice_no || '', cargo_name: d.cargo_name || '',
+        payment_type: d.payment_type, due_date: d.due_date || '', payment_method: d.payments?.[0]?.method || 'Bank transfer', payment_reference: '', notes: d.notes || '',
+        expenses: [{ label: 'Cargo charge', amount_lkr: d.expenses_lkr || '' }],
+        items: d.items.map((i) => ({
+          key: keySeq++, product_id: i.product_id, name: i.name, category: i.category || '', subtype: i.subtype || '', pname: i.pname || '',
+          catOther: false, isNew: false, pcs_per_set: i.pcs_per_set, colors_count: i.colors_count || '', color_names: i.color_names || '', sizes: i.sizes || '',
+          sets: i.sets, extra_pcs: i.extra_pcs || '', short_sets: i.short_sets || '', short_pcs: i.short_pcs || '', showQty: Boolean(i.extra_pcs || i.short_pcs || i.short_sets),
+          cost_inr_per_pcs: pp(i.cost_inr_per_set, i.pcs_per_set), expected_per_pcs: pp(i.expected_per_set, i.pcs_per_set), mrp_per_pcs: pp(i.mrp_per_set, i.pcs_per_set),
+          expectedManual: true, mrpManual: true,
+        })),
+        entry: blankItem(), editingKey: null,
+      });
+      setFormOpen(false);
+      keepDue.current = true;
+      setEditing(d.grn_no);
+    }).catch((e) => { toast(e.message, 'error'); navigate('/grn'); });
+  }, [editId]); // eslint-disable-line
   useEffect(() => {
     api.get('/suppliers').then((s) => setSuppliers(s.filter((x) => x.active)));
     api.get('/products?active=all').then(setProducts);
@@ -63,7 +91,10 @@ export default function GrnForm() {
   }, []);
 
   const supplier = (suppliers || []).find((s) => s.id === g.supplier_id);
+  // the due date follows the supplier's credit days — but a GRN loaded for editing keeps its own due date
+  const keepDue = useRef(false);
   useEffect(() => {
+    if (keepDue.current) { keepDue.current = false; return; }
     if (supplier && g.payment_type === 'credit') setG((x) => ({ ...x, due_date: addDays(x.date, supplier.credit_days) }));
   }, [g.supplier_id, g.date, g.payment_type]); // eslint-disable-line
 
@@ -173,7 +204,8 @@ export default function GrnForm() {
     if (!e.category.trim()) return toast('Choose the category', 'error');
     const fromCatalog = !e.catOther && findCategory(catalog, e.category);
     if (fromCatalog && !e.subtype) return toast('Choose the product', 'error');
-    if (fromCatalog && !e.pname) return toast('Choose the product name', 'error');
+    // new items need a product name; existing stock items from before product names keep theirs as they are
+    if (fromCatalog && !e.pname && !e.product_id) return toast('Choose the product name', 'error');
     if (!e.name.trim()) return toast('Choose the product', 'error');
     if (!hasQty(e)) return toast('Enter the number of sets', 'error');
     if (n(e.sets) > 0 && n(e.cost_inr_per_pcs) <= 0 && !confirm(`"${e.name}" has no billed price per piece. Add it anyway?`)) return;
@@ -228,20 +260,26 @@ export default function GrnForm() {
     if (missing && !confirm(`"${missing.name}" has no cost. Save anyway?`)) return;
     setBusy(true);
     try {
-      const saved = await api.post('/grns', { ...g, items: filledItems.map(forSaving) });
-      localStorage.removeItem(DRAFT);
-      toast(`${saved.grn_no} saved — stock updated`);
+      const body = { ...g, items: filledItems.map(forSaving) };
+      const saved = editId ? await api.put(`/grns/${editId}`, body) : await api.post('/grns', body);
+      if (!editId) localStorage.removeItem(DRAFT);
+      toast(editId ? `${saved.grn_no} updated — stock adjusted` : `${saved.grn_no} saved — stock updated`);
       navigate(`/grn/${saved.id}`);
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   };
   const reset = () => { if (confirm('Clear this form and start again?')) { localStorage.removeItem(DRAFT); setG({ ...initial, items: [], entry: blankItem(), editingKey: null, supplier_id: null }); window.location.reload(); } };
 
-  if (!suppliers) return <Loading />;
+  if (!suppliers || editing === null) return <Loading />;
 
   return (
     <div>
-      <PageHeader title="Receive Goods (GRN)" subtitle="Enter a shipment from India. The system works out the real cost of every item in LKR."
-        actions={<button className="btn btn-ghost" onClick={reset}><Icon name="trash" size={16} /> Clear form</button>} />
+      {editId ? (
+        <PageHeader back={`/grn/${editId}`} title={`Edit ${editing}`} subtitle="Fix what was entered wrongly. Stock moves by the difference only. Saving needs the Super Admin's password."
+          actions={<button className="btn btn-ghost" onClick={() => navigate(`/grn/${editId}`)}>Cancel</button>} />
+      ) : (
+        <PageHeader title="Receive Goods (GRN)" subtitle="Enter a shipment from India. The system works out the real cost of every item in LKR."
+          actions={<button className="btn btn-ghost" onClick={reset}><Icon name="trash" size={16} /> Clear form</button>} />
+      )}
 
       <div className="grn-layout">
         <div className="stack">
@@ -591,7 +629,7 @@ export default function GrnForm() {
               <dt>Payable to supplier</dt><dd>{inr(calc.goods_inr)}</dd>
             </dl>
           </Card>
-          <button className="btn btn-primary btn-lg btn-block" onClick={save} disabled={busy}><Icon name="check" /> {busy ? 'Saving…' : 'Save GRN & add to stock'}</button>
+          <button className="btn btn-primary btn-lg btn-block" onClick={save} disabled={busy}><Icon name="check" /> {busy ? 'Saving…' : editId ? `Save changes to ${editing}` : 'Save GRN & add to stock'}</button>
           <p className="muted small center">Draft is saved automatically on this computer until you save.</p>
         </div>
       </div>

@@ -277,9 +277,8 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .cost-high { background: var(--red-soft); color: var(--red); }
 .till-hits .cost-badge { margin-left: 6px; font-size: 10.5px; letter-spacing: .02em; text-transform: uppercase; }
 .table tr.batch-row td { border-top-style: dashed; }
-.item-size-row { display: flex; flex-direction: column; gap: 12px; }   /* sizes, then the cargo charge and other expenses below */
-.item-charges { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 12px; }
-@media (max-width: 520px) { .item-charges { grid-template-columns: 1fr 1fr; } }
+.item-size-row { display: flex; flex-direction: column; gap: 22px; }   /* sizes, then the cargo charge and other expenses below */
+.item-charges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }   /* same widths as the selling price & MRP fields */
 .role-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 750; white-space: nowrap; line-height: 1.3; }
 .role-superadmin { background: linear-gradient(135deg, #FDF0C8, #F6D77A); color: #7A5200; box-shadow: inset 0 0 0 1px #E9C35A; }
 .role-admin { background: var(--violet-soft); color: var(--violet); }

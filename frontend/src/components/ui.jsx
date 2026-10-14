@@ -134,6 +134,12 @@ export function Badge({ tone = 'grey', children }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
+/** Low / medium / high cost badge for a stock batch (see costTiers in lib.js). */
+export function CostBadge({ tier }) {
+  if (!tier) return null;
+  return <span className={`cost-badge cost-${tier}`}>{tier === 'low' ? 'Low cost' : tier === 'medium' ? 'Medium cost' : 'High cost'}</span>;
+}
+
 const STATUS = {
   paid: ['green', 'Paid'],
   overdue: ['red', 'Overdue'],

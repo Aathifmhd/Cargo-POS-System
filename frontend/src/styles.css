@@ -271,6 +271,15 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .toolbar .search .input { padding-left: 34px; }
 .es-toolbar .es-supplier { width: auto; min-width: 170px; }
 .es-stats { margin-bottom: 18px; }
+.cost-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 750; white-space: nowrap; vertical-align: 1px; line-height: 1.5; }
+.cost-low { background: var(--green-soft); color: var(--green); }
+.cost-medium { background: var(--amber-soft); color: var(--amber); }
+.cost-high { background: var(--red-soft); color: var(--red); }
+.till-hits .cost-badge { margin-left: 6px; font-size: 10.5px; letter-spacing: .02em; text-transform: uppercase; }
+.table tr.batch-row td { border-top-style: dashed; }
+.item-size-row { display: flex; flex-direction: column; gap: 12px; }   /* sizes, then the cargo charge and other expenses below */
+.item-charges { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 12px; }
+@media (max-width: 520px) { .item-charges { grid-template-columns: 1fr 1fr; } }
 .role-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 750; white-space: nowrap; line-height: 1.3; }
 .role-superadmin { background: linear-gradient(135deg, #FDF0C8, #F6D77A); color: #7A5200; box-shadow: inset 0 0 0 1px #E9C35A; }
 .role-admin { background: var(--violet-soft); color: var(--violet); }
@@ -1127,15 +1136,6 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .calc-pill small { display: block; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* Receive Goods: cargo charge under the goods table */
-.cargo-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
-.cargo-row-text { display: flex; flex-direction: column; gap: 2px; }
-.cargo-input { width: 220px; }
-.cargo-input .input { text-align: right; font-weight: 700; }
-.item-group-cargo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 9px 14px; border-top: 1px dashed var(--border); background: var(--surface-2); }
-.item-group-cargo .cargo-input { width: 180px; }
-.cargo-total { font-size: 18px; }
-.cargo-row-old { border-style: dashed; }
-.kv .sub-kv { font-size: 12.5px; color: var(--muted); padding-left: 10px; }
 .item-qty-toggle { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 1px dashed var(--border-strong); background: var(--surface); color: var(--text-2); font: inherit; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 999px; cursor: pointer; }
 .item-qty-toggle:hover { border-color: var(--amber); color: var(--amber); }
 .item-cost-row { grid-template-columns: 1fr; }
@@ -1143,13 +1143,4 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 
 
 /* Settings: click a product chip to manage its product names */
-.tag-edit .tag.pickable { padding-left: 4px; }
-.tag-edit .tag .tag-pick { width: auto; height: 26px; border-radius: 999px; padding: 0 6px 0 7px; display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 650; color: var(--text); }
-.tag-edit .tag .tag-pick:hover { background: var(--primary-soft); color: var(--primary-text); }
-.tag-edit .tag .tag-pick em { font-style: normal; font-size: 11px; font-weight: 750; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--primary-soft); color: var(--primary-text); display: grid; place-items: center; }
-.tag-edit .tag.picked { border-color: var(--primary); background: var(--primary-soft); }
-.tag-edit .tag.picked .tag-pick em { background: var(--primary); color: #fff; }
-.cat-names-pop { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 10px; border: 1px solid var(--primary); border-radius: 10px; background: var(--surface); }
-.cat-names-title { font-size: 12.5px; font-weight: 750; color: var(--primary-text); }
-.cat-names-hint { font-size: 12px; color: var(--muted); margin-top: -4px; }
 .modal .table td:first-child, .modal .table th:first-child { min-width: 170px; }

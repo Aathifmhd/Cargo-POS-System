@@ -1,14 +1,15 @@
 import {
   find, findOne, insert, setById, updateOne, updateMany, deleteMany, tx, fail, round2, num, sum, todayStr, addDays, getSettings,
   nextNo, nextProductCode, allocate, dueStatus, moveStock, recomputeProductCost, grnItemPcs, byDateId, stamp, inParallel,
-  itemShortPcs, unbilledExtraInr, setSetting,
+  itemShortPcs, unbilledExtraInr, setSetting, syncGrnBatch,
 } from './db.js';
 
 /* =========================================================
    LANDED COST
    (INR goods + INR cargo) x exchange rate + LKR expenses,
    spread over items by their share of the INR goods value.
-   A charge with a category (cargo is paid category by category) is spread over that category's items only.
+   Each item has its own cargo charge and other expenses (LKR), added straight to that item's cost. Older GRNs kept the cargo as
+   separate charges: one with a category is spread over that category's items, any other over the whole shipment.
    ========================================================= */
 export function computeLanding({ items, exchange_rate, cargo_charge_inr, expenses, goods_rate, cargo_rate }) {
   const baseRate = num(exchange_rate);
@@ -26,7 +27,7 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const shortSets = q(it.short_sets);
     const shortPcs = q(it.short_pcs);
     return {
-      ...it, sets, pcs_per_set: pcsPerSet, cost_inr_per_set: cost,
+      ...it, sets, pcs_per_set: pcsPerSet, cost_inr_per_set: cost, cargo_lkr: round2(Math.max(0, num(it.cargo_lkr))), other_lkr: round2(Math.max(0, num(it.other_lkr))),
       line_inr: round2(sets * cost + extraPcs * (cost / pcsPerSet)),
       extra_sets: extraSets, extra_pcs: extraPcs, short_sets: shortSets, short_pcs: shortPcs,
       billed_pcs: sets * pcsPerSet + extraPcs,
@@ -35,13 +36,15 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   });
   const goods_inr = round2(lines.reduce((s, l) => s + l.line_inr, 0));
   const cargo_inr = num(cargo_charge_inr);
-  const expenses_lkr = round2((expenses || []).reduce((s, e) => s + num(e.amount_lkr), 0));
+  // every charge: the items' own cargo and other expenses, and any older shared ones
+  const other_lkr = round2(lines.reduce((s, l) => s + l.other_lkr, 0));
+  const expenses_lkr = round2((expenses || []).reduce((s, e) => s + num(e.amount_lkr), 0) + lines.reduce((s, l) => s + l.cargo_lkr, 0) + other_lkr);
   const total_pcs = lines.reduce((s, l) => s + l.pcs, 0);
   const total_sets = lines.reduce((s, l) => s + Math.max(0, l.sets + l.extra_sets - l.short_sets), 0);
 
   // each charge is shared by value over the items it covers: a category's cargo charge over that
   // category's items only, any other charge over the whole shipment
-  const overheadOf = lines.map(() => 0);
+  const overheadOf = lines.map((l) => l.cargo_lkr + l.other_lkr);   // the item's own cargo charge and other expenses
   const all = lines.map((_, i) => i);
   const spread = (amount, idx) => {
     if (!amount) return;
@@ -65,7 +68,7 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const perPcs = basis ? landed / basis : 0;
     return { ...l, landed_lkr: round2(landed), landed_per_set_lkr: round2(perPcs * l.pcs_per_set), landed_per_pcs_lkr: round2(perPcs) };
   });
-  return { items: out, goods_inr, cargo_inr, expenses_lkr, total_sets, total_pcs, total_lkr: round2(goods_inr * rate + cargo_inr * cRate + expenses_lkr) };
+  return { items: out, goods_inr, cargo_inr, expenses_lkr, other_lkr, total_sets, total_pcs, total_lkr: round2(goods_inr * rate + cargo_inr * cRate + expenses_lkr) };
 }
 
 /** The one rate every cost is worked out at (Settings → Exchange rate, 3.5 by default). The live rate never changes costs. */
@@ -114,6 +117,10 @@ async function recostGrn(g, rate) {
   for (let i = 0; i < calc.items.length; i++) {
     const it = calc.items[i];
     await setById('grn_items', items[i].id, { landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr });
+  }
+  // its stock batches take the new cost (only the batches collection exists after the batch update has run)
+  if ((await getSettings()).batches_version) {
+    for (const pid of new Set(items.map((i) => i.product_id))) await syncGrnBatch(g.id, pid, { ref: g.grn_no, date: g.date });
   }
   return { total_lkr: calc.total_lkr, productIds: items.map((i) => i.product_id) };
 }
@@ -286,7 +293,7 @@ async function saveGrn(body, editId = null) {
   const head = {
     date, supplier_id: supplier.id, supplier_invoice_no: body.supplier_invoice_no || null, cargo_name: (body.cargo_name || '').trim() || null,
     exchange_rate: rate, goods_inr: calc.goods_inr, cargo_charge_inr: calc.cargo_inr, cargo_in_supplier_bill: cargoInBill, payable_inr,
-    expenses_lkr: calc.expenses_lkr, total_lkr: calc.total_lkr, total_sets: calc.total_sets, total_pcs: calc.total_pcs,
+    expenses_lkr: calc.expenses_lkr, other_lkr: calc.other_lkr, total_lkr: calc.total_lkr, total_sets: calc.total_sets, total_pcs: calc.total_pcs,
     payment_type: paymentType, due_date, notes: body.notes || null, effective_rate: rate,
   };
 
@@ -304,7 +311,7 @@ async function saveGrn(body, editId = null) {
       grn_no = await nextNo('grns', 'grn_no', settings.grn_prefix || 'GRN-', 4);
       grnId = (await insert('grns', { grn_no, ...head })).id;
     }
-    const newPcs = new Map(); // product id → pieces this GRN now brings in
+    const received = new Map(); // product id → what the stock card says about it
     // editing keeps how each line's extra / short pieces were resolved (Extra & Short) — those can't be changed here
     const oldLines = new Map();
     for (const o of old?.items || []) oldLines.set(o.product_id, [...(oldLines.get(o.product_id) || []), o]);
@@ -340,7 +347,7 @@ async function saveGrn(body, editId = null) {
         });
       }
 
-      // cost is worked out from the receipts by recomputeProductCost (called from moveStock below)
+      // cost comes from the stock batches (syncGrnBatch below)
       const mrp = num(it.mrp_per_set) || product.mrp_per_set;
       const expected = num(it.expected_per_set) || product.expected_per_set;
       const keep = (v, cur) => v || cur;   // like COALESCE: only replace when a new value is given
@@ -356,7 +363,7 @@ async function saveGrn(body, editId = null) {
         ...carry(product.id, it),
         grn_id: grnId, product_id: product.id, name: product.name, category: product.category || (it.category || '').trim() || null, pcs_per_set: it.pcs_per_set, colors_count: Math.round(num(it.colors_count)),
         color_names: it.color_names || null, sizes: it.sizes || null, sets: it.sets, cost_inr_per_set: it.cost_inr_per_set,
-        line_inr: it.line_inr, landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr,
+        line_inr: it.line_inr, cargo_lkr: it.cargo_lkr, other_lkr: it.other_lkr, landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr,
         mrp_per_set: round2(mrp), expected_per_set: round2(expected),
         extra_sets: it.extra_sets, extra_pcs: it.extra_pcs, short_sets: it.short_sets, short_pcs: it.short_pcs,
       });
@@ -367,8 +374,15 @@ async function saveGrn(body, editId = null) {
         it.short_pcs && `${it.short_pcs} pcs short`,
       ].filter(Boolean);
       unbilled += unbilledExtraInr(line);
-      if (old) newPcs.set(product.id, (newPcs.get(product.id) || 0) + grnItemPcs(line));
-      else await moveStock(product.id, it.pcs, 'grn', grn_no, `Received ${it.sets} sets${notes.length ? ` (${notes.join(', ')})` : ''}`, date);
+      received.set(product.id, [...(received.get(product.id) || []), `${it.sets} sets${notes.length ? ` (${notes.join(', ')})` : ''}`]);
+    }
+    // stock: every product of this GRN (before and after an edit) gets its batch brought in line —
+    // a batch can't go below what is already sold from it
+    for (const pid of new Set([...(old?.items || []).map((i) => i.product_id), ...received.keys()])) {
+      await syncGrnBatch(grnId, pid, {
+        ref: grn_no, date, type: old ? 'grn-edit' : 'grn',
+        note: old ? 'GRN edited' : `Received ${(received.get(pid) || []).join(' + ')}`,
+      });
     }
 
     for (const left of [...oldLines.values()].flat()) {
@@ -382,16 +396,6 @@ async function saveGrn(body, editId = null) {
 
     const autoNote = `Paid with ${grn_no}`;
     if (old) {
-      // stock moves by the difference only — and can't take back pieces that are already sold
-      const oldPcs = new Map();
-      for (const it of old.items) oldPcs.set(it.product_id, (oldPcs.get(it.product_id) || 0) + grnItemPcs(it));
-      for (const pid of new Set([...oldPcs.keys(), ...newPcs.keys()])) {
-        const diff = (newPcs.get(pid) || 0) - (oldPcs.get(pid) || 0);
-        if (!diff) { await recomputeProductCost(pid); continue; }
-        const p = await findOne('products', { id: pid });
-        if (p.stock_pcs + diff < 0) fail(`Cannot save: "${p.name}" from this GRN is already sold — only ${p.stock_pcs} pcs are left to take back.`);
-        await moveStock(pid, diff, 'grn-edit', grn_no, `GRN edited (${diff > 0 ? '+' : ''}${diff} pcs)`, date);
-      }
       // a GRN paid at receipt: its payment follows the new total; switching to credit removes it
       const auto = await findOne('supplier_payments', { grn_id: grnId, notes: autoNote });
       if (auto && (paymentType !== 'paid' || payable_inr <= 0)) await deleteMany('supplier_payments', { id: auto.id });
@@ -476,13 +480,13 @@ export async function resolveLine(itemId, { kind, action, date, note } = {}) {
       const pcs = itemShortPcs(item);
       if (!pcs) fail('This line has no short pieces');
       const was = item.short_status || null;
-      if (was === 'received' && to !== 'received') {
-        const p = await findOne('products', { id: item.product_id });
-        if (p.stock_pcs < pcs) fail(`Cannot undo: only ${p.stock_pcs} pcs of "${p.name}" are left in stock.`);
-      }
       await setById('grn_items', item.id, { short_status: to, short_date: to ? day : null, short_note: to ? text : null });
-      if (was !== 'received' && to === 'received') await moveStock(item.product_id, pcs, 'short-received', g.grn_no, `Short pieces received later${text ? ` (${text})` : ''}`, day);
-      if (was === 'received' && to !== 'received') await moveStock(item.product_id, -pcs, 'short-undo', g.grn_no, 'Short pieces taken back off (resolve undone)', day);
+      if ((was === 'received') !== (to === 'received')) {
+        await syncGrnBatch(g.id, item.product_id, {
+          ref: g.grn_no, date: g.date, type: to === 'received' ? 'short-received' : 'short-undo',
+          note: to === 'received' ? `Short pieces received ${day}${text ? ` (${text})` : ''}` : 'Short pieces taken back off (resolve undone)',
+        });
+      }
     } else {
       if (!(item.extra_pcs > 0)) fail('This line has no extra pieces');
       await setById('grn_items', item.id, { extra_status: to, extra_date: to ? day : null, extra_note: to ? text : null });
@@ -499,17 +503,13 @@ export async function resolveLine(itemId, { kind, action, date, note } = {}) {
 export async function deleteGrn(id) {
   const g = await getGrn(id);
   return tx(async () => {
-    for (const it of g.items) {
-      const pcs = grnItemPcs(it);
-      const p = await findOne('products', { id: it.product_id });
-      if (p.stock_pcs < pcs) fail(`Cannot delete: "${p.name}" from this GRN is already sold (only ${p.stock_pcs} pcs left).`);
-      await moveStock(it.product_id, -pcs, 'grn-delete', g.grn_no, 'GRN deleted');
+    await deleteMany('grn_items', { grn_id: id });
+    for (const pid of new Set(g.items.map((i) => i.product_id))) {
+      await syncGrnBatch(id, pid, { ref: g.grn_no, date: todayStr(), type: 'grn-delete', note: 'GRN deleted' });
     }
     await deleteMany('supplier_payments', { grn_id: id });
-    await deleteMany('grn_items', { grn_id: id });
     await deleteMany('grn_expenses', { grn_id: id });
     await deleteMany('grns', { id });
-    for (const pid of new Set(g.items.map((i) => i.product_id))) await recomputeProductCost(pid);
     return { ok: true };
   });
 }
@@ -528,6 +528,7 @@ export async function createSale(body, approve) {
   const date = body.date || todayStr();
 
   return tx(async () => {
+    const invoice_no = await nextNo('sales', 'invoice_no', settings.invoice_prefix || 'INV-', 5);
     const lines = [];
     for (const i of items) {
       const p = await findOne('products', { id: num(i.product_id) });
@@ -537,15 +538,20 @@ export async function createSale(body, approve) {
       const qty = num(i.qty);
       const pcs = Math.round(qty * per);
       if (pcs > p.stock_pcs) fail(`Not enough stock for "${p.name}". Available: ${p.stock_pcs} pcs`);
+      // taken now (the whole bill is undone if anything below fails), so the cost is the batch's own
+      const taken = await moveStock(p.id, -pcs, 'sale', invoice_no, `${qty} ${unit}`, date, { batchId: i.batch_id ?? null });
+      const costPc = pcs ? sum(taken, (t) => -t.pcs * t.cost_per_pcs) / pcs : p.cost_per_pcs;
+      const batch = taken.length === 1 ? await findOne('batches', { id: taken[0].batch_id }) : null;
       const price = num(i.price);
       const disc_pct = Math.min(100, Math.max(0, num(i.disc_pct)));
       const disc = round2((qty * price * disc_pct) / 100);
       lines.push({
         p, unit, qty, pcs, price, disc, disc_pct,
         net: qty ? round2((qty * price - disc) / qty) : price,     // price per unit after the line discount
-        mrp: round2(p.mrp_per_set / (unit === 'set' ? 1 : p.pcs_per_set)),
-        expected: round2(p.expected_per_set / (unit === 'set' ? 1 : p.pcs_per_set)),
-        cost: round2(p.cost_per_pcs * per),
+        mrp: round2((batch?.mrp_per_pcs || p.mrp_per_set / p.pcs_per_set) * per),
+        expected: round2((batch?.expected_per_pcs || p.expected_per_set / p.pcs_per_set) * per),
+        cost: round2(costPc * per),
+        batches: taken.map((t) => ({ batch_id: t.batch_id, pcs: -t.pcs })),
         line_total: round2(qty * price - disc),
       });
     }
@@ -568,7 +574,6 @@ export async function createSale(body, approve) {
     }
     if (reasons.length && approve) await approve(reasons.join(' · '));
 
-    const invoice_no = await nextNo('sales', 'invoice_no', settings.invoice_prefix || 'INV-', 5);
     const sale = await insert('sales', {
       invoice_no, date, customer_id: customer?.id ?? null, customer_name: customer?.name || (body.customer_name || '').trim() || 'Walk-in customer',
       payment_type: paymentType, subtotal, discount, total, paid_at_sale: paid, cost_total, due_date, notes: body.notes || null,
@@ -577,8 +582,8 @@ export async function createSale(body, approve) {
       await insert('sale_items', {
         sale_id: sale.id, product_id: l.p.id, code: l.p.code, name: l.p.name, unit: l.unit, qty: l.qty, pcs: l.pcs, price: l.price,
         mrp_per_unit: l.mrp, expected_per_unit: l.expected, cost_per_unit: l.cost, line_total: l.line_total, disc: l.disc, disc_pct: l.disc_pct,
+        batch_id: l.batches.length === 1 ? l.batches[0].batch_id : null, batches: l.batches,
       });
-      await moveStock(l.p.id, -l.pcs, 'sale', invoice_no, `${l.qty} ${l.unit}`, date);
     }
     return sale.id;
   }).then((saleId) => getSale(saleId));
@@ -614,10 +619,21 @@ export async function getSale(id) {
  * Deletes a bill for good (Super Admin only). Its stock goes back (unless it was already cancelled),
  * and any payments recorded against it stay with the customer as money on account.
  */
+/** A cancelled or deleted bill: each line's pieces go back to the batches they were sold from. */
+async function returnStock(s, note) {
+  for (const it of s.items) {
+    const from = it.batches?.length ? it.batches : [{ batch_id: it.batch_id ?? null, pcs: it.pcs }];
+    for (const b of from) {
+      const there = b.batch_id != null && await findOne('batches', { id: b.batch_id });
+      await moveStock(it.product_id, b.pcs, 'void', s.invoice_no, note, todayStr(), { batchId: there ? b.batch_id : null });
+    }
+  }
+}
+
 export async function deleteSale(id) {
   const s = await getSale(id);
   return tx(async () => {
-    if (s.status !== 'void') for (const it of s.items) await moveStock(it.product_id, it.pcs, 'void', s.invoice_no, 'Bill deleted');
+    if (s.status !== 'void') await returnStock(s, 'Bill deleted');
     await updateMany('customer_payments', { sale_id: id }, { $set: { sale_id: null } });
     await deleteMany('sale_items', { sale_id: id });
     await deleteMany('sales', { id });
@@ -630,7 +646,7 @@ export async function voidSale(id, reason) {
   if (s.status === 'void') fail('This bill is already cancelled');
   if (s.payments.length) fail('This bill has payments recorded against it. Delete those payments first.');
   await tx(async () => {
-    for (const it of s.items) await moveStock(it.product_id, it.pcs, 'void', s.invoice_no, 'Bill cancelled');
+    await returnStock(s, 'Bill cancelled');
     await setById('sales', id, { status: 'void', notes: `${s.notes || ''} [Cancelled: ${reason || 'no reason'}]`.trim() });
   });
   return getSale(id);

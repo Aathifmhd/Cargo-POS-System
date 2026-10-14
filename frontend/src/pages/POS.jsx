@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate } from '../lib.js';
-import { Icon, Modal, Field, NumInput, useToast, Loading } from '../components/ui.jsx';
+import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers } from '../lib.js';
+import { Icon, Modal, Field, NumInput, CostBadge, useToast, Loading } from '../components/ui.jsx';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 import { isAdmin, isSuper } from '../lib.js';
@@ -40,27 +40,27 @@ export const POS_KEYS = [
   ['?', 'This list'],
 ];
 
-/** per-unit numbers for a product */
-function unitInfo(p, unit) {
-  const div = unit === 'set' ? 1 : p.pcs_per_set;
+/** per-unit numbers for a product — from its stock batch when one is picked (each batch has its own cost and prices) */
+function unitInfo(p, unit, b = null) {
+  const per = unit === 'set' ? p.pcs_per_set : 1;
+  const costPc = b ? b.cost_per_pcs : p.cost_per_pcs;
+  const expectedPc = b?.expected_per_pcs || p.expected_per_set / p.pcs_per_set;
+  const mrpPc = b?.mrp_per_pcs || p.mrp_per_set / p.pcs_per_set;
   return {
-    cost: r2((p.cost_per_pcs * p.pcs_per_set) / div),
-    expected: r2(p.expected_per_set / div),
-    mrp: r2(p.mrp_per_set / div),
-    per: unit === 'set' ? p.pcs_per_set : 1,
+    cost: r2(costPc * per), expected: r2(expectedPc * per), mrp: r2(mrpPc * per), per,
     // always per piece too, so a set price can be read as a piece price
-    costPc: r2(p.cost_per_pcs),
-    expectedPc: r2(p.expected_per_set / p.pcs_per_set),
-    mrpPc: r2(p.mrp_per_set / p.pcs_per_set),
+    costPc: r2(costPc), expectedPc: r2(expectedPc), mrpPc: r2(mrpPc),
   };
 }
+/** "GRN-0003 · 09 Oct" — where a batch came from */
+const batchText = (b) => (b ? `${b.ref || 'Stock'}${b.date ? ` · ${niceDate(b.date)}` : ''}` : '');
 const lineCalc = (l) => {
   const gross = n(l.qty) * n(l.price);
   const disc = r2((gross * n(l.disc_pct)) / 100);
   return { gross, disc, amount: r2(gross - disc), net: n(l.qty) ? (gross - disc) / n(l.qty) : n(l.price) };
 };
 const pcsText = (pcs) => `${int(pcs)} pcs`;
-const blankEntry = { q: '', pid: null, unit: 'pcs', qty: '1', price: '', disc_pct: '' };   // sold by the piece only
+const blankEntry = { q: '', pid: null, bid: null, unit: 'pcs', qty: '1', price: '', disc_pct: '' };   // sold by the piece only; bid = the stock batch
 const typingIn = (el) => el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
 
 export default function POS() {
@@ -112,6 +112,9 @@ export default function POS() {
   }, [lines, byId]);
   const customer = customers.find((c) => c.id === customerId);
   const cur = entry.pid ? byId[entry.pid] : null;
+  // the stock batch a line (or the entry) sells from: the same product bought at different costs is kept apart
+  const batchOf = (pid, bid) => (bid != null ? (byId[pid]?.batches || []).find((b) => b.id === bid) || null : null);
+  const curB = cur ? batchOf(cur.id, entry.bid) : null;
 
   /* ---------- matches for the code box ---------- */
   const hits = useMemo(() => {
@@ -120,8 +123,17 @@ export default function POS() {
     const all = (products || []).filter((p) => s === '*' || p.code.toLowerCase().includes(s) || p.name.toLowerCase().includes(s) || (p.category || '').toLowerCase().includes(s));
     return all.sort((a, b) => (a.code.toLowerCase() === s ? -1 : 0) - (b.code.toLowerCase() === s ? -1 : 0) || (b.stock_pcs > 0) - (a.stock_pcs > 0)).slice(0, 60);
   }, [products, entry.q, entry.pid]);
+  // one row per stock batch when a product was bought at different costs (cheapest first, badged low / medium / high)
+  const hitRows = useMemo(() => hits.flatMap((p) => {
+    const bs = p.batches || [];
+    if (bs.length < 2) return [{ p, b: bs[0] || null, tier: null }];
+    const tiers = costTiers(bs);
+    return bs.map((b) => ({ p, b, tier: tiers[b.id] }));
+  }), [hits]);
 
-  const inBillPcs = (pid, except = -1) => lines.reduce((s, l, i) => (l.product_id === pid && i !== except && byId[pid] ? s + n(l.qty) * unitInfo(byId[pid], l.unit).per : s), 0);
+  const inBillPcs = (pid, except = -1, bid = null) => lines.reduce((s, l, i) => (l.product_id === pid && i !== except && byId[pid] && (bid == null || l.batch_id === bid) ? s + n(l.qty) * unitInfo(byId[pid], l.unit).per : s), 0);
+  // pieces still free to bill: of the batch when one is picked, never more than the product has
+  const freePcs = (p, b, except = -1) => Math.min(p.stock_pcs - inBillPcs(p.id, except), b ? b.left_pcs - inBillPcs(p.id, except, b.id) : Infinity);
   // Move the cursor straight away, so fast typing / a barcode scanner never lands in the wrong box.
   // (Only boxes that appear after a re-render — the line editor — wait for the next tick.)
   const focus = (id) => {
@@ -133,13 +145,13 @@ export default function POS() {
   const toCode = () => { setSel(-1); setEdit(null); focus(codeRef); };
 
   /* ---------- entry row ---------- */
-  const pick = (p) => {
+  const pick = (p, b = null) => {
     if (!p) return;
     const unit = 'pcs';
-    const u = unitInfo(p, unit);
-    setEntry({ q: p.code, pid: p.id, unit, qty: '1', price: String(u.expected || u.mrp || ''), disc_pct: '' });
+    const u = unitInfo(p, unit, b);
+    setEntry({ q: p.code, pid: p.id, bid: b?.id ?? null, unit, qty: '1', price: String(u.expected || u.mrp || ''), disc_pct: '' });
     setHi(0);
-    if (p.stock_pcs - inBillPcs(p.id) <= 0) toast(`"${p.name}" has no stock left`, 'error');
+    if (freePcs(p, b) <= 0) toast(`"${p.name}"${b ? ` (${b.ref})` : ''} has no stock left`, 'error');
     focus('tQty');
   };
   const commit = () => {
@@ -148,11 +160,11 @@ export default function POS() {
     const qty = n(entry.qty);
     if (qty <= 0) { toast('Enter a quantity', 'error'); return focus('tQty'); }
     const per = unitInfo(p, entry.unit).per;
-    const free = p.stock_pcs - inBillPcs(p.id);
-    if (qty * per > free) { toast(`Only ${pcsText(Math.max(0, free))} of ${p.name} left`, 'error'); return focus('tQty'); }
-    const line = { product_id: p.id, unit: entry.unit, qty, price: n(entry.price), disc_pct: n(entry.disc_pct) };
+    const free = freePcs(p, curB);
+    if (qty * per > free) { toast(`Only ${pcsText(Math.max(0, free))} of ${p.name}${curB ? ` (${curB.ref})` : ''} left`, 'error'); return focus('tQty'); }
+    const line = { product_id: p.id, batch_id: curB?.id ?? null, unit: entry.unit, qty, price: n(entry.price), disc_pct: n(entry.disc_pct) };
     setLines((ls) => {
-      const i = ls.findIndex((l) => l.product_id === line.product_id && l.unit === line.unit && n(l.price) === line.price && n(l.disc_pct) === line.disc_pct);
+      const i = ls.findIndex((l) => l.product_id === line.product_id && (l.batch_id ?? null) === line.batch_id && l.unit === line.unit && n(l.price) === line.price && n(l.disc_pct) === line.disc_pct);
       if (i >= 0) return ls.map((l, j) => (j === i ? { ...l, qty: n(l.qty) + qty } : l));
       return [line, ...ls];   // newest line on top
     });
@@ -167,15 +179,17 @@ export default function POS() {
     const atEnd = el.selectionStart === el.value.length;
     if (e.key === 'Escape') { e.preventDefault(); setEntry(blankEntry); return toCode(); }
     if (id === 'tCode') {
-      if (e.key === 'ArrowDown' && hits.length) { e.preventDefault(); return setHi((h) => Math.min(h + 1, hits.length - 1)); }
-      if (e.key === 'ArrowUp' && hits.length) { e.preventDefault(); return setHi((h) => Math.max(h - 1, 0)); }
+      if (e.key === 'ArrowDown' && hitRows.length) { e.preventDefault(); return setHi((h) => Math.min(h + 1, hitRows.length - 1)); }
+      if (e.key === 'ArrowUp' && hitRows.length) { e.preventDefault(); return setHi((h) => Math.max(h - 1, 0)); }
       if (e.key === 'ArrowDown' && !entry.q && lines.length) { e.preventDefault(); el.blur(); return setSel(0); }
       if (e.key === 'Enter' && !e.ctrlKey) {
         e.preventDefault();
         if (cur) return focus('tQty');
         if (!entry.q.trim()) return doubleEnter();
-        const exact = hits.find((p) => p.code.toLowerCase() === entry.q.trim().toLowerCase());
-        if (exact || hits[hi]) return pick(exact || hits[hi]);
+        // an exact code picks its highlighted row (the cheapest batch first); otherwise the highlighted row
+        const exact = hitRows[hi]?.p.code.toLowerCase() === entry.q.trim().toLowerCase() ? hitRows[hi] : hitRows.find((r) => r.p.code.toLowerCase() === entry.q.trim().toLowerCase());
+        const row = exact || hitRows[hi];
+        if (row) return pick(row.p, row.b);
         if (entry.q.trim()) toast(`Nothing matches “${entry.q}”`, 'error');
         return;
       }
@@ -207,7 +221,7 @@ export default function POS() {
     const p = byId[l.product_id];
     const qty = n(edit.qty);
     if (qty <= 0) return toast('Quantity must be more than 0', 'error');
-    if (p && qty * unitInfo(p, edit.unit).per > p.stock_pcs - inBillPcs(p.id, edit.i)) return toast(`Not enough stock of ${p.name}`, 'error');
+    if (p && qty * unitInfo(p, edit.unit).per > freePcs(p, batchOf(p.id, l.batch_id), edit.i)) return toast(`Not enough stock of ${p.name}`, 'error');
     update(edit.i, { unit: edit.unit, qty, price: n(edit.price) });
     setEdit(null);
   };
@@ -239,10 +253,11 @@ export default function POS() {
     const rows = lines.map((l) => {
       const p = byId[l.product_id];
       if (!p) return null;
-      const u = unitInfo(p, l.unit);
+      const b = batchOf(p.id, l.batch_id);
+      const u = unitInfo(p, l.unit, b);
       const c = lineCalc(l);
       sub += c.gross; lineDisc += c.disc; cost += u.cost * n(l.qty); mrp += u.mrp * n(l.qty); pcs += n(l.qty) * u.per;
-      return { ...l, p, u, ...c, under: u.cost > 0 && c.net < u.cost };
+      return { ...l, p, b, u, ...c, under: u.cost > 0 && c.net < u.cost };
     });
     const afterLines = sub - lineDisc;
     const bd = String(billDisc).trim().endsWith('%') ? (afterLines * n(String(billDisc).replace('%', ''))) / 100 : n(billDisc);
@@ -279,7 +294,7 @@ export default function POS() {
       const sale = await api.post('/sales', {
         customer_id: customerId, payment_type: type, discount: T.billDisc,
         paid_amount: type === 'credit' ? n(paid) : T.net, due_date: type === 'credit' ? due : null,
-        items: lines.map((l) => ({ product_id: l.product_id, unit: l.unit, qty: n(l.qty), price: n(l.price), disc_pct: n(l.disc_pct) })),
+        items: lines.map((l) => ({ product_id: l.product_id, batch_id: l.batch_id ?? null, unit: l.unit, qty: n(l.qty), price: n(l.price), disc_pct: n(l.disc_pct) })),
       });
       writeLS(LAST_KEY, sale.id);
       setDone({ sale, change: type === 'cash' && n(paid) > 0 ? r2(n(paid) - sale.total) : null });
@@ -356,7 +371,7 @@ export default function POS() {
 
   if (!products) return <Loading />;
 
-  const eu = cur ? unitInfo(cur, entry.unit) : null;
+  const eu = cur ? unitInfo(cur, entry.unit, curB) : null;
   const eAmt = lineCalc(entry).amount;
   const eUnder = cur && eu.cost > 0 && lineCalc(entry).net < eu.cost;
 
@@ -397,7 +412,7 @@ export default function POS() {
           <div className={`till-item ${cur ? 'has' : ''}`}>
             {cur ? <>
               <b>{cur.name.toUpperCase()}</b>
-              <em>{cur.code}{cur.sizes ? ` · ${cur.sizes}` : ''} · stock {pcsText(cur.stock_pcs - inBillPcs(cur.id))}</em>
+              <em>{cur.code}{cur.sizes ? ` · ${cur.sizes}` : ''}{curB && (cur.batches || []).length > 1 ? ` · ${batchText(curB)}` : ''} · stock {pcsText(freePcs(cur, curB))}</em>
             </> : <i>scan or key a code — F1</i>}
           </div>
         </div>
@@ -424,22 +439,28 @@ export default function POS() {
 
       {/* ================= MATCH LIST ================= */}
       <div className="till-hitwrap">
-        {hits.length > 0 && (
+        {hitRows.length > 0 && (
           <div className="till-hits">
             <table>
-              <thead><tr><th>CODE</th><th>ITEM</th><th>CATEGORY</th><th>SIZES</th><th className="n">IN STOCK</th><th className="n">EXPECTED / PC</th><th className="n">MRP / PC</th></tr></thead>
+              <thead><tr><th>CODE</th><th>ITEM</th><th>STOCK FROM</th><th>SIZES</th><th className="n">IN STOCK</th><th className="n">COST / PC</th><th className="n">EXPECTED / PC</th><th className="n">MRP / PC</th></tr></thead>
               <tbody>
-                {hits.map((p, i) => (
-                  <tr key={p.id} className={i === hi ? 'on' : ''} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p); }}>
-                    <td className="c">{p.code}</td>
-                    <td className="d">{p.name}</td>
-                    <td className="s">{p.category || '—'}</td>
-                    <td className="s">{p.sizes || '—'}</td>
-                    <td className={`n ${p.stock_pcs <= 0 ? 'neg' : p.stock_pcs < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{p.stock_pcs <= 0 ? 'none' : pcsText(p.stock_pcs)}</td>
-                    <td className="p">{money(p.expected_per_set / p.pcs_per_set)}</td>
-                    <td className="n">{money(p.mrp_per_set / p.pcs_per_set)}</td>
-                  </tr>
-                ))}
+                {hitRows.map(({ p, b, tier }, i) => {
+                  const u = unitInfo(p, 'pcs', b);
+                  const stock = b ? b.left_pcs : p.stock_pcs;
+                  const many = (p.batches || []).length > 1;
+                  return (
+                    <tr key={`${p.id}-${b?.id ?? 0}`} className={`${i === hi ? 'on' : ''} ${many ? 'batch' : ''}`} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p, b); }}>
+                      <td className="c">{p.code}</td>
+                      <td className="d">{p.name}{tier && <> <CostBadge tier={tier} /></>}</td>
+                      <td className="s">{many ? batchText(b) : p.category || '—'}</td>
+                      <td className="s">{p.sizes || '—'}</td>
+                      <td className={`n ${stock <= 0 ? 'neg' : !many && stock < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{stock <= 0 ? 'none' : pcsText(stock)}</td>
+                      <td className="n cost">{money(u.costPc)}</td>
+                      <td className="p">{money(u.expectedPc)}</td>
+                      <td className="n">{money(u.mrpPc)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -459,7 +480,7 @@ export default function POS() {
                   <td className="c">{r.p.code}</td>
                   <td className="d">
                     <b>{r.p.name.toUpperCase()}</b>
-                    <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}expected {money(r.u.expectedPc)}</em>
+                    <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{r.b && (r.p.batches || []).length > 1 ? `${batchText(r.b)} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}expected {money(r.u.expectedPc)}</em>
                     {showCost && r.under && <span className="tag bad">under cost</span>}
                   </td>
                   <td className="n q">{edit?.i === i

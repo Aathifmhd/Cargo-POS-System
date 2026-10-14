@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, parseCatalog, namesFor } from '../lib.js';
+import { api, parseCatalog } from '../lib.js';
 import { Icon, useToast } from './ui.jsx';
 import { useSettings } from '../App.jsx';
 
 let seq = 1;
 const fromSettings = (settings) => parseCatalog(settings).map((c) => ({ ...c, orig: c.name, id: seq++ }));
-const strip = (rows) => rows.map(({ name, sizes, types, names, reorder_sets }) => ({ name: name.trim(), sizes, types, names: namesFor(types, names), reorder_sets: Math.max(0, Math.round(Number(reorder_sets) || 0)) })).filter((c) => c.name);
+const strip = (rows) => rows.map(({ name, sizes, types, reorder_sets }) => ({ name: name.trim(), sizes, types, reorder_sets: Math.max(0, Math.round(Number(reorder_sets) || 0)) })).filter((c) => c.name);
 
 /** Chips with × to remove, and a box to add more (Enter or comma; pasting "S, M, L" adds all three). */
-function TagEdit({ values, onChange, placeholder, onPick, picked, counts }) {
+function TagEdit({ values, onChange, placeholder }) {
   const [text, setText] = useState('');
   const add = (raw) => {
     const extra = raw.split(',').map((s) => s.trim()).filter(Boolean);
@@ -20,10 +20,8 @@ function TagEdit({ values, onChange, placeholder, onPick, picked, counts }) {
   return (
     <div className="tag-edit">
       {values.map((v) => (
-        <span key={v} className={`tag ${onPick ? 'pickable' : ''} ${picked === v ? 'picked' : ''}`}>
-          {onPick
-            ? <button type="button" className="tag-pick" title={`Product names for ${v}`} onClick={() => onPick(v)}>{v}{counts?.[v] ? <em>{counts[v]}</em> : null}</button>
-            : v}
+        <span key={v} className="tag">
+          {v}
           <button type="button" title={`Remove ${v}`} onClick={() => onChange(values.filter((x) => x !== v))}><Icon name="x" size={12} /></button>
         </span>
       ))}
@@ -40,7 +38,6 @@ export default function CatalogEditor() {
   const toast = useToast();
   const [rows, setRows] = useState(() => fromSettings(settings));
   const [busy, setBusy] = useState(null); // 'all', or the id of the card being saved
-  const [openNames, setOpenNames] = useState({}); // card id → the product whose names are open
   // after saving one card, the other cards keep their unsaved edits
   const keepEdits = useRef(false);
   useEffect(() => {
@@ -115,7 +112,6 @@ export default function CatalogEditor() {
       <div className="cat-flow">
         <span><b>Category</b> → Receive Goods' Category list</span>
         <span><b>Products</b> → that category's Products list</span>
-        <span><b>Product names</b> → the names for each product</span>
         <span><b>Sizes</b> → the size buttons for that category</span>
         <span><b>Re-order at</b> → low stock alert for its products</span>
       </div>
@@ -132,22 +128,13 @@ export default function CatalogEditor() {
                 <input className="input" value={r.name} placeholder="Category name" onChange={(e) => upd(r.id, { name: e.target.value })} />
                 {r.orig && r.name.trim() && r.orig !== r.name.trim() && <span className="badge badge-amber">renamed from {r.orig}</span>}
                 {!r.orig && <span className="badge badge-violet">New</span>}
-                <span className="muted">{r.types.length} products · {Object.values(r.names || {}).flat().length} names · {r.sizes.length} sizes</span>
+                <span className="muted">{r.types.length} products · {r.sizes.length} sizes</span>
                 <button type="button" className="btn btn-icon btn-sm btn-ghost" title="Move up" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
                 <button type="button" className="btn btn-icon btn-sm btn-ghost" title="Move down" disabled={i === rows.length - 1} onClick={() => move(i, 1)}>↓</button>
                 <button type="button" className="btn btn-icon btn-sm btn-ghost" title="Remove category" onClick={() => remove(r)}><Icon name="trash" size={15} /></button>
               </div>
               <div className="cat-label">Products</div>
-              <TagEdit values={r.types} onChange={(types) => upd(r.id, { types })} placeholder="+ Add product"
-                onPick={(t) => setOpenNames((o) => ({ ...o, [r.id]: o[r.id] === t ? null : t }))} picked={openNames[r.id]}
-                counts={Object.fromEntries(r.types.map((t) => [t, (r.names?.[t] || []).length]))} />
-              {openNames[r.id] && r.types.includes(openNames[r.id]) ? (
-                <div className="cat-names-pop">
-                  <span className="cat-names-title">{openNames[r.id]} — product names</span>
-                  <TagEdit values={r.names?.[openNames[r.id]] || []} placeholder="+ Add name"
-                    onChange={(list) => upd(r.id, { names: { ...(r.names || {}), [openNames[r.id]]: list } })} />
-                </div>
-              ) : r.types.length > 0 && <span className="cat-names-hint">Click a product to add its product names.</span>}
+              <TagEdit values={r.types} onChange={(types) => upd(r.id, { types })} placeholder="+ Add product" />
               <div className="cat-label">Sizes</div>
               <TagEdit values={r.sizes} onChange={(sizes) => upd(r.id, { sizes })} placeholder="+ Add size" />
               <div className="cat-reorder">
@@ -170,7 +157,7 @@ export default function CatalogEditor() {
         })}
       </div>
       <div className="cat-save-all">
-        <button type="button" className="btn" onClick={() => setRows((rs) => [...rs, { name: '', sizes: [], types: [], names: {}, reorder_sets: 0, orig: null, id: seq++ }])}>
+        <button type="button" className="btn" onClick={() => setRows((rs) => [...rs, { name: '', sizes: [], types: [], reorder_sets: 0, orig: null, id: seq++ }])}>
           <Icon name="plus" size={16} /> Add category
         </button>
         <span className="spacer" />

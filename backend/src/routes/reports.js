@@ -26,42 +26,14 @@ function cleanCatalog(raw) {
     if (!name) continue;
     if (seen.has(name.toLowerCase())) fail(`The category "${name}" is listed twice`);
     seen.add(name.toLowerCase());
-    const types = uniq(c.types);
-    // product names under each product: { Kerala: ['Royal Check', …] } — only for products still in the list
-    const names = {};
-    for (const t of types) {
-      const list = uniq(c.names?.[t]);
-      if (list.length) names[t] = list;
-    }
-    out.push({ name, sizes: uniq(c.sizes), types, names, reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) });
+    // product names are typed on Receive Goods, so the list keeps only categories, products and sizes
+    out.push({ name, sizes: uniq(c.sizes), types: uniq(c.types), reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) });
   }
   return JSON.stringify(out);
 }
 
 /* ---------------- settings ---------------- */
 r.get('/settings', async (req, res) => res.json(await publicSettings()));
-
-/** Receive Goods → "+ Add name": add one product name under a category's product (any signed-in user). */
-r.post('/catalog/names', async (req, res) => {
-  const category = String(req.body?.category || '').trim();
-  const product = String(req.body?.product || '').trim();
-  const pname = String(req.body?.name || '').trim();
-  if (!category || !product || !pname) fail('Choose the category and product, and type the product name');
-  const list = JSON.parse((await getSettings()).catalog || '[]');
-  const cat = list.find((c) => c.name.toLowerCase() === category.toLowerCase());
-  if (!cat) fail(`"${category}" is not in the category list`);
-  const type = (cat.types || []).find((t) => t.toLowerCase() === product.toLowerCase());
-  if (!type) fail(`"${product}" is not a product of ${cat.name}`);
-  cat.names = cat.names || {};
-  const names = (cat.names[type] = cat.names[type] || []);
-  const existing = names.find((x) => x.toLowerCase() === pname.toLowerCase());
-  if (!existing) {
-    names.push(pname);
-    await setSetting('catalog', cleanCatalog(list));
-    await audit(req.user, `Added product name "${pname}" to ${cat.name} › ${type}`);
-  }
-  res.json({ catalog: (await getSettings()).catalog, name: existing || pname });
-});
 
 /** Receive Goods → "+ Add product": add one product to a category's list (any signed-in user). */
 r.post('/catalog/products', async (req, res) => {
@@ -282,10 +254,6 @@ r.get('/reports/shipments', async (req, res) => {
   const names = Object.fromEntries((await find('suppliers', { id: { $in: [...new Set(list.map((g) => g.supplier_id))] } }, { project: { id: 1, name: 1 } })).map((s) => [s.id, s.name]));
   const grns = list.filter((g) => names[g.supplier_id] !== undefined).map((g) => ({ ...g, supplier_name: names[g.supplier_id] }))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  // cargo paid in rupees on older GRNs + 'Cargo …' lines paid in LKR
-  const cargoLines = grns.length ? await find('grn_expenses', { grn_id: { $in: grns.map((g) => g.id) }, label: /^Cargo/i }) : [];
-  const cargoLkr = {};
-  for (const e of cargoLines) cargoLkr[e.grn_id] = (cargoLkr[e.grn_id] || 0) + e.amount_lkr;
   const cargo = {};
   const supp = {};
   for (const g of grns) {
@@ -294,7 +262,8 @@ r.get('/reports/shipments', async (req, res) => {
     c.shipments++;
     c.goods_inr += g.goods_inr;
     c.cargo_inr += g.cargo_charge_inr;
-    c.cargo_lkr += g.cargo_charge_inr * g.exchange_rate + (cargoLkr[g.id] || 0);
+    // cargo paid in rupees on the oldest GRNs + the cargo charges in LKR (on each item, or older shared ones), without other expenses
+    c.cargo_lkr += g.cargo_charge_inr * g.exchange_rate + g.expenses_lkr - (g.other_lkr || 0);
     c.expenses_lkr += g.expenses_lkr;
     c.total_lkr += g.total_lkr;
     c.pcs += g.total_pcs;

@@ -14,6 +14,7 @@ import { requireAuth, initAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
 import { setOnRateChange, startFxTimer } from './fx.js';
 import { revalueGrns, upgradeCosting } from './services.js';
+import { setupBatches } from './db.js';
 
 // Connect to MongoDB, create indexes / default settings / default logins (safe on every start).
 await setup();
@@ -56,5 +57,6 @@ app.listen(PORT, () => console.log(`Cargo POS API running on http://localhost:${
 
 // The live INR rate is shown on the dashboard only — costs always use the fixed costing rate (Settings).
 setOnRateChange((rate) => console.log(`Live INR rate now ${rate}`));
-upgradeCosting().then(() => revalueGrns()).catch((e) => console.error('Re-costing GRNs failed:', e.message));
+// stock batches first (once: existing stock is split by GRN), then the GRN costs
+setupBatches().then(() => upgradeCosting()).then(() => revalueGrns()).catch((e) => console.error('Stock batches / re-costing GRNs failed:', e.message));
 if (!process.env.VERCEL) startFxTimer();   // on Vercel the rate is refreshed when the dashboard asks for it

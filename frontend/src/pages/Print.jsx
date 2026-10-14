@@ -105,7 +105,8 @@ export function PrintGrn() {
         <div className="print-totals">
           <div><span>Goods</span><span>{inr(g.goods_inr)}</span></div>
           {g.cargo_charge_inr > 0 && <div><span>Cargo charge (₹)</span><span>{inr(g.cargo_charge_inr)}</span></div>}
-          {g.expenses.map((e) => <div key={e.id}><span>{e.label}</span><span>{lkr(e.amount_lkr)}</span></div>)}
+          {g.expenses_lkr - (g.other_lkr || 0) > 0 && <div><span>Cargo charge</span><span>{lkr(g.expenses_lkr - (g.other_lkr || 0))}</span></div>}
+          {g.other_lkr > 0 && <div><span>Other expenses</span><span>{lkr(g.other_lkr)}</span></div>}
           <div className="grand"><span>Total cost</span><span>{lkr(g.total_lkr)}</span></div>
           <div><span>Payable to supplier</span><span>{inr(g.payable_inr)}</span></div>
           <div><span>Due date</span><span>{niceDate(g.due_date)}</span></div>

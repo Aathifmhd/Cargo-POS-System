@@ -2,24 +2,28 @@ import { useCallback, useEffect, useState } from 'react';
 
 /* ---------------- catalogue (Settings → Categories, products & sizes) ---------------- */
 /** [{ name, sizes: [], types: [] }] from settings.catalog */
-/** Product names per product, kept in the products' order and only for products that still exist (same as the server). */
-export function namesFor(types, names) {
-  const out = {};
-  for (const t of types) {
-    const list = Array.isArray(names?.[t]) ? names[t].filter(Boolean) : [];
-    if (list.length) out[t] = list;
-  }
-  return out;
-}
 export function parseCatalog(settings) {
   try {
     const list = JSON.parse(settings?.catalog || '[]');
     return Array.isArray(list) ? list.filter((c) => c && c.name).map((c) => {
-      const types = c.types || [];
-      return { name: c.name, sizes: c.sizes || [], types, names: namesFor(types, c.names), reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) };
+      return { name: c.name, sizes: c.sizes || [], types: c.types || [], reorder_sets: Math.max(0, Math.round(Number(c.reorder_sets) || 0)) };
     }) : [];
   } catch { return []; }
 }
+/**
+ * Low / medium / high cost for one product's stock batches (cheapest first, as the server sends them).
+ * The dearest third (at least one) is high, the rest split evenly with the extra one going to low:
+ * 2 costs → low, high · 3 → low, medium, high · 5 → low, low, medium, medium, high.
+ * Returns batch id → 'low' | 'medium' | 'high' (empty when there is only one cost).
+ */
+export function costTiers(batches) {
+  const list = [...(batches || [])].sort((a, b) => a.cost_per_pcs - b.cost_per_pcs);
+  if (list.length < 2) return {};
+  const high = Math.max(1, Math.floor(list.length / 3));
+  const low = Math.ceil((list.length - high) / 2);
+  return Object.fromEntries(list.map((b, i) => [b.id, i < low ? 'low' : i < list.length - high ? 'medium' : 'high']));
+}
+
 export const findCategory = (catalog, name) => catalog.find((c) => c.name.toLowerCase() === String(name || '').trim().toLowerCase());
 
 /* ---------------- theme (light by default, or dark) ---------------- */
@@ -181,7 +185,7 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const short_pcs = q(it.short_pcs);
     const line_inr = r2(sets * cost + extra_pcs * (cost / pcsPerSet));
     return {
-      category: it.category || '', sets, pcs_per_set: pcsPerSet, line_inr, extra_sets, extra_pcs, short_sets, short_pcs,
+      category: it.category || '', cargo_lkr: r2(Math.max(0, n(it.cargo_lkr))), other_lkr: r2(Math.max(0, n(it.other_lkr))), sets, pcs_per_set: pcsPerSet, line_inr, extra_sets, extra_pcs, short_sets, short_pcs,
       set_pcs: sets * pcsPerSet,                       // pieces in the billed sets
       billed_pcs: sets * pcsPerSet + extra_pcs,        // pieces on the supplier's bill
       pcs: Math.max(0, (sets + extra_sets - short_sets) * pcsPerSet + extra_pcs - short_pcs), // pieces really received
@@ -191,13 +195,15 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   });
   const goods_inr = r2(lines.reduce((s, l) => s + l.line_inr, 0));
   const cargo_inr = n(cargo_charge_inr);
-  const expenses_lkr = r2((expenses || []).reduce((s, e) => s + n(e.amount_lkr), 0));
+  // every charge: the items' own cargo and other expenses, and any older shared ones
+  const other_lkr = r2(lines.reduce((s, l) => s + l.other_lkr, 0));
+  const expenses_lkr = r2((expenses || []).reduce((s, e) => s + n(e.amount_lkr), 0) + lines.reduce((s, l) => s + l.cargo_lkr, 0) + other_lkr);
   const total_pcs = lines.reduce((s, l) => s + l.pcs, 0);
   const total_sets = lines.reduce((s, l) => s + Math.max(0, l.sets + l.extra_sets - l.short_sets), 0);
   // a line's landed cost is spread over every piece received (billed + free)
   // each charge is shared by value over the items it covers: a category's cargo charge over that
   // category's items only, any other charge over the whole shipment
-  const overheadOf = lines.map(() => 0);
+  const overheadOf = lines.map((l) => l.cargo_lkr + l.other_lkr);   // the item's own cargo charge and other expenses
   const all = lines.map((_, i) => i);
   const spread = (amount, idx) => {
     if (!amount) return;
@@ -226,7 +232,7 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   });
   const total_lkr = r2((goods_inr + cargo_inr) * rate + expenses_lkr);
   return {
-    items: out, goods_inr, cargo_inr, expenses_lkr, total_sets, total_pcs, total_lkr,
+    items: out, goods_inr, cargo_inr, expenses_lkr, other_lkr, total_sets, total_pcs, total_lkr,
     // how many rupees (LKR) it really costs to land 1 INR of goods
     landing_factor: goods_inr > 0 ? total_lkr / goods_inr : 0,
   };

@@ -70,7 +70,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
                           {(i.short_sets > 0 || i.short_pcs > 0) && <div className="sub text-red">− {int(i.short_sets * i.pcs_per_set + i.short_pcs)} pcs short</div>}
                         </td>
                         <td className="right">{money(i.cost_inr_per_set / (i.pcs_per_set || 1))}<div className="sub">{inr(i.line_inr)}</div></td>
-                        <td className="right strong">{lkr(i.landed_per_pcs_lkr)}</td>
+                        <td className="right strong">{lkr(i.landed_per_pcs_lkr)}{(i.cargo_lkr > 0 || i.other_lkr > 0) && <div className="sub">incl. {[i.cargo_lkr > 0 && `cargo ${lkr(i.cargo_lkr)}`, i.other_lkr > 0 && `other ${lkr(i.other_lkr)}`].filter(Boolean).join(' + ')}</div>}</td>
                         <td className="right">{lkr(per(i.expected_per_set))}</td>
                         <td className="right">{lkr(per(i.mrp_per_set))}</td>
                         <td className={`right ${margin(i.expected_per_set, i.landed_per_set_lkr) < 0 ? 'text-red' : 'text-green'}`}>{pct(margin(i.expected_per_set, i.landed_per_set_lkr))}</td>
@@ -82,11 +82,19 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
             </div>
           </Card>
           <div className="grid grid-2">
-            <Card title="Cargo charge (LKR)">
-              {g.expenses.length === 0 ? <p className="muted">No extra expenses.</p> : g.expenses.map((e) => (
-                <div key={e.id} className="list-row"><span>{e.category ? <>Cargo charge – <b>{e.category}</b></> : e.label}</span><b className="mono">{lkr(e.amount_lkr)}</b></div>
-              ))}
-              {g.expenses.length > 1 && <div className="list-row"><b>Total cargo charge</b><b className="mono">{lkr(g.expenses_lkr)}</b></div>}
+            <Card title="Cargo & other expenses (LKR)">
+              {!(g.expenses_lkr > 0) ? <p className="muted">No cargo charge or other expenses.</p> : <>
+                {g.items.filter((i) => i.cargo_lkr > 0 || i.other_lkr > 0).map((i) => (
+                  <div key={`i${i.id}`} className="list-row">
+                    <span>{i.name}<div className="sub">{[i.cargo_lkr > 0 && `cargo ${lkr(i.cargo_lkr)}`, i.other_lkr > 0 && `other ${lkr(i.other_lkr)}`].filter(Boolean).join(' · ')}</div></span>
+                    <b className="mono">{lkr((i.cargo_lkr || 0) + (i.other_lkr || 0))}</b>
+                  </div>
+                ))}
+                {g.expenses.map((e) => (
+                  <div key={e.id} className="list-row"><span>{e.category ? <>Cargo charge – <b>{e.category}</b></> : e.label}</span><b className="mono">{lkr(e.amount_lkr)}</b></div>
+                ))}
+                <div className="list-row"><b>Total</b><b className="mono">{lkr(g.expenses_lkr)}</b></div>
+              </>}
             </Card>
             <Card title="Supplier payments">
               {g.payments.length === 0 ? <p className="muted">No payment linked to this GRN yet.</p> : g.payments.map((p) => (
@@ -105,7 +113,8 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
               {g.cargo_charge_inr > 0 && <><dt>Cargo charge (₹)</dt><dd>{inr(g.cargo_charge_inr)}</dd></>}
               <dt>Goods in LKR (× {g.exchange_rate.toFixed(2)})</dt><dd>{lkr(g.goods_inr * g.exchange_rate)}</dd>
               {g.cargo_charge_inr > 0 && <><dt>Cargo in LKR (× {g.exchange_rate.toFixed(2)})</dt><dd>{lkr(g.cargo_charge_inr * g.exchange_rate)}</dd></>}
-              <dt>Cargo charge</dt><dd>{lkr(g.expenses_lkr)}</dd>
+              <dt>Cargo charge</dt><dd>{lkr(g.expenses_lkr - (g.other_lkr || 0))}</dd>
+              {g.other_lkr > 0 && <><dt>Other expenses</dt><dd>{lkr(g.other_lkr)}</dd></>}
               <dt className="total">Total cost</dt><dd className="total">{lkr(g.total_lkr)}</dd>
               <dt>Expected sales value</dt><dd>{lkr(expectedValue)}</dd>
               <dt>Expected profit</dt><dd className="text-green">{lkr(expectedValue - g.total_lkr)}</dd>

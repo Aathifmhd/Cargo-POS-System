@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, useApi, n, r2, lkr, money, niceDate, int, stockText, margin, pct, parseCatalog, findCategory } from '../lib.js';
+import { api, useApi, n, r2, lkr, money, niceDate, int, stockText, margin, pct, parseCatalog, findCategory, costTiers } from '../lib.js';
 import { useSettings } from '../App.jsx';
 import SizePicker from '../components/SizePicker.jsx';
-import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, Modal, Field, NumInput, Segmented, Tabs, Stat, useToast } from '../components/ui.jsx';
+import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, CostBadge, Modal, Field, NumInput, Segmented, Tabs, Stat, useToast } from '../components/ui.jsx';
 
 export default function Stock() {
   const [params] = useSearchParams();
@@ -61,21 +61,37 @@ export default function Stock() {
             <table className="table">
               <thead><tr><th>Code</th><th>Product</th><th>Pack</th><th>In stock</th><th className="right">Cost/pc</th><th className="right">Expected/pc</th><th className="right">MRP/pc</th><th className="right">Margin</th><th className="right">Stock value</th></tr></thead>
               <tbody>
-                {rows.map((p) => {
+                {rows.flatMap((p) => {
                   const low = p.stock_pcs < p.reorder_sets * p.pcs_per_set;
-                  return (
-                    <tr key={p.id} className="click" onClick={() => setOpen(p.id)}>
-                      <td className="muted strong">{p.code}</td>
-                      <td><b>{p.name}</b><div className="sub">{p.category || 'No category'}{p.subtype ? ` · ${p.subtype}` : ''}{p.pname ? ` · ${p.pname}` : ''}{p.supplier_name ? ` · ${p.supplier_name}` : ''}</div></td>
-                      <td className="nowrap">{p.pcs_per_set} pcs/set<div className="sub">{p.colors_count ? `${p.colors_count} colours` : ''}{p.sizes ? ` · ${p.sizes}` : ''}</div></td>
-                      <td><Badge tone={p.stock_pcs <= 0 ? 'red' : low ? 'amber' : 'green'}>{stockText(p.stock_pcs, p.pcs_per_set)}</Badge></td>
-                      <td className="right">{money(p.cost_per_pcs)}</td>
-                      <td className="right strong">{money(p.expected_per_set / p.pcs_per_set)}</td>
-                      <td className="right">{money(p.mrp_per_set / p.pcs_per_set)}</td>
-                      <td className={`right ${margin(p.expected_per_set, p.cost_per_set) < 0 ? 'text-red' : ''}`}>{pct(margin(p.expected_per_set, p.cost_per_set))}</td>
-                      <td className="right">{money(p.stock_pcs * p.cost_per_pcs)}</td>
-                    </tr>
-                  );
+                  const batches = p.batches || [];
+                  // a product bought at different costs: one line per cost, each with its own badge
+                  const lines = batches.length > 1 ? batches : [null];
+                  const tiers = costTiers(batches);
+                  return lines.map((b, k) => {
+                    const pcs = b ? b.left_pcs : p.stock_pcs;
+                    const cost = b ? b.cost_per_pcs : p.cost_per_pcs;
+                    const exp = b ? b.expected_per_pcs || p.expected_per_set / p.pcs_per_set : p.expected_per_set / p.pcs_per_set;
+                    const mrp = b ? b.mrp_per_pcs || p.mrp_per_set / p.pcs_per_set : p.mrp_per_set / p.pcs_per_set;
+                    return (
+                      <tr key={`${p.id}-${b?.id ?? 0}`} className={`click ${b && k > 0 ? 'batch-row' : ''}`} onClick={() => setOpen(p.id)}>
+                        <td className="muted strong">{p.code}</td>
+                        <td>
+                          <b>{p.name}</b> {b && <CostBadge tier={tiers[b.id]} />}
+                          <div className="sub">{b ? `${b.ref} · ${niceDate(b.date)}` : <>{p.category || 'No category'}{p.subtype ? ` · ${p.subtype}` : ''}{p.pname ? ` · ${p.pname}` : ''}{p.supplier_name ? ` · ${p.supplier_name}` : ''}</>}</div>
+                        </td>
+                        <td className="nowrap">{p.pcs_per_set} pcs/set<div className="sub">{p.colors_count ? `${p.colors_count} colours` : ''}{p.sizes ? ` · ${p.sizes}` : ''}</div></td>
+                        <td>
+                          <Badge tone={pcs <= 0 ? 'red' : !b && low ? 'amber' : 'green'}>{stockText(pcs, p.pcs_per_set)}</Badge>
+                          {b && k === 0 && <div className="sub">{int(p.stock_pcs)} pcs in all</div>}
+                        </td>
+                        <td className="right">{money(cost)}</td>
+                        <td className="right strong">{money(exp)}</td>
+                        <td className="right">{money(mrp)}</td>
+                        <td className={`right ${margin(exp, cost) < 0 ? 'text-red' : ''}`}>{pct(margin(exp, cost))}</td>
+                        <td className="right">{money(pcs * cost)}</td>
+                      </tr>
+                    );
+                  });
                 })}
               </tbody>
             </table>
@@ -95,7 +111,7 @@ function ProductModal({ id, categories, onClose, onChanged }) {
   const [f, setF] = useState(null);
   const { settings } = useSettings();
   const catalog = useMemo(() => parseCatalog(settings), [settings]);
-  const [adj, setAdj] = useState({ mode: 'out', sets: '', pcs: '', reason: 'Damaged' });
+  const [adj, setAdj] = useState({ mode: 'out', sets: '', pcs: '', reason: 'Damaged', batch_id: '' });
   const perPc = (v, pps) => (n(v) > 0 ? r2(n(v) / Math.max(1, n(pps) || 1)) : '');
   const load = () => (id
     ? api.get(`/products/${id}`).then((x) => { setP(x); setF({ ...x, expected_pc: perPc(x.expected_per_set, x.pcs_per_set), mrp_pc: perPc(x.mrp_per_set, x.pcs_per_set) }); })
@@ -120,7 +136,7 @@ function ProductModal({ id, categories, onClose, onChanged }) {
 
   if (!f) return <Modal title="Loading…" onClose={onClose}><Loading /></Modal>;
   const cat = findCategory(catalog, f.category);
-  const moveLabel = { grn: 'Received', 'grn-delete': 'GRN deleted', sale: 'Sold', void: 'Bill cancelled', adjust: 'Adjustment' };
+  const moveLabel = { grn: 'Received', 'grn-edit': 'GRN edited', 'grn-delete': 'GRN deleted', sale: 'Sold', void: 'Bill cancelled', adjust: 'Adjustment', 'short-received': 'Short pieces received', 'short-undo': 'Short pieces taken back' };
 
   return (
     <Modal size="lg" title={id ? p.name : 'Add product manually'} subtitle={id ? `${p.code} · ${stockText(p.stock_pcs, p.pcs_per_set)} in stock` : 'Use this for opening stock. Normally products are added through Receive Goods.'} onClose={onClose}
@@ -132,9 +148,24 @@ function ProductModal({ id, categories, onClose, onChanged }) {
         <div className="stack">
           <div className="grid grid-3">
             <Stat label="In stock" value={stockText(p.stock_pcs)} sub={`Comes in packs of ${p.pcs_per_set}`} />
-            <Stat label="Cost / piece" value={lkr(p.cost_per_pcs)} sub={`Last GRN: ${lkr(p.last_cost_per_pcs)} a piece`} />
+            <Stat label={(p.batches || []).length > 1 ? 'Average cost / piece' : 'Cost / piece'} value={lkr(p.cost_per_pcs)} sub={(p.batches || []).length > 1 ? `${p.batches.length} costs: ${money(p.batches[0].cost_per_pcs)} – ${money(p.batches[p.batches.length - 1].cost_per_pcs)}` : `Last GRN: ${lkr(p.last_cost_per_pcs)} a piece`} />
             <Stat label="Sold so far" value={`${int(p.sold.pcs)} pcs`} sub={`${lkr(p.sold.amount)} · profit ${lkr(p.sold.profit)}`} />
           </div>
+          {(p.batches || []).length > 0 && (
+            <Card title="Stock by cost (batches)" pad={false}>
+              <table className="table"><thead><tr><th>From</th><th>Date</th><th className="right">In stock</th><th className="right">Cost / pc</th><th className="right">Expected / pc</th><th className="right">MRP / pc</th></tr></thead>
+                <tbody>{p.batches.map((b, k) => (
+                  <tr key={b.id}>
+                    <td className="strong">{b.ref || 'Stock'} <CostBadge tier={costTiers(p.batches)[b.id]} /></td>
+                    <td>{niceDate(b.date)}</td>
+                    <td className="right strong">{int(b.left_pcs)} pcs</td>
+                    <td className="right">{money(b.cost_per_pcs)}</td>
+                    <td className="right">{money(b.expected_per_pcs)}</td>
+                    <td className="right">{money(b.mrp_per_pcs)}</td>
+                  </tr>
+                ))}</tbody></table>
+            </Card>
+          )}
           <Card title="Purchase history (GRNs)" pad={false}>
             {p.purchases.length === 0 ? <p className="muted card-body">No GRNs yet.</p> : (
               <table className="table"><thead><tr><th>GRN</th><th>Date</th><th>Cargo</th><th className="right">Sets</th><th className="right">Bill ₹/pc</th><th className="right">Rate</th><th className="right">Cost Rs/pc</th></tr></thead>
@@ -166,6 +197,14 @@ function ProductModal({ id, categories, onClose, onChanged }) {
           <p className="muted small">{adj.mode === 'count' ? `Enter what you physically counted. Now the system says ${stockText(p.stock_pcs, p.pcs_per_set)}.` : adj.mode === 'out' ? 'For damaged, missing or free-sample goods.' : 'For customer returns or found stock.'}</p>
           <div className="grid grid-2">
             <Field label="Pieces"><NumInput value={adj.pcs} onChange={(v) => setAdj({ ...adj, pcs: v })} /></Field>
+            {(p.batches || []).length > 1 && adj.mode !== 'count' && (
+              <Field label="Which stock" className="span-2" hint={adj.mode === 'out' ? 'Leave as "oldest first" if you are not sure' : 'Leave as "newest" if you are not sure'}>
+                <select className="input" value={adj.batch_id} onChange={(e) => setAdj({ ...adj, batch_id: e.target.value })}>
+                  <option value="">{adj.mode === 'out' ? 'Oldest first' : 'Newest'}</option>
+                  {p.batches.map((b) => <option key={b.id} value={b.id}>{b.ref} · {niceDate(b.date)} · {int(b.left_pcs)} pcs at {money(b.cost_per_pcs)}</option>)}
+                </select>
+              </Field>
+            )}
             <Field label="Reason">
               <input className="input" list="adj-reasons" value={adj.reason} onChange={(e) => setAdj({ ...adj, reason: e.target.value })} />
               <datalist id="adj-reasons">{['Damaged', 'Missing', 'Customer return', 'Stock count', 'Free sample', 'Found stock'].map((r) => <option key={r} value={r} />)}</datalist>
@@ -193,18 +232,9 @@ function ProductModal({ id, categories, onClose, onChanged }) {
               {f.subtype && !(cat?.types || []).includes(f.subtype) && <option value={f.subtype}>{f.subtype}</option>}
             </select>
           </Field>
-          {(() => {
-            const names = (cat && f.subtype && cat.names?.[f.subtype]) || [];
-            return (
-              <Field label="Product name">
-                <select className="input" value={f.pname || ''} onChange={set('pname')} disabled={!f.subtype}>
-                  <option value="">{f.subtype ? 'Choose name…' : '—'}</option>
-                  {names.map((x) => <option key={x} value={x}>{x}</option>)}
-                  {f.pname && !names.includes(f.pname) && <option value={f.pname}>{f.pname}</option>}
-                </select>
-              </Field>
-            );
-          })()}
+          <Field label="Product name">
+            <input className="input" value={f.pname || ''} onChange={set('pname')} disabled={!f.subtype} placeholder={f.subtype ? 'e.g. Royal Check' : '—'} autoComplete="off" />
+          </Field>
           <Field label="Pieces per set"><NumInput value={f.pcs_per_set} onChange={set('pcs_per_set')} /></Field>
           <Field label="No. of colours"><NumInput value={f.colors_count} onChange={set('colors_count')} /></Field>
           <Field label="Colour names" className="span-2"><input className="input" value={f.color_names || ''} onChange={set('color_names')} /></Field>

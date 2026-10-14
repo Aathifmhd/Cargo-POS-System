@@ -7,11 +7,25 @@ import { guard } from '../auth.js';
 
 const r = Router();
 
-/** The product as the screens use it: + supplier name, stock in sets / loose pieces, cost per set. */
+const BATCH_FIELDS = { id: 1, product_id: 1, kind: 1, ref: 1, date: 1, cost_per_pcs: 1, expected_per_pcs: 1, mrp_per_pcs: 1, in_pcs: 1, left_pcs: 1 };
+/**
+ * The product as the screens use it: + supplier name, stock in sets / loose pieces, cost per set,
+ * and its stock batches still in stock (cheapest first — the same product bought at different costs).
+ */
 async function withExtras(products) {
   const sIds = [...new Set(products.map((p) => p.supplier_id).filter((x) => x != null))];
-  const names = Object.fromEntries((sIds.length ? await find('suppliers', { id: { $in: sIds } }, { project: { id: 1, name: 1 } }) : []).map((s) => [s.id, s.name]));
+  const ids = products.map((p) => p.id);
+  const [supplierList, batchList] = await inParallel(
+    () => (sIds.length ? find('suppliers', { id: { $in: sIds } }, { project: { id: 1, name: 1 } }) : []),
+    () => (ids.length ? find('batches', { product_id: { $in: ids }, left_pcs: { $gt: 0 } }, { project: BATCH_FIELDS }) : []),
+  );
+  const names = Object.fromEntries(supplierList.map((s) => [s.id, s.name]));
+  const batchesOf = new Map();
+  for (const b of batchList.sort((a, b) => a.cost_per_pcs - b.cost_per_pcs || (a.date < b.date ? -1 : 1))) {
+    batchesOf.set(b.product_id, [...(batchesOf.get(b.product_id) || []), b]);
+  }
   return products.map((p) => ({
+    batches: batchesOf.get(p.id) || [],
     ...p,
     supplier_name: p.supplier_id != null ? names[p.supplier_id] ?? null : null,
     stock_sets: p.pcs_per_set > 0 ? Math.trunc(p.stock_pcs / p.pcs_per_set) : p.stock_pcs,
@@ -109,7 +123,7 @@ r.post('/', async (req, res) => {
     const p = await insert('products', {
       code, ...d, cost_per_pcs: cost, last_cost_per_pcs: cost, opening_pcs: Math.max(0, opening), opening_cost_per_pcs: cost,
     });
-    if (opening) await moveStock(p.id, opening, 'adjust', null, 'Opening stock');
+    if (opening) await moveStock(p.id, opening, 'adjust', null, 'Opening stock', todayStr(), { newBatch: { kind: 'opening', ref: 'Opening stock', cost_per_pcs: cost } });
     return p.id;
   });
   res.json(await oneProduct(id));
@@ -161,8 +175,9 @@ r.post('/:id/adjust', async (req, res) => {
   }
   if (!pcs) fail('Nothing to change');
   if (p.stock_pcs + pcs < 0) fail('Stock cannot go below zero');
+  const batchId = req.body.batch_id ? num(req.body.batch_id) : null;
   await guard(req, `Stock correction ${p.name}: ${pcs > 0 ? '+' : ''}${pcs} pcs (${req.body.reason || 'Adjustment'})`);
-  await tx(() => moveStock(id, pcs, 'adjust', null, req.body.reason || 'Adjustment', req.body.date || todayStr()));
+  await tx(() => moveStock(id, pcs, 'adjust', null, req.body.reason || 'Adjustment', req.body.date || todayStr(), { batchId }));
   res.json(await oneProduct(id));
 });
 
@@ -174,6 +189,7 @@ r.delete('/:id', async (req, res) => {
   await guard(req, `Delete product #${id}`);
   await tx(async () => {
     await deleteMany('stock_moves', { product_id: id });
+    await deleteMany('batches', { product_id: id });
     await deleteMany('products', { id });
   });
   res.json({ ok: true });

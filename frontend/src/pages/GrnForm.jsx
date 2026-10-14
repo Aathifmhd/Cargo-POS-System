@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, n, r2, lkr, inr, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
 import { PageHeader, Card, Icon, Field, NumInput, Combobox, Segmented, useToast, Loading } from '../components/ui.jsx';
@@ -6,17 +6,23 @@ import { SupplierForm } from '../components/forms.jsx';
 import SizePicker from '../components/SizePicker.jsx';
 import { useSettings } from '../App.jsx';
 
-const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR, as lines in the charges list (one per category)
-const catKey = (c) => String(c || '').trim().toLowerCase();
-// cargo is paid category by category: one charge line per category, spread over that category's items only
-const cargoLabel = (cat) => `Cargo charge – ${cat}`;
-// charges for categories no longer in the list are left out; a charge without a category (older GRNs) covers the whole shipment
-const liveCharges = (expenses, items) => {
-  const cats = new Set(items.map((i) => catKey(i.category)));
-  return (expenses || []).filter((e) => !catKey(e.category) || cats.has(catKey(e.category)));
-};
+const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR; each item has its own cargo charge
 let keySeq = 1;
-const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', mrp_per_pcs: '', expected_per_pcs: '' });
+const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', cargo_lkr: '', other_lkr: '', mrp_per_pcs: '', expected_per_pcs: '' });
+/**
+ * Older GRNs and drafts kept the cargo as shared charges (per category, or for the whole shipment).
+ * Move each item's share onto the item itself, so every cost stays exactly as it was.
+ */
+const cargoOntoItems = (items, expenses, rate) => {
+  const charges = (expenses || []).filter((e) => n(e.amount_lkr) !== 0);
+  if (!charges.length) return items;
+  const c = computeLanding({ items: items.map((i) => ({ ...i, cargo_lkr: 0 })), expenses: charges, exchange_rate: rate });
+  const shares = c.items.map((x) => r2(Math.max(0, x.landed_lkr - x.line_inr * rate)));
+  // rounding cents go to the biggest share, so the cargo total stays exactly the same
+  const big = shares.indexOf(Math.max(...shares));
+  shares[big] = r2(shares[big] + charges.reduce((t, e) => t + n(e.amount_lkr), 0) - shares.reduce((t, v) => t + v, 0));
+  return items.map((i, k) => ({ ...i, cargo_lkr: r2(n(i.cargo_lkr) + shares[k]) || '' }));
+};
 // prices are entered per piece; products keep them per set, so convert on the way in and out
 const ppsOf = (it) => Math.max(1, Math.round(n(it.pcs_per_set) || 1));
 const perPiece = (v, pps) => (n(v) > 0 ? r2(n(v) / Math.max(1, Math.round(n(pps) || 1))) : '');
@@ -53,15 +59,16 @@ export default function GrnForm() {
         d.items = d.items.filter((i) => i.name || i.product_id).map((i) => withPcsPrices({ ...i, key: keySeq++ }));
         d.entry = withPcsPrices({ ...(d.entry || blankItem()), key: keySeq++ });
         d.editingKey = null;
-        // an older draft's single cargo charge stays as a charge for the whole shipment
-        d.expenses = (d.expenses || []).filter((e) => catKey(e.category) || n(e.amount_lkr) !== 0);
+        // an older draft's shared cargo charges move onto its items
+        d.items = cargoOntoItems(d.items, d.expenses, n(settings.costing_rate) || 3.5);
+        d.expenses = [];
         return d;
       }
     } catch { /* ignore */ }
     return {
       date: today(), supplier_id: null, supplier_invoice_no: '', cargo_name: '',
       payment_type: 'credit', due_date: '', payment_method: 'Bank transfer', payment_reference: '', notes: '',
-      expenses: [],   // the cargo charge in LKR, one line per category (set in the Goods Table)
+      expenses: [],   // older GRNs only: the cargo is now entered on each item
       items: [], entry: blankItem(), editingKey: null,
     };
   }, []); // eslint-disable-line
@@ -79,14 +86,15 @@ export default function GrnForm() {
       setG({
         date: d.date, supplier_id: d.supplier_id, supplier_invoice_no: d.supplier_invoice_no || '', cargo_name: d.cargo_name || '',
         payment_type: d.payment_type, due_date: d.due_date || '', payment_method: d.payments?.[0]?.method || 'Bank transfer', payment_reference: '', notes: d.notes || '',
-        expenses: d.expenses.map((e) => ({ label: e.label, category: e.category || '', amount_lkr: e.amount_lkr })),
-        items: d.items.map((i) => ({
+        expenses: [],
+        // an older GRN's shared cargo charges move onto its items (same costs)
+        items: cargoOntoItems(d.items.map((i) => ({
           key: keySeq++, product_id: i.product_id, name: i.name, category: i.category || '', subtype: i.subtype || '', pname: i.pname || '',
           catOther: false, isNew: false, pcs_per_set: i.pcs_per_set, colors_count: i.colors_count || '', color_names: i.color_names || '', sizes: i.sizes || '',
           sets: i.sets, extra_pcs: i.extra_pcs || '', short_sets: i.short_sets || '', short_pcs: i.short_pcs || '', showQty: Boolean(i.extra_pcs || i.short_pcs || i.short_sets),
-          cost_inr_per_pcs: pp(i.cost_inr_per_set, i.pcs_per_set), expected_per_pcs: pp(i.expected_per_set, i.pcs_per_set), mrp_per_pcs: pp(i.mrp_per_set, i.pcs_per_set),
+          cost_inr_per_pcs: pp(i.cost_inr_per_set, i.pcs_per_set), cargo_lkr: i.cargo_lkr || '', other_lkr: i.other_lkr || '', expected_per_pcs: pp(i.expected_per_set, i.pcs_per_set), mrp_per_pcs: pp(i.mrp_per_set, i.pcs_per_set),
           expectedManual: true, mrpManual: true,
-        })),
+        })), d.expenses, d.exchange_rate),
         entry: blankItem(), editingKey: null,
       });
       setFormOpen(false);
@@ -114,25 +122,17 @@ export default function GrnForm() {
   // the bale's figures come from the added items only
   // every cost is worked out at the fixed costing rate (Settings → Exchange rate), never the live rate
   const rate = n(settings.costing_rate) || 3.5;
-  const calc = useMemo(() => computeLanding({ ...g, exchange_rate: rate, expenses: liveCharges(g.expenses, g.items) }), [g, rate]);
+  const calc = useMemo(() => computeLanding({ ...g, exchange_rate: rate }), [g, rate]);
   // the entry card's own figures: worked out as if it were already in the list (charges are shared by value)
   const entryIdx = g.editingKey ? g.items.findIndex((i) => i.key === g.editingKey) : g.items.length;
   const preview = useMemo(() => {
     const items = g.editingKey ? g.items.map((i) => (i.key === g.editingKey ? g.entry : i)) : [...g.items, g.entry];
-    return computeLanding({ ...g, exchange_rate: rate, items, expenses: liveCharges(g.expenses, items) });
+    return computeLanding({ ...g, exchange_rate: rate, items });
   }, [g, rate]);
 
   // an item is either the entry card or a line in the list
   const mapItem = (x, key, fn) => (x.entry?.key === key ? { ...x, entry: fn(x.entry) } : { ...x, items: x.items.map((i) => (i.key === key ? fn(i) : i)) });
   const updItem = (key, patch) => setG((x) => mapItem(x, key, (i) => ({ ...i, ...patch })));
-  // the cargo charge of one category (no category: an older charge for the whole shipment)
-  const cargoOf = (cat) => (g.expenses.find((e) => catKey(e.category) === catKey(cat))?.amount_lkr ?? '');
-  const setCargo = (cat, v) => setG((x) => {
-    const has = x.expenses.some((e) => catKey(e.category) === catKey(cat));
-    const line = { label: cat ? cargoLabel(cat) : 'Cargo charge', category: cat || '', amount_lkr: v };
-    return { ...x, expenses: has ? x.expenses.map((e) => (catKey(e.category) === catKey(cat) ? line : e)) : [...x.expenses, line] };
-  });
-  const wholeCargo = g.expenses.find((e) => !catKey(e.category) && n(e.amount_lkr) !== 0);
 
   const catalog = useMemo(() => parseCatalog(settings), [settings]);
   const rules = useMemo(() => priceRules(settings), [settings]);
@@ -144,17 +144,25 @@ export default function GrnForm() {
   };
   // Category → product ("Kerala") → product name ("Royal Check"): the stock item is "Shirts - Kerala - Royal Check"
   const chooseProduct = (key, type) => setG((x) => mapItem(x, key, (i) => ({ ...i, subtype: type || '', pname: '', product_id: null, name: '', isNew: false })));
-  // the product name completes the item — stock goes onto the existing item of that name, if there is one
-  const choosePName = (key, pname) => setG((x) => mapItem(x, key, (i) => {
-    if (!pname) return { ...i, pname: '', product_id: null, name: '', isNew: false };
-    const name = `${i.category} - ${i.subtype} - ${pname}`;
+  // the product name is typed (it changes from shipment to shipment) and completes the item —
+  // stock goes onto the existing item of that name, if there is one
+  const typePName = (key, pname) => setG((x) => mapItem(x, key, (i) => {
+    const text = pname.trim();
+    if (!text) return { ...i, pname, product_id: null, name: '', isNew: false };
+    const name = `${i.category} - ${i.subtype} - ${text}`;
     const existing = products.find((p) => p.name.toLowerCase() === name.toLowerCase());
-    if (existing) return { ...i, ...productFields(existing), category: i.category, subtype: i.subtype, pname, isNew: false };
-    return { ...i, pname, product_id: null, name, isNew: true };
+    return existing ? { ...i, pname, product_id: existing.id, name: existing.name, isNew: false } : { ...i, pname, product_id: null, name, isNew: true };
+  }));
+  // leaving the name box: an existing item fills in what is still empty (pieces per set, sizes, prices…)
+  const fillFromExisting = (key) => setG((x) => mapItem(x, key, (i) => {
+    const existing = i.product_id && products.find((p) => p.id === i.product_id);
+    if (!existing) return i;
+    const fill = Object.fromEntries(Object.entries(productFields(existing)).filter(([k]) => i[k] === '' || i[k] == null));
+    return { ...i, ...fill };
   }));
 
   // "+ Add product" in the Products dropdown: saves it under the category for next time, then selects it
-  const [adding, setAdding] = useState(null); // { key, text, kind: 'product' | 'name' }
+  const [adding, setAdding] = useState(null); // { key, text } — a new product being added to the category
   const addProduct = async (it) => {
     const product = (adding?.text || '').trim();
     if (!product) return;
@@ -164,18 +172,6 @@ export default function GrnForm() {
       setAdding(null);
       chooseProduct(it.key, res.product);
       toast(`"${res.product}" added to ${it.category}`);
-    } catch (e) { toast(e.message, 'error'); }
-  };
-  // "+ Add name" in the Product name dropdown: saves it under the product in Settings, then selects it
-  const addName = async (it) => {
-    const name = (adding?.text || '').trim();
-    if (!name) return;
-    try {
-      const res = await api.post('/catalog/names', { category: it.category, product: it.subtype, name });
-      await reloadSettings();
-      setAdding(null);
-      choosePName(it.key, res.name);
-      toast(`"${res.name}" added to ${it.category} › ${it.subtype}`);
     } catch (e) { toast(e.message, 'error'); }
   };
 
@@ -226,7 +222,7 @@ export default function GrnForm() {
     const fromCatalog = !e.catOther && findCategory(catalog, e.category);
     if (fromCatalog && !e.subtype) return toast('Choose the product', 'error');
     // new items need a product name; existing stock items from before product names keep theirs as they are
-    if (fromCatalog && !e.pname && !e.product_id) return toast('Choose the product name', 'error');
+    if (fromCatalog && !String(e.pname || '').trim() && !e.product_id) return toast('Type the product name', 'error');
     if (!e.name.trim()) return toast('Choose the product', 'error');
     if (!hasQty(e)) return toast('Enter the number of sets', 'error');
     if (n(e.sets) > 0 && n(e.cost_inr_per_pcs) <= 0 && !confirm(`"${e.name}" has no billed price per piece. Add it anyway?`)) return;
@@ -281,7 +277,7 @@ export default function GrnForm() {
     if (missing && !confirm(`"${missing.name}" has no cost. Save anyway?`)) return;
     setBusy(true);
     try {
-      const body = { ...g, items: filledItems.map(forSaving), expenses: liveCharges(g.expenses, filledItems).filter((e) => n(e.amount_lkr) !== 0) };
+      const body = { ...g, items: filledItems.map(forSaving), expenses: [] };
       const saved = editId ? await api.put(`/grns/${editId}`, body) : await api.post('/grns', body);
       if (!editId) localStorage.removeItem(DRAFT);
       toast(editId ? `${saved.grn_no} updated — stock adjusted` : `${saved.grn_no} saved — stock updated`);
@@ -347,7 +343,7 @@ export default function GrnForm() {
                     <span className="muted small">{rows.length} {rows.length === 1 ? 'product' : 'products'} · {int(rows.reduce((t, r) => t + (r.c.pcs || 0), 0))} pcs</span>
                   </div>
                   <table className="table item-table">
-                    <thead><tr><th>Product</th><th className="right">Pieces</th><th className="right">Cost / pc</th><th className="right">Selling / pc</th><th /></tr></thead>
+                    <thead><tr><th>Product</th><th className="right">Pieces</th><th className="right">Cargo & other</th><th className="right">Cost / pc</th><th className="right">Selling / pc</th><th /></tr></thead>
                     <tbody>
                       {rows.map(({ it: row, c: rc }) => (
                         <tr key={row.key} className={g.editingKey === row.key ? 'row-editing' : ''}>
@@ -364,6 +360,12 @@ export default function GrnForm() {
                               </div>
                             )}
                           </td>
+                          <td className="right nowrap">
+                            {n(row.cargo_lkr) > 0 || n(row.other_lkr) > 0 ? <>
+                              {n(row.cargo_lkr) > 0 && <div>{lkr(row.cargo_lkr)}</div>}
+                              {n(row.other_lkr) > 0 && <div className="sub">+ {lkr(row.other_lkr)} other</div>}
+                            </> : <span className="muted">—</span>}
+                          </td>
                           <td className="right nowrap">{lkr(rc.landed_per_pcs_lkr)}</td>
                           <td className="right nowrap">{lkr(row.expected_per_pcs)}</td>
                           <td className="right nowrap">
@@ -378,10 +380,6 @@ export default function GrnForm() {
                       ))}
                     </tbody>
                   </table>
-                  <div className="item-group-cargo">
-                    <span>Cargo charge for <b>{cat}</b><span className="muted small"> · shared over {rows.length === 1 ? 'this item' : `these ${rows.length} items`} by value</span></span>
-                    <div className="input-affix cargo-input"><span>Rs</span><NumInput value={cargoOf(rows[0].it.category)} onChange={(v) => setCargo(rows[0].it.category, v)} placeholder="0.00" /></div>
-                  </div>
                 </div>
               ))}
             </div>
@@ -414,10 +412,7 @@ export default function GrnForm() {
                         const options = cat ? [...cat.types] : [];
                         // a product picked earlier that has since been removed from Settings stays visible on this line only
                         const removed = cat && it.subtype && !options.some((t) => t.toLowerCase() === it.subtype.toLowerCase()) ? it.subtype : null;
-                        const isAdding = adding?.key === it.key && adding.kind !== 'name';
-                        const isAddingName = adding?.key === it.key && adding.kind === 'name';
-                        const nameOptions = cat && it.subtype ? cat.names?.[it.subtype] || [] : [];
-                        const removedName = it.pname && !nameOptions.some((x) => x.toLowerCase() === it.pname.toLowerCase()) ? it.pname : null;
+                        const isAdding = adding?.key === it.key;
                         return (<>
                           <div className="item-pick">
                             <Field label="Category" required>
@@ -432,7 +427,7 @@ export default function GrnForm() {
                               <Field label={`${cat.name} — product`} required>
                                 <select className="input" value={isAdding ? '__add' : it.subtype}
                                   onChange={(e) => {
-                                    if (e.target.value === '__add') return setAdding({ key: it.key, text: '', kind: 'product' });
+                                    if (e.target.value === '__add') return setAdding({ key: it.key, text: '' });
                                     setAdding(null);
                                     chooseProduct(it.key, e.target.value);
                                   }}>
@@ -453,27 +448,9 @@ export default function GrnForm() {
                               </Field>
                             )}
                             {cat && it.subtype && !isAdding && (
-                              <Field label={`${it.subtype} — product name`} required>
-                                <select className="input" value={isAddingName ? '__add' : it.pname || ''}
-                                  onChange={(e) => {
-                                    if (e.target.value === '__add') return setAdding({ key: it.key, text: '', kind: 'name' });
-                                    setAdding(null);
-                                    choosePName(it.key, e.target.value);
-                                  }}>
-                                  <option value="">Choose name…</option>
-                                  {nameOptions.map((x) => <option key={x} value={x}>{x}</option>)}
-                                  {removedName && <option value={removedName}>{removedName} (removed in Settings)</option>}
-                                  <option value="__add">+ Add name to {it.subtype}…</option>
-                                </select>
-                                {isAddingName && (
-                                  <div className="row mt-s" style={{ gap: 8 }}>
-                                    <input className="input" autoFocus value={adding.text} placeholder="New product name, e.g. Royal Check"
-                                      onChange={(e) => setAdding({ ...adding, text: e.target.value })}
-                                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addName(it); } if (e.key === 'Escape') { e.stopPropagation(); setAdding(null); } }} />
-                                    <button type="button" className="btn btn-primary" disabled={!adding.text.trim()} onClick={() => addName(it)}>Add</button>
-                                    <button type="button" className="btn btn-ghost" onClick={() => setAdding(null)}>Cancel</button>
-                                  </div>
-                                )}
+                              <Field label={`${it.subtype} — product name`} required hint="Type the name on this shipment">
+                                <input className="input" value={it.pname || ''} placeholder="e.g. Royal Check" autoComplete="off"
+                                  onChange={(e) => typePName(it.key, e.target.value)} onBlur={() => fillFromExisting(it.key)} />
                               </Field>
                             )}
                             {otherCat && (
@@ -487,7 +464,7 @@ export default function GrnForm() {
                               </Field>
                             )}
                           </div>
-                          {it.name && !isAdding && !isAddingName && (
+                          {it.name && !isAdding && (
                             <div className="item-product-row">
                               <span className="item-product-name">{it.name}</span>
                               {it.product_id
@@ -544,15 +521,31 @@ export default function GrnForm() {
                   </div>
                   )}
 
-                  {/* 3 · sizes */}
-                  <div className="field">
-                    <span className="field-label">Sizes in the pack</span>
-                    <SizePicker value={it.sizes} options={findCategory(catalog, it.category)?.sizes} hint={`${it.name} ${it.category}`}
-                      onChange={(sizes, count) => updItem(it.key, {
-                        sizes,
-                        ...(count > 0 && (it.pcsAuto || !n(it.pcs_per_set)) ? { pcs_per_set: count, pcsAuto: true } : {}),
-                      })} />
-                  </div>
+                  {/* 3 · sizes, then this item's cargo charge and other expenses below them (both go into its cost) */}
+                  {(() => {
+                    const paidPcs = c.pcs + (c.short_sets || 0) * (c.pcs_per_set || 1) + (c.short_pcs || 0);
+                    const perPc = (v) => (n(v) > 0 && paidPcs ? `${lkr(n(v) / paidPcs)} a piece · added to the cost` : 'For this item · added to its cost');
+                    return (
+                      <div className="item-size-row">
+                        <div className="field">
+                          <span className="field-label">Sizes in the pack</span>
+                          <SizePicker value={it.sizes} options={findCategory(catalog, it.category)?.sizes} hint={`${it.name} ${it.category}`}
+                            onChange={(sizes, count) => updItem(it.key, {
+                              sizes,
+                              ...(count > 0 && (it.pcsAuto || !n(it.pcs_per_set)) ? { pcs_per_set: count, pcsAuto: true } : {}),
+                            })} />
+                        </div>
+                        <div className="item-charges">
+                          <Field label="Cargo charge (Rs)" hint={perPc(it.cargo_lkr)}>
+                            <NumInput value={it.cargo_lkr} onChange={(v) => updItem(it.key, { cargo_lkr: v })} placeholder="0.00" />
+                          </Field>
+                          <Field label="Other expenses (Rs)" hint={perPc(it.other_lkr)}>
+                            <NumInput value={it.other_lkr} onChange={(v) => updItem(it.key, { other_lkr: v })} placeholder="0.00" />
+                          </Field>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* 4 · cost */}
                   <div className="item-cost-row">
@@ -596,26 +589,6 @@ export default function GrnForm() {
                 </div>
               );
             })()}
-            {wholeCargo && (
-              <div className="cargo-row cargo-row-old">
-                <div className="cargo-row-text">
-                  <b>Cargo charge for the whole shipment</b>
-                  <span className="muted small">Entered before cargo was split by category · shared over all items. Move it into the categories above, then clear it.</span>
-                </div>
-                <div className="input-affix cargo-input"><span>Rs</span><NumInput value={wholeCargo.amount_lkr} onChange={(v) => setCargo('', v)} placeholder="0.00" /></div>
-              </div>
-            )}
-            <div className="cargo-row">
-              <div className="cargo-row-text">
-                <b>Total cargo charge</b>
-                <span className="muted small">
-                  {g.items.length
-                    ? [...groups.map(([cat, rows]) => `${cat} ${lkr(n(cargoOf(rows[0].it.category)))}`), ...(wholeCargo ? [`Whole shipment ${lkr(n(wholeCargo.amount_lkr))}`] : [])].join(' · ')
-                    : 'Add items, then enter the cargo charge for each category in the table above'}
-                </span>
-              </div>
-              <b className="cargo-total mono">{lkr(calc.expenses_lkr)}</b>
-            </div>
 
           </Card>
 
@@ -651,10 +624,8 @@ export default function GrnForm() {
               <dt>Goods value</dt><dd>{inr(calc.goods_inr)}</dd>
               <dt>× Costing rate</dt><dd>{rate.toFixed(2)}</dd>
               <dt>= Goods in LKR</dt><dd>{lkr(calc.goods_inr * rate)}</dd>
-              <dt>+ Cargo charge</dt><dd>{lkr(calc.expenses_lkr)}</dd>
-              {groups.filter(([, rows]) => n(cargoOf(rows[0].it.category)) > 0).map(([cat, rows]) => (
-                <Fragment key={cat}><dt className="sub-kv">· {cat}</dt><dd className="sub-kv">{lkr(n(cargoOf(rows[0].it.category)))}</dd></Fragment>
-              ))}
+              <dt>+ Cargo charge</dt><dd>{lkr(calc.expenses_lkr - calc.other_lkr)}</dd>
+              <dt>+ Other expenses</dt><dd>{lkr(calc.other_lkr)}</dd>
               <dt className="total">Total cost</dt><dd className="total">{lkr(calc.total_lkr)}</dd>
             </dl>
             <div className="formula mt">

@@ -184,8 +184,12 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const short_sets = q(it.short_sets);
     const short_pcs = q(it.short_pcs);
     const line_inr = r2(sets * cost + extra_pcs * (cost / pcsPerSet));
+    // cargo and other expenses are entered per piece, over every piece paid for (arrived + shorts)
+    const paidPcs = Math.max(0, (sets + extra_sets - short_sets) * pcsPerSet + extra_pcs - short_pcs) + short_sets * pcsPerSet + short_pcs;
+    const given = (v) => v !== undefined && v !== null && v !== '';
+    const charge = (perPc, total) => (given(perPc) ? r2(Math.max(0, n(perPc)) * paidPcs) : r2(Math.max(0, n(total))));
     return {
-      category: it.category || '', cargo_lkr: r2(Math.max(0, n(it.cargo_lkr))), other_lkr: r2(Math.max(0, n(it.other_lkr))), sets, pcs_per_set: pcsPerSet, line_inr, extra_sets, extra_pcs, short_sets, short_pcs,
+      category: it.category || '', cargo_lkr: charge(it.cargo_per_pcs, it.cargo_lkr), other_lkr: charge(it.other_per_pcs, it.other_lkr), paid_pcs: paidPcs, sets, pcs_per_set: pcsPerSet, line_inr, extra_sets, extra_pcs, short_sets, short_pcs,
       set_pcs: sets * pcsPerSet,                       // pieces in the billed sets
       billed_pcs: sets * pcsPerSet + extra_pcs,        // pieces on the supplier's bill
       pcs: Math.max(0, (sets + extra_sets - short_sets) * pcsPerSet + extra_pcs - short_pcs), // pieces really received

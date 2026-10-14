@@ -92,7 +92,7 @@ export function PrintGrn() {
       <div className="print-page">
         <ShopHead title="GOODS RECEIVED NOTE" no={g.grn_no} date={g.date} />
         <div className="print-meta">
-          <div><div className="muted">Supplier</div><b>{g.supplier_name}</b><div>{g.supplier_city}</div><div>Invoice: {g.supplier_invoice_no || '—'}</div></div>
+          <div><div className="muted">Supplier</div><b>{g.supplier_name}</b><div>{g.supplier_city}</div><div>Invoice: {g.supplier_invoice_no || '—'}</div>{g.supplier_bill_date && <div>Billed: {niceDate(g.supplier_bill_date)}</div>}</div>
           <div className="right"><div>Cargo: <b>{g.cargo_name || '—'}</b></div><div>Rate: <b>1 INR = Rs {g.exchange_rate}</b></div></div>
         </div>
         <table>

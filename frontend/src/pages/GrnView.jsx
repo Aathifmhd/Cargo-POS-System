@@ -40,6 +40,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
 
   const body = <>
       <div className="stats mb">
+        <div className="stat"><div className="stat-text"><div className="stat-label">Supplier billed</div><div className="stat-value" style={{ fontSize: 17 }}>{g.supplier_bill_date ? niceDate(g.supplier_bill_date) : '—'}</div>{g.supplier_invoice_no && <div className="stat-sub">Invoice {g.supplier_invoice_no}</div>}</div></div>
         <div className="stat"><div className="stat-text"><div className="stat-label">Cargo</div><div className="stat-value" style={{ fontSize: 17 }}>{g.cargo_name || '—'}</div></div></div>
         <div className="stat"><div className="stat-text"><div className="stat-label">Costing rate</div><div className="stat-value" style={{ fontSize: 17 }}>1 ₹ = Rs {g.exchange_rate.toFixed(4)}</div></div></div>
       </div>
@@ -70,7 +71,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
                           {(i.short_sets > 0 || i.short_pcs > 0) && <div className="sub text-red">− {int(i.short_sets * i.pcs_per_set + i.short_pcs)} pcs short</div>}
                         </td>
                         <td className="right">{money(i.cost_inr_per_set / (i.pcs_per_set || 1))}<div className="sub">{inr(i.line_inr)}</div></td>
-                        <td className="right strong">{lkr(i.landed_per_pcs_lkr)}{(i.cargo_lkr > 0 || i.other_lkr > 0) && <div className="sub">incl. {[i.cargo_lkr > 0 && `cargo ${lkr(i.cargo_lkr)}`, i.other_lkr > 0 && `other ${lkr(i.other_lkr)}`].filter(Boolean).join(' + ')}</div>}</td>
+                        <td className="right strong">{lkr(i.landed_per_pcs_lkr)}{(i.cargo_lkr > 0 || i.other_lkr > 0) && <div className="sub">incl. {[i.cargo_per_pcs > 0 && `cargo ${lkr(i.cargo_per_pcs)}`, i.other_per_pcs > 0 && `other ${lkr(i.other_per_pcs)}`].filter(Boolean).join(' + ') || 'cargo'}/pc</div>}</td>
                         <td className="right">{lkr(per(i.expected_per_set))}</td>
                         <td className="right">{lkr(per(i.mrp_per_set))}</td>
                         <td className={`right ${margin(i.expected_per_set, i.landed_per_set_lkr) < 0 ? 'text-red' : 'text-green'}`}>{pct(margin(i.expected_per_set, i.landed_per_set_lkr))}</td>
@@ -86,7 +87,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
               {!(g.expenses_lkr > 0) ? <p className="muted">No cargo charge or other expenses.</p> : <>
                 {g.items.filter((i) => i.cargo_lkr > 0 || i.other_lkr > 0).map((i) => (
                   <div key={`i${i.id}`} className="list-row">
-                    <span>{i.name}<div className="sub">{[i.cargo_lkr > 0 && `cargo ${lkr(i.cargo_lkr)}`, i.other_lkr > 0 && `other ${lkr(i.other_lkr)}`].filter(Boolean).join(' · ')}</div></span>
+                    <span>{i.name}<div className="sub">{[i.cargo_lkr > 0 && `cargo ${lkr(i.cargo_lkr)}${i.cargo_per_pcs ? ` (${lkr(i.cargo_per_pcs)}/pc)` : ''}`, i.other_lkr > 0 && `other ${lkr(i.other_lkr)}${i.other_per_pcs ? ` (${lkr(i.other_per_pcs)}/pc)` : ''}`].filter(Boolean).join(' · ')}</div></span>
                     <b className="mono">{lkr((i.cargo_lkr || 0) + (i.other_lkr || 0))}</b>
                   </div>
                 ))}

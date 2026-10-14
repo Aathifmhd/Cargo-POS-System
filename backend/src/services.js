@@ -8,7 +8,8 @@ import {
    LANDED COST
    (INR goods + INR cargo) x exchange rate + LKR expenses,
    spread over items by their share of the INR goods value.
-   Each item has its own cargo charge and other expenses (LKR), added straight to that item's cost. Older GRNs kept the cargo as
+   Each item has its own cargo charge and other expenses, entered per piece (LKR): its cost per piece is
+   goods cost per piece + cargo per piece + other expenses per piece. (Lines saved before that keep their totals.) Older GRNs kept the cargo as
    separate charges: one with a category is spread over that category's items, any other over the whole shipment.
    ========================================================= */
 export function computeLanding({ items, exchange_rate, cargo_charge_inr, expenses, goods_rate, cargo_rate }) {
@@ -26,8 +27,16 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const extraSets = q(it.extra_sets); // older GRNs only: free sets, not billed
     const shortSets = q(it.short_sets);
     const shortPcs = q(it.short_pcs);
+    // every piece paid for: what arrived + shorts (the cost per piece is over these)
+    const paidPcs = Math.max(0, (sets + extraSets - shortSets) * pcsPerSet + extraPcs - shortPcs) + shortSets * pcsPerSet + shortPcs;
+    const given = (v) => v !== undefined && v !== null && v !== '';
+    const charge = (perPc, total) => (given(perPc) ? round2(Math.max(0, num(perPc)) * paidPcs) : round2(Math.max(0, num(total))));
+    const cargoLkr = charge(it.cargo_per_pcs, it.cargo_lkr);
+    const otherLkr = charge(it.other_per_pcs, it.other_lkr);
     return {
-      ...it, sets, pcs_per_set: pcsPerSet, cost_inr_per_set: cost, cargo_lkr: round2(Math.max(0, num(it.cargo_lkr))), other_lkr: round2(Math.max(0, num(it.other_lkr))),
+      ...it, sets, pcs_per_set: pcsPerSet, cost_inr_per_set: cost, cargo_lkr: cargoLkr, other_lkr: otherLkr,
+      cargo_per_pcs: given(it.cargo_per_pcs) ? round2(Math.max(0, num(it.cargo_per_pcs))) : paidPcs ? round2(cargoLkr / paidPcs) : 0,
+      other_per_pcs: given(it.other_per_pcs) ? round2(Math.max(0, num(it.other_per_pcs))) : paidPcs ? round2(otherLkr / paidPcs) : 0,
       line_inr: round2(sets * cost + extraPcs * (cost / pcsPerSet)),
       extra_sets: extraSets, extra_pcs: extraPcs, short_sets: shortSets, short_pcs: shortPcs,
       billed_pcs: sets * pcsPerSet + extraPcs,
@@ -291,7 +300,8 @@ async function saveGrn(body, editId = null) {
   const paymentType = body.payment_type === 'paid' ? 'paid' : 'credit';
   const due_date = paymentType === 'credit' ? body.due_date || addDays(date, supplier.credit_days) : date;
   const head = {
-    date, supplier_id: supplier.id, supplier_invoice_no: body.supplier_invoice_no || null, cargo_name: (body.cargo_name || '').trim() || null,
+    date, supplier_id: supplier.id, supplier_invoice_no: body.supplier_invoice_no || null,
+    supplier_bill_date: /^\d{4}-\d{2}-\d{2}$/.test(String(body.supplier_bill_date || '')) ? body.supplier_bill_date : null, cargo_name: (body.cargo_name || '').trim() || null,
     exchange_rate: rate, goods_inr: calc.goods_inr, cargo_charge_inr: calc.cargo_inr, cargo_in_supplier_bill: cargoInBill, payable_inr,
     expenses_lkr: calc.expenses_lkr, other_lkr: calc.other_lkr, total_lkr: calc.total_lkr, total_sets: calc.total_sets, total_pcs: calc.total_pcs,
     payment_type: paymentType, due_date, notes: body.notes || null, effective_rate: rate,
@@ -363,7 +373,7 @@ async function saveGrn(body, editId = null) {
         ...carry(product.id, it),
         grn_id: grnId, product_id: product.id, name: product.name, category: product.category || (it.category || '').trim() || null, pcs_per_set: it.pcs_per_set, colors_count: Math.round(num(it.colors_count)),
         color_names: it.color_names || null, sizes: it.sizes || null, sets: it.sets, cost_inr_per_set: it.cost_inr_per_set,
-        line_inr: it.line_inr, cargo_lkr: it.cargo_lkr, other_lkr: it.other_lkr, landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr,
+        line_inr: it.line_inr, cargo_lkr: it.cargo_lkr, other_lkr: it.other_lkr, cargo_per_pcs: it.cargo_per_pcs, other_per_pcs: it.other_per_pcs, landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr,
         mrp_per_set: round2(mrp), expected_per_set: round2(expected),
         extra_sets: it.extra_sets, extra_pcs: it.extra_pcs, short_sets: it.short_sets, short_pcs: it.short_pcs,
       });

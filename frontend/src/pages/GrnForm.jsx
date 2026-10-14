@@ -8,7 +8,7 @@ import { useSettings } from '../App.jsx';
 
 const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR; each item has its own cargo charge
 let keySeq = 1;
-const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', cargo_lkr: '', other_lkr: '', mrp_per_pcs: '', expected_per_pcs: '' });
+const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', cargo_per_pcs: '', other_per_pcs: '', mrp_per_pcs: '', expected_per_pcs: '' });
 /**
  * Older GRNs and drafts kept the cargo as shared charges (per category, or for the whole shipment).
  * Move each item's share onto the item itself, so every cost stays exactly as it was.
@@ -23,6 +23,14 @@ const cargoOntoItems = (items, expenses, rate) => {
   shares[big] = r2(shares[big] + charges.reduce((t, e) => t + n(e.amount_lkr), 0) - shares.reduce((t, v) => t + v, 0));
   return items.map((i, k) => ({ ...i, cargo_lkr: r2(n(i.cargo_lkr) + shares[k]) || '' }));
 };
+/** Lines kept as totals (older GRNs and drafts) → the same cargo and other expenses per piece. */
+const chargesPerPiece = (items) => items.map((i) => {
+  if (i.cargo_per_pcs !== undefined && i.other_per_pcs !== undefined && !n(i.cargo_lkr) && !n(i.other_lkr)) return i;
+  const paid = computeLanding({ items: [{ ...i, cargo_per_pcs: undefined, other_per_pcs: undefined }], exchange_rate: 1 }).items[0].paid_pcs || 1;
+  const per = (given, total) => (given !== undefined && given !== null && given !== '' ? given : n(total) ? r2(n(total) / paid) : '');
+  const { cargo_lkr, other_lkr, ...rest } = i;
+  return { ...rest, cargo_per_pcs: per(i.cargo_per_pcs, cargo_lkr), other_per_pcs: per(i.other_per_pcs, other_lkr) };
+});
 // prices are entered per piece; products keep them per set, so convert on the way in and out
 const ppsOf = (it) => Math.max(1, Math.round(n(it.pcs_per_set) || 1));
 const perPiece = (v, pps) => (n(v) > 0 ? r2(n(v) / Math.max(1, Math.round(n(pps) || 1))) : '');
@@ -60,13 +68,14 @@ export default function GrnForm() {
         d.entry = withPcsPrices({ ...(d.entry || blankItem()), key: keySeq++ });
         d.editingKey = null;
         // an older draft's shared cargo charges move onto its items
-        d.items = cargoOntoItems(d.items, d.expenses, n(settings.costing_rate) || 3.5);
+        d.items = chargesPerPiece(cargoOntoItems(d.items, d.expenses, n(settings.costing_rate) || 3.5));
+        d.entry = chargesPerPiece([d.entry])[0];
         d.expenses = [];
         return d;
       }
     } catch { /* ignore */ }
     return {
-      date: today(), supplier_id: null, supplier_invoice_no: '', cargo_name: '',
+      date: today(), supplier_id: null, supplier_invoice_no: '', supplier_bill_date: '', cargo_name: '',
       payment_type: 'credit', due_date: '', payment_method: 'Bank transfer', payment_reference: '', notes: '',
       expenses: [],   // older GRNs only: the cargo is now entered on each item
       items: [], entry: blankItem(), editingKey: null,
@@ -84,7 +93,7 @@ export default function GrnForm() {
     api.get(`/grns/${editId}`).then((d) => {
       const pp = (v, pps) => (n(v) > 0 ? r2(n(v) / Math.max(1, n(pps) || 1)) : '');
       setG({
-        date: d.date, supplier_id: d.supplier_id, supplier_invoice_no: d.supplier_invoice_no || '', cargo_name: d.cargo_name || '',
+        date: d.date, supplier_id: d.supplier_id, supplier_invoice_no: d.supplier_invoice_no || '', supplier_bill_date: d.supplier_bill_date || '', cargo_name: d.cargo_name || '',
         payment_type: d.payment_type, due_date: d.due_date || '', payment_method: d.payments?.[0]?.method || 'Bank transfer', payment_reference: '', notes: d.notes || '',
         expenses: [],
         // an older GRN's shared cargo charges move onto its items (same costs)
@@ -92,9 +101,10 @@ export default function GrnForm() {
           key: keySeq++, product_id: i.product_id, name: i.name, category: i.category || '', subtype: i.subtype || '', pname: i.pname || '',
           catOther: false, isNew: false, pcs_per_set: i.pcs_per_set, colors_count: i.colors_count || '', color_names: i.color_names || '', sizes: i.sizes || '',
           sets: i.sets, extra_pcs: i.extra_pcs || '', short_sets: i.short_sets || '', short_pcs: i.short_pcs || '', showQty: Boolean(i.extra_pcs || i.short_pcs || i.short_sets),
-          cost_inr_per_pcs: pp(i.cost_inr_per_set, i.pcs_per_set), cargo_lkr: i.cargo_lkr || '', other_lkr: i.other_lkr || '', expected_per_pcs: pp(i.expected_per_set, i.pcs_per_set), mrp_per_pcs: pp(i.mrp_per_set, i.pcs_per_set),
+          cost_inr_per_pcs: pp(i.cost_inr_per_set, i.pcs_per_set), cargo_lkr: i.cargo_per_pcs != null ? '' : i.cargo_lkr || '', other_lkr: i.other_per_pcs != null ? '' : i.other_lkr || '',
+          cargo_per_pcs: i.cargo_per_pcs ?? undefined, other_per_pcs: i.other_per_pcs ?? undefined, expected_per_pcs: pp(i.expected_per_set, i.pcs_per_set), mrp_per_pcs: pp(i.mrp_per_set, i.pcs_per_set),
           expectedManual: true, mrpManual: true,
-        })), d.expenses, d.exchange_rate),
+        })), d.expenses, d.exchange_rate).map((i) => chargesPerPiece([i])[0]),
         entry: blankItem(), editingKey: null,
       });
       setFormOpen(false);
@@ -313,10 +323,13 @@ export default function GrnForm() {
           {/* STEP 1 */}
           <Card title={<span className="step-title"><span className="step-no">1</span> Shipment details</span>}>
             <div className="grid grid-3">
-              <Field label="Supplier" required className="span-2">
+              <Field label="Supplier" required>
                 <Combobox items={suppliers} value={g.supplier_id} onSelect={(s) => set('supplier_id')(s.id)} placeholder="Search supplier…"
                   getSub={(s) => [s.city, s.balance_inr > 0 ? `to pay ${inr(s.balance_inr)}` : ''].filter(Boolean).join(' · ')}
                   onCreate={(name) => setNewSupplier(name)} createLabel={(q) => `Add new supplier “${q}”`} />
+              </Field>
+              <Field label="Supplier billed date" hint="The date on the supplier's bill">
+                <input type="date" className="input" value={g.supplier_bill_date || ''} max={g.date || undefined} onChange={set('supplier_bill_date')} />
               </Field>
               <Field label="Date received"><input type="date" className="input" value={g.date} onChange={set('date')} /></Field>
               <Field label="Cargo name" hint="Cargo / courier company">
@@ -343,7 +356,7 @@ export default function GrnForm() {
                     <span className="muted small">{rows.length} {rows.length === 1 ? 'product' : 'products'} · {int(rows.reduce((t, r) => t + (r.c.pcs || 0), 0))} pcs</span>
                   </div>
                   <table className="table item-table">
-                    <thead><tr><th>Product</th><th className="right">Pieces</th><th className="right">Cargo & other</th><th className="right">Cost / pc</th><th className="right">Selling / pc</th><th /></tr></thead>
+                    <thead><tr><th>Product</th><th className="right">Pieces</th><th className="right">Cargo & other / pc</th><th className="right">Cost / pc</th><th className="right">Selling / pc</th><th /></tr></thead>
                     <tbody>
                       {rows.map(({ it: row, c: rc }) => (
                         <tr key={row.key} className={g.editingKey === row.key ? 'row-editing' : ''}>
@@ -361,9 +374,10 @@ export default function GrnForm() {
                             )}
                           </td>
                           <td className="right nowrap">
-                            {n(row.cargo_lkr) > 0 || n(row.other_lkr) > 0 ? <>
-                              {n(row.cargo_lkr) > 0 && <div>{lkr(row.cargo_lkr)}</div>}
-                              {n(row.other_lkr) > 0 && <div className="sub">+ {lkr(row.other_lkr)} other</div>}
+                            {rc.cargo_lkr > 0 || rc.other_lkr > 0 ? <>
+                              {rc.cargo_lkr > 0 && <div>{lkr(n(row.cargo_per_pcs))}/pc</div>}
+                              {rc.other_lkr > 0 && <div className="sub">+ {lkr(n(row.other_per_pcs))}/pc other</div>}
+                              <div className="sub">{lkr(rc.cargo_lkr + rc.other_lkr)} in all</div>
                             </> : <span className="muted">—</span>}
                           </td>
                           <td className="right nowrap">{lkr(rc.landed_per_pcs_lkr)}</td>
@@ -523,8 +537,8 @@ export default function GrnForm() {
 
                   {/* 3 · sizes, then this item's cargo charge and other expenses below them (both go into its cost) */}
                   {(() => {
-                    const paidPcs = c.pcs + (c.short_sets || 0) * (c.pcs_per_set || 1) + (c.short_pcs || 0);
-                    const perPc = (v) => (n(v) > 0 && paidPcs ? `${lkr(n(v) / paidPcs)} a piece · added to the cost` : 'For this item · added to its cost');
+                    const paidPcs = c.paid_pcs || 0;
+                    const total = (v) => (n(v) > 0 && paidPcs ? `× ${int(paidPcs)} pcs = ${lkr(n(v) * paidPcs)} · added to each piece's cost` : 'For each piece · added to its cost');
                     return (
                       <div className="item-size-row">
                         <div className="field">
@@ -536,11 +550,11 @@ export default function GrnForm() {
                             })} />
                         </div>
                         <div className="item-charges">
-                          <Field label="Cargo charge (Rs)" hint={perPc(it.cargo_lkr)}>
-                            <NumInput value={it.cargo_lkr} onChange={(v) => updItem(it.key, { cargo_lkr: v })} placeholder="0.00" />
+                          <Field label="Cargo charge / piece (Rs)" hint={total(it.cargo_per_pcs)}>
+                            <NumInput value={it.cargo_per_pcs ?? ''} onChange={(v) => updItem(it.key, { cargo_per_pcs: v, cargo_lkr: '' })} placeholder="0.00" />
                           </Field>
-                          <Field label="Other expenses (Rs)" hint={perPc(it.other_lkr)}>
-                            <NumInput value={it.other_lkr} onChange={(v) => updItem(it.key, { other_lkr: v })} placeholder="0.00" />
+                          <Field label="Other expenses / piece (Rs)" hint={total(it.other_per_pcs)}>
+                            <NumInput value={it.other_per_pcs ?? ''} onChange={(v) => updItem(it.key, { other_per_pcs: v, other_lkr: '' })} placeholder="0.00" />
                           </Field>
                         </div>
                       </div>

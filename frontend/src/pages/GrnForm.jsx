@@ -247,6 +247,25 @@ export default function GrnForm() {
     setFormOpen(false);
     toast(editing ? `${e.name} updated` : `${e.name} added`);
   };
+  // Enter in the item card moves to the next box (like Tab); on the last box it adds the item
+  const enterToNext = (e) => {
+    if (e.key !== 'Enter' || e.defaultPrevented || e.shiftKey || e.ctrlKey || e.altKey) return;
+    const el = e.target;
+    if (!/^(INPUT|SELECT)$/.test(el.tagName) || ['checkbox', 'radio'].includes(el.type)) return;
+    const boxes = [...e.currentTarget.querySelectorAll('input, select')]
+      .filter((x) => !x.disabled && !['hidden', 'checkbox', 'radio'].includes(x.type) && x.offsetParent !== null);
+    const i = boxes.indexOf(el);
+    e.preventDefault();
+    if (i >= 0 && i < boxes.length - 1) boxes[i + 1].focus();
+    else addItem();
+  };
+  // Reset: a new item starts empty again; an item being edited goes back to how it is in the list
+  const resetEntry = () => {
+    if (!entryStarted && !g.editingKey) return;
+    if (!confirm(g.editingKey ? 'Undo your changes to this item?' : 'Clear everything typed in this item?')) return;
+    setAdding(null);
+    setG((x) => ({ ...x, entry: x.editingKey ? { ...x.items.find((i) => i.key === x.editingKey) } : { ...blankItem(), key: x.entry.key } }));
+  };
   const editItem = (it) => {
     if (g.editingKey === it.key) return;
     if (!g.editingKey && entryStarted && !confirm('The item you are entering has not been added yet. Discard it and edit this one?')) return;
@@ -408,10 +427,12 @@ export default function GrnForm() {
               const c = preview.items[entryIdx] || {};
               const m = margin(it.expected_per_pcs, c.landed_per_pcs_lkr);
               return (
-                <div className={`item-card item-entry ${g.editingKey ? 'editing' : ''}`}>
+                <div className={`item-card item-entry ${g.editingKey ? 'editing' : ''}`} onKeyDown={enterToNext}>
                   <div className="item-entry-title">
                     <Icon name={g.editingKey ? 'edit' : 'plus'} size={15} />
                     {g.editingKey ? <span>Editing <b>{it.name}</b></span> : <span>Add an item</span>}
+                    <button type="button" className="item-fold item-reset" onClick={resetEntry}
+                      title={g.editingKey ? 'Put this item back as it is in the list' : 'Clear every box of this form'}>↺ Reset</button>
                     {!g.editingKey && (
                       <button type="button" className="item-fold" onClick={() => { setAdding(null); setFormOpen(false); }} title="Fold the form away (what you typed is kept)">Fold ▴</button>
                     )}
@@ -504,7 +525,7 @@ export default function GrnForm() {
                       <span className="field-hint">Sets × pieces per set</span>
                     </div>
                     <Field label="Billed per piece (INR)" required hint="From the supplier's bill">
-                      <NumInput value={it.cost_inr_per_pcs} onChange={(v) => updItem(it.key, { cost_inr_per_pcs: v })} placeholder="0.00" />
+                      <NumInput money value={it.cost_inr_per_pcs} onChange={(v) => updItem(it.key, { cost_inr_per_pcs: v })} placeholder="0.00" />
                     </Field>
                   </div>
 
@@ -550,10 +571,10 @@ export default function GrnForm() {
                         </div>
                         <div className="item-charges">
                           <Field label="Cargo charge / piece (Rs)" hint={total(it.cargo_per_pcs)}>
-                            <NumInput value={it.cargo_per_pcs ?? ''} onChange={(v) => updItem(it.key, { cargo_per_pcs: v, cargo_lkr: '' })} placeholder="0.00" />
+                            <NumInput money value={it.cargo_per_pcs ?? ''} onChange={(v) => updItem(it.key, { cargo_per_pcs: v, cargo_lkr: '' })} placeholder="0.00" />
                           </Field>
                           <Field label="Other expenses / piece (Rs)" hint={total(it.other_per_pcs)}>
-                            <NumInput value={it.other_per_pcs ?? ''} onChange={(v) => updItem(it.key, { other_per_pcs: v, other_lkr: '' })} placeholder="0.00" />
+                            <NumInput money value={it.other_per_pcs ?? ''} onChange={(v) => updItem(it.key, { other_per_pcs: v, other_lkr: '' })} placeholder="0.00" />
                           </Field>
                         </div>
                       </div>
@@ -582,10 +603,10 @@ export default function GrnForm() {
                     const perSet = (v) => (n(v) > 0 && c.pcs_per_set > 1 ? <> · {lkr(n(v) * c.pcs_per_set)} a set</> : null);
                     return (
                       <div className="item-fields">
-                        <Field label="Expected selling price / piece (Rs)" className="span-6"
+                        <Field label="Expected selling price / piece (Rs)" className="span-3 exp-price-field"
                           hint={<>{priceHint(it.expectedManual, 'expected', rules.selling)}{perSet(it.expected_per_pcs)}
                             {c.landed_per_pcs_lkr > 0 && n(it.expected_per_pcs) > 0 && <span className={m < 0 ? 'text-red' : m < 15 ? 'text-amber' : 'text-green'}> · margin {pct(m)}</span>}</>}>
-                          <NumInput value={it.expected_per_pcs} onChange={(v) => updItem(it.key, { expected_per_pcs: v, expectedManual: true })} placeholder="0.00" />
+                          <NumInput money value={it.expected_per_pcs} onChange={(v) => updItem(it.key, { expected_per_pcs: v, expectedManual: true })} placeholder="0.00" />
                         </Field>
                       </div>
                     );

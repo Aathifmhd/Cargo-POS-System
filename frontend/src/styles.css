@@ -1007,6 +1007,9 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .item-sizes { grid-column: 1 / -1; }
 .span-3 { grid-column: span 3; }
 .span-6 { grid-column: 1 / -1; }
+/* Receive Goods: the expected selling price stands out among the item fields */
+.exp-price-field .field-label { font-size: 13.5px; font-weight: 800; color: var(--primary-text); }
+.exp-price-field .input { border-width: 2px; border-color: var(--primary); }
 /* Receive Goods: category → product */
 .item-pick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .item-product-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
@@ -1114,6 +1117,8 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .item-add-arrow { margin-left: auto; font-size: 18px; opacity: .7; }
 .item-fold { margin-left: auto; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--primary-text); cursor: pointer; padding: 2px 6px; border-radius: 6px; }
 .item-fold:hover { background: var(--primary-soft); }
+.item-fold + .item-fold { margin-left: 0; }
+.item-reset { color: var(--text-2); }
 .item-entry { border: 1.5px solid var(--primary); box-shadow: 0 6px 18px rgba(27, 42, 78, .10); }
 .item-entry .item-entry-title { color: var(--primary-text); font-size: 13px; }
 :root[data-theme="dark"] .item-add-plus { background: var(--primary); }

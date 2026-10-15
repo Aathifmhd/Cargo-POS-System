@@ -239,10 +239,10 @@ function ProductModal({ id, categories, onClose, onChanged }) {
             <span className="field-label">Sizes</span>
             <SizePicker value={f.sizes || ''} options={cat?.sizes} hint={`${f.name} ${f.category || ''}`} onChange={(sizes) => setF((x) => ({ ...x, sizes }))} />
           </div>
-          <Field label="Expected price / piece (Rs)"><NumInput value={f.expected_pc} onChange={set('expected_pc')} /></Field>
+          <Field label="Expected price / piece (Rs)"><NumInput money value={f.expected_pc} onChange={set('expected_pc')} /></Field>
           <Field label="Re-order at (sets)"><NumInput value={f.reorder_sets} onChange={set('reorder_sets')} /></Field>
           {!id && <>
-            <Field label="Cost / piece (Rs)" hint="Cost of old stock"><NumInput value={f.cost_pc} onChange={set('cost_pc')} /></Field>
+            <Field label="Cost / piece (Rs)" hint="Cost of old stock"><NumInput money value={f.cost_pc} onChange={set('cost_pc')} /></Field>
             <Field label="Opening stock (pieces)"><NumInput value={f.opening_pcs} onChange={set('opening_pcs')} /></Field>
           </>}
           {id && <label className="check"><input type="checkbox" checked={!!f.active} onChange={set('active')} /> Active (show in sales)</label>}

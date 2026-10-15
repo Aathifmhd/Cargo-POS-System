@@ -61,6 +61,12 @@ const lineCalc = (l) => {
 };
 const pcsText = (pcs) => `${int(pcs)} pcs`;
 const blankEntry = { q: '', pid: null, bid: null, unit: 'pcs', qty: '1', price: '', disc_pct: '' };   // sold by the piece only; bid = the stock batch
+// one click in a box selects all of it, ready to type over (the mouse coming up would otherwise drop the selection)
+const selectAll = {
+  onFocus: (e) => { e.target.dataset.fresh = '1'; e.target.select(); },
+  onMouseUp: (e) => { if (e.target.dataset.fresh) { e.preventDefault(); delete e.target.dataset.fresh; } },
+  onBlur: (e) => { delete e.target.dataset.fresh; },
+};
 const typingIn = (el) => el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
 
 export default function POS() {
@@ -149,7 +155,7 @@ export default function POS() {
     if (!p) return;
     const unit = 'pcs';
     const u = unitInfo(p, unit, b);
-    setEntry({ q: p.code, pid: p.id, bid: b?.id ?? null, unit, qty: '1', price: String(u.expected || ''), disc_pct: '' });
+    setEntry({ q: p.code, pid: p.id, bid: b?.id ?? null, unit, qty: '1', price: u.expected ? u.expected.toFixed(2) : '', disc_pct: '' });
     setHi(0);
     if (freePcs(p, b) <= 0) toast(`"${p.name}"${b ? ` (${b.ref})` : ''} has no stock left`, 'error');
     focus('tQty');
@@ -212,7 +218,7 @@ export default function POS() {
   const EDIT_ORDER = ['lnQty', 'lnPrice'];
   const startEdit = (i, field = 'lnQty') => {
     setSel(i);
-    setEdit({ i, unit: lines[i].unit, qty: String(lines[i].qty), price: String(lines[i].price) });
+    setEdit({ i, unit: lines[i].unit, qty: String(lines[i].qty), price: n(lines[i].price).toFixed(2) });
     focus(field);
   };
   const saveEdit = () => {
@@ -417,18 +423,18 @@ export default function POS() {
           </div>
         </div>
         <label className="f-qty"><span>QTY (PCS)</span>
-          <input id="tQty" inputMode="decimal" autoComplete="off" value={entry.qty} onFocus={(e) => e.target.select()}
+          <input id="tQty" inputMode="decimal" autoComplete="off" value={entry.qty} {...selectAll}
             onChange={(e) => setEntry({ ...entry, qty: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tQty')} />
         </label>
         {showCost && <div className="f-ro"><span>COST</span><div className="till-ro cost">{cur ? money(eu.cost) : '—'}</div></div>}
         <div className="f-ro"><span>EXPECTED</span>
-          <div className="till-ro click exp" onClick={() => cur && setEntry({ ...entry, price: String(eu.expected) })} title="Use the expected price">{cur ? money(eu.expected) : '—'}</div></div>
+          <div className="till-ro click exp" onClick={() => cur && setEntry({ ...entry, price: eu.expected.toFixed(2) })} title="Use the expected price">{cur ? money(eu.expected) : '—'}</div></div>
         <label className="f-price"><span>LAST PRICE</span>
-          <input id="tPrice" className={eUnder && showCost ? 'under' : ''} inputMode="decimal" autoComplete="off" value={entry.price} onFocus={(e) => e.target.select()}
+          <input id="tPrice" className={eUnder && showCost ? 'under' : ''} inputMode="decimal" autoComplete="off" value={entry.price} {...selectAll}
             onChange={(e) => setEntry({ ...entry, price: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tPrice')} />
         </label>
         <label className="f-dis"><span>DIS %</span>
-          <input id="tDis" inputMode="decimal" autoComplete="off" value={entry.disc_pct} placeholder="0" onFocus={(e) => e.target.select()}
+          <input id="tDis" inputMode="decimal" autoComplete="off" value={entry.disc_pct} placeholder="0" {...selectAll}
             onChange={(e) => setEntry({ ...entry, disc_pct: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tDis')} />
         </label>
         <div className="f-amt"><span>AMOUNT</span><div className={`till-amt ${eUnder && showCost ? 'under' : ''}`}>{cur ? money(eAmt) : '0.00'}</div></div>
@@ -481,11 +487,11 @@ export default function POS() {
                     {showCost && r.under && <span className="tag bad">under cost</span>}
                   </td>
                   <td className="n q">{edit?.i === i
-                    ? <input id="lnQty" className="ln-in" inputMode="decimal" value={edit.qty} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} onKeyDown={editKey} onFocus={(e) => e.target.select()} />
+                    ? <input id="lnQty" className="ln-in" inputMode="decimal" value={edit.qty} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} onKeyDown={editKey} {...selectAll} />
                     : <b>{r.qty}</b>}</td>
                   <td className="n mrp">{money(r.u.expected)}</td>
                   <td className={`n pr ${showCost && r.under ? 'under' : ''}`}>{edit?.i === i
-                    ? <input id="lnPrice" className="ln-in" inputMode="decimal" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} onKeyDown={editKey} onFocus={(e) => e.target.select()} />
+                    ? <input id="lnPrice" className="ln-in" inputMode="decimal" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} onKeyDown={editKey} {...selectAll} />
                     : money(r.price)}
                     {showCost && edit?.i !== i && <em className={r.under ? 'loss' : ''}>{pct(margin(r.net, r.u.cost))}</em>}</td>
                   <td className="n ds">{r.disc ? <><b>{r.disc_pct}%</b><em>{money(r.disc)}</em></> : '—'}</td>
@@ -509,7 +515,7 @@ export default function POS() {
             <div className="sum-line"><span>Sub total</span><b>{money(T.sub)}</b></div>
             <div className={`sum-line ${T.lineDisc ? 'off' : ''}`}><span>Line discounts</span><b>{T.lineDisc ? `− ${money(T.lineDisc)}` : '0.00'}</b></div>
             <div className="sum-line edit"><span>Bill discount <i>F8</i></span>
-              <input id="tBillDisc" value={billDisc} placeholder="0 or 5%" onFocus={(e) => e.target.select()} onChange={(e) => setBillDisc(e.target.value)}
+              <input id="tBillDisc" value={billDisc} placeholder="0 or 5%" {...selectAll} onChange={(e) => setBillDisc(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); toCode(); } }} /></div>
             {T.sub > 0 && (T.lineDisc || T.billDisc) > 0 && <div className="sum-line faint"><span>Total discount</span><b>{(((T.lineDisc + T.billDisc) / T.sub) * 100).toFixed(2)}%</b></div>}
           </div>

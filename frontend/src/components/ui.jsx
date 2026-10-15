@@ -213,10 +213,20 @@ export function Segmented({ options, value, onChange, size = '' }) {
 }
 
 /** Number input that selects its content on focus (fast data entry). */
-export function NumInput({ value, onChange, className = '', ...rest }) {
+/**
+ * A number box. One click selects the whole number, ready to type over.
+ * `money`: a price — shown with two decimals (350 → 350.00) except while you type in it.
+ */
+export function NumInput({ value, onChange, className = '', money = false, ...rest }) {
+  const [typing, setTyping] = useState(false);
+  const fresh = useRef(false);   // focused by this click: keep the whole number selected when the mouse comes up
+  const shown = money && !typing && value !== '' && value != null && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : value ?? '';
   return (
-    <input type="number" inputMode="decimal" step="any" className={`input num ${className}`} value={value ?? ''}
-      onFocus={(e) => e.target.select()} onWheel={(e) => e.target.blur()} onChange={(e) => onChange(e.target.value)} {...rest} />
+    <input type="number" inputMode="decimal" step="any" className={`input num ${className}`} value={shown}
+      onFocus={(e) => { fresh.current = true; const el = e.target; el.select(); setTimeout(() => document.activeElement === el && el.select(), 0); }}
+      onMouseUp={(e) => { if (fresh.current) { e.preventDefault(); fresh.current = false; } }}
+      onBlur={() => { setTyping(false); fresh.current = false; }} onWheel={(e) => e.target.blur()}
+      onChange={(e) => { setTyping(true); onChange(e.target.value); }} {...rest} />
   );
 }
 

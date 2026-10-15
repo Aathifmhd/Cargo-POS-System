@@ -80,6 +80,25 @@ r.put('/settings', async (req, res) => {
   res.json(await publicSettings());
 });
 
+/* ---------------- stock value, batch by batch ----------------
+ * The same product bought at different costs keeps them apart (stock batches), each batch with its own cost and
+ * expected price — so stock value is pieces × cost (and × expected price) batch by batch, not one price per product.
+ */
+async function stockValues(products) {
+  const ids = products.map((p) => p.id);
+  const batches = ids.length ? await find('batches', { product_id: { $in: ids }, left_pcs: { $gt: 0 } }) : [];
+  const out = new Map();
+  for (const p of products) {
+    const mine = batches.filter((b) => b.product_id === p.id);
+    const expPc = p.expected_per_set / (p.pcs_per_set || 1);
+    out.set(p.id, mine.length ? {
+      cost: sum(mine, (b) => b.left_pcs * b.cost_per_pcs),
+      expected: sum(mine, (b) => b.left_pcs * (b.expected_per_pcs || expPc)),
+    } : { cost: Math.max(0, p.stock_pcs) * p.cost_per_pcs, expected: Math.max(0, p.stock_pcs) * expPc });
+  }
+  return out;
+}
+
 /* ---------------- payables / receivables ---------------- */
 const allPayables = async () => [...(await supplierLedgers()).values()].flat().filter((b) => b.balance > 0.009);
 const allReceivables = async () => [...(await customerLedgers()).values()].flat().filter((b) => b.balance > 0.009);
@@ -151,9 +170,10 @@ r.get('/dashboard', async (req, res) => {
   }
 
   const inStock = products.filter((p) => p.stock_pcs > 0);
+  const values = await stockValues(inStock);
   const stock = {
-    cost_value: sum(inStock, (p) => p.stock_pcs * p.cost_per_pcs),
-    expected_value: sum(inStock, (p) => (p.stock_pcs * p.expected_per_set) / p.pcs_per_set),
+    cost_value: sum(inStock, (p) => values.get(p.id).cost),
+    expected_value: sum(inStock, (p) => values.get(p.id).expected),
     pcs: sum(inStock, (p) => p.stock_pcs),
     products: inStock.length,
   };
@@ -241,14 +261,15 @@ r.get('/reports/sales', async (req, res) => {
 
 r.get('/reports/stock', async (req, res) => {
   const products = await find('products', { active: 1, stock_pcs: { $gt: 0 } });
+  const values = await stockValues(products);
   const cats = {};
   for (const p of products) {
     const key = p.category ?? 'Uncategorised';
     const c = (cats[key] ??= { category: key, products: 0, pcs: 0, cost_value: 0, expected_value: 0, mrp_value: 0 });
     c.products++;
     c.pcs += p.stock_pcs;
-    c.cost_value += p.stock_pcs * p.cost_per_pcs;
-    c.expected_value += (p.stock_pcs * p.expected_per_set) / p.pcs_per_set;
+    c.cost_value += values.get(p.id).cost;
+    c.expected_value += values.get(p.id).expected;
     c.mrp_value += (p.stock_pcs * p.mrp_per_set) / p.pcs_per_set;
   }
   // slow movers: in stock, nothing sold in 60 days
@@ -264,7 +285,7 @@ r.get('/reports/stock', async (req, res) => {
   }
   const slow = products
     .filter((p) => !(lastSold[p.id] && lastSold[p.id] >= since))
-    .map((p) => ({ id: p.id, code: p.code, name: p.name, stock_pcs: p.stock_pcs, pcs_per_set: p.pcs_per_set, cost_value: round2(p.stock_pcs * p.cost_per_pcs), last_sold: lastSold[p.id] || null }))
+    .map((p) => ({ id: p.id, code: p.code, name: p.name, stock_pcs: p.stock_pcs, pcs_per_set: p.pcs_per_set, cost_value: round2(values.get(p.id).cost), last_sold: lastSold[p.id] || null }))
     .sort(desc('cost_value'))
     .slice(0, 50);
   res.json({ categories: Object.values(cats).sort(desc('cost_value')), slow });

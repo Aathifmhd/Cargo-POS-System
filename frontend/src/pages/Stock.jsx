@@ -23,8 +23,15 @@ export default function Stock() {
   }, [data, q, cat, filter]);
 
   const active = (data || []).filter((p) => p.active);
-  const costValue = active.reduce((s, p) => s + p.stock_pcs * p.cost_per_pcs, 0);
-  const sellValue = active.reduce((s, p) => s + (p.stock_pcs * p.expected_per_set) / p.pcs_per_set, 0);
+  // stock value batch by batch: each cost (and expected price) of the same product counted on its own pieces
+  const valueOf = (p, key) => {
+    const bs = (p.batches || []).filter((b) => b.left_pcs > 0);
+    const expPc = p.expected_per_set / (p.pcs_per_set || 1);
+    if (!bs.length) return Math.max(0, p.stock_pcs) * (key === 'cost' ? p.cost_per_pcs : expPc);
+    return bs.reduce((s, b) => s + b.left_pcs * (key === 'cost' ? b.cost_per_pcs : b.expected_per_pcs || expPc), 0);
+  };
+  const costValue = active.reduce((s, p) => s + valueOf(p, 'cost'), 0);
+  const sellValue = active.reduce((s, p) => s + valueOf(p, 'expected'), 0);
 
   return (
     <div>
@@ -68,9 +75,12 @@ export default function Stock() {
                   const lines = batches.length > 1 ? batches : [null];
                   const tiers = costTiers(batches);
                   return lines.map((b, k) => {
+                    // a single-cost product shows its one batch's cost and expected price
+                    const one = !b && batches.length === 1 ? batches[0] : null;
+                    const src = b || one;
                     const pcs = b ? b.left_pcs : p.stock_pcs;
-                    const cost = b ? b.cost_per_pcs : p.cost_per_pcs;
-                    const exp = b ? b.expected_per_pcs || p.expected_per_set / p.pcs_per_set : p.expected_per_set / p.pcs_per_set;
+                    const cost = src ? src.cost_per_pcs : p.cost_per_pcs;
+                    const exp = src?.expected_per_pcs || p.expected_per_set / p.pcs_per_set;
                     return (
                       <tr key={`${p.id}-${b?.id ?? 0}`} className={`click ${b && k > 0 ? 'batch-row' : ''}`} onClick={() => setOpen(p.id)}>
                         <td className="muted strong">{p.code}</td>

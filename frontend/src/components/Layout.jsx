@@ -18,7 +18,7 @@ const NAV = [
   { to: '/customers', icon: 'users', label: 'Customers' },
   { to: '/suppliers', icon: 'factory', label: 'Suppliers' },
   { group: 'Money' },
-  { to: '/dues', icon: 'wallet', label: 'Payments Due', hint: 'F7' },
+  { to: '/dues', icon: 'wallet', label: 'Payment Portal', hint: 'F7' },
   { to: '/reports', icon: 'chart', label: 'Reports' },
   { to: '/settings', icon: 'settings', label: 'Settings' },
   { to: '/users', icon: 'shield', label: 'Users & Security', admin: true },

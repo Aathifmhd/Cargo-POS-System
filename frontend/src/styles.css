@@ -172,6 +172,12 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
 .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+/* money buttons on the bill tables: Receive (money in) green, Pay (money out) orange */
+.btn-receive { background: #1F9D55; border-color: #1F9D55; color: #fff; font-weight: 700; }
+.btn-receive:hover { background: #17834A; border-color: #17834A; color: #fff; }
+.btn-pay { background: #E07B12; border-color: #E07B12; color: #fff; font-weight: 700; }
+.btn-pay:hover { background: #C46A0C; border-color: #C46A0C; color: #fff; }
+.btn-pay, .btn-receive { min-width: 110px; justify-content: center; }
 .btn-danger { color: var(--red); border-color: #f3b4b4; }
 .btn-danger:hover { background: var(--red-soft); border-color: var(--red); }
 .btn-ghost { border-color: transparent; background: transparent; }
@@ -271,6 +277,11 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .toolbar .search .input { padding-left: 34px; }
 .es-toolbar .es-supplier { width: auto; min-width: 170px; }
 .es-stats { margin-bottom: 18px; }
+.pay-form { display: flex; flex-direction: column; gap: 16px; }
+.pay-step { display: flex; flex-direction: column; gap: 8px; }   /* one section: no separate boxes */
+.pay-step-title { font-weight: 700; font-size: 13px; color: var(--text-2); }
+.pay-date { max-width: 220px; }
+@media (max-width: 560px) { .pay-step .grid-3 { grid-template-columns: 1fr; } }
 .cost-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 750; white-space: nowrap; vertical-align: 1px; line-height: 1.5; }
 .cost-low { background: var(--green-soft); color: var(--green); }
 .cost-medium { background: var(--amber-soft); color: var(--amber); }

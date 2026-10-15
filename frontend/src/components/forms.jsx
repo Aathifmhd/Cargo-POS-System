@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, n, r2, today, lkr, inr, PAY_METHODS_CUSTOMER, PAY_METHODS_SUPPLIER, isAdmin, isSuper } from '../lib.js';
-import { Modal, Field, NumInput, useToast, Segmented, Icon } from './ui.jsx';
+import { Modal, Field, NumInput, useToast, Icon } from './ui.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 
 function useForm(initial) {
@@ -83,71 +83,104 @@ export function SupplierForm({ supplier, initialName = '', onClose, onSaved }) {
   );
 }
 
-/* ================= PAY SUPPLIER ================= */
+/* ================= PAYMENTS (pay a supplier · receive from a customer) =================
+ * Four clear sections: which bill · bill balance, amount and the balance left, date · how · reference & notes.
+ */
+function PayStep({ title, children }) {
+  return (
+    <div className="pay-step">
+      <div className="pay-step-title">{title}</div>
+      {children}
+    </div>
+  );
+}
+
+/** Steps 1–2: which bill, its balance, the amount, what is left — shared by both pop-ups. */
+function BillAndAmount({ bills, billKey, billLabel, f, setF, set, money, amountKey, amountLabel, amountHint, verb }) {
+  const open = bills.filter((b) => b.balance > 0.009);
+  const total = r2(open.reduce((a, b) => a + b.balance, 0));
+  const bill = open.find((b) => String(b.id) === String(f[billKey]));
+  const due = bill ? bill.balance : total;            // what this payment is set against
+  const left = r2(due - n(f[amountKey]));
+  return (
+    <>
+      <PayStep title="For which bill?">
+        <select className="input" value={f[billKey]} onChange={(e) => setF((x) => ({ ...x, [billKey]: e.target.value }))}>
+          <option value="">All bills · oldest first ({money(total)})</option>
+          {open.filter((b) => b.id).map((b) => <option key={b.id} value={b.id}>{billLabel(b)} · {money(b.balance)}</option>)}
+        </select>
+      </PayStep>
+      <PayStep title={`Amount ${verb}`}>
+        <div className="grid grid-3">
+          <Field label={bill ? 'Bill balance' : 'Total balance'}>
+            <div className="input input-static strong">{money(due)}</div>
+          </Field>
+          <Field label={amountLabel} required hint={amountHint}>
+            <NumInput money autoFocus value={f[amountKey]} onChange={set(amountKey)} placeholder="0.00" />
+          </Field>
+          <Field label="Balance after this" hint={left < 0 ? (bill ? 'The extra goes to their other bills' : 'The extra is kept as an advance') : left === 0 ? 'Fully paid' : ''}>
+            <div className={`input input-static strong ${left <= 0 ? 'text-green' : 'text-red'}`}>{money(Math.max(0, left))}</div>
+          </Field>
+        </div>
+        <Field label="Date" className="pay-date"><input type="date" className="input" value={f.date} onChange={set('date')} /></Field>
+      </PayStep>
+    </>
+  );
+}
+
+/* ---------------- PAY SUPPLIER ---------------- */
 export function SupplierPaymentModal({ supplier, bills = [], defaultGrnId, onClose, onSaved }) {
   const { settings } = useSettings();
   const toast = useToast();
-  const open = bills.filter((b) => b.balance > 0.009);
-  const preset = open.find((b) => b.id === defaultGrnId);
-  const total = r2(open.reduce((a, b) => a + b.balance, 0));
-  const [f, set, setF] = useForm({
-    date: today(), grn_id: preset?.id ?? '', amount_inr: preset ? preset.balance : '',
-    method: 'Bank transfer', reference: '', notes: '',
-  });
+  const preset = bills.find((b) => b.id === defaultGrnId && b.balance > 0.009);
+  const [f, set, setF] = useForm({ date: today(), grn_id: preset?.id ?? '', amount_inr: '', method: 'Bank transfer', reference: '', notes: '' });
   const [busy, setBusy] = useState(false);
   // recorded at the fixed costing rate, like every cost
   const rate = n(settings.costing_rate) || 3.5;
-  const lkrAmt = r2(n(f.amount_inr) * rate);
 
   const save = async (e) => {
     e.preventDefault();
+    if (!(n(f.amount_inr) > 0)) return toast('Enter the amount you are paying', 'error');
     setBusy(true);
     try {
       await api.post(`/suppliers/${supplier.id}/payments`, { ...f, grn_id: f.grn_id || null });
-      toast(`Payment of ${inr(f.amount_inr)} saved`);
+      toast(`Paid ${inr(f.amount_inr)} to ${supplier.name}`);
       onSaved?.();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
 
   return (
-    <Modal title={`Pay ${supplier.name}`} subtitle={`Total still to pay: ${inr(total)}`} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="sp-form" disabled={busy}>Save payment</button></>}>
-      <form id="sp-form" onSubmit={save} className="grid grid-2">
-        <Field label="Pay for which GRN?" className="span-2" hint="Leave as 'Oldest first' to settle the oldest bills automatically">
-          <select className="input" value={f.grn_id} onChange={(e) => {
-            const b = open.find((x) => String(x.id) === e.target.value);
-            setF((x) => ({ ...x, grn_id: e.target.value, amount_inr: b ? b.balance : x.amount_inr }));
-          }}>
-            <option value="">Oldest first (automatic)</option>
-            {open.filter((b) => b.id).map((b) => <option key={b.id} value={b.id}>{b.grn_no} · balance {inr(b.balance)}</option>)}
-          </select>
-        </Field>
-        <Field label="Amount paid (₹ INR)" required hint={n(f.amount_inr) > 0 ? `= ${lkr(lkrAmt)} at Rs ${rate.toFixed(2)} per ₹1` : ''}>
-          <NumInput autoFocus value={f.amount_inr} onChange={set('amount_inr')} />
-        </Field>
-        <Field label="Paid by">
+    <Modal title={`Pay ${supplier.name}`} subtitle="Money you pay the supplier, in Indian Rupees (₹)" onClose={onClose}
+      footer={<><button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" form="sp-form" disabled={busy}><Icon name="check" size={16} /> {busy ? 'Saving…' : n(f.amount_inr) > 0 ? `Make payment · ${inr(f.amount_inr)}` : 'Make payment'}</button></>}>
+      <form id="sp-form" onSubmit={save} className="pay-form">
+        <BillAndAmount bills={bills} billKey="grn_id" billLabel={(b) => b.grn_no} f={f} setF={setF} set={set} money={inr}
+          amountKey="amount_inr" amountLabel="Amount paying (₹)" verb="paying"
+          amountHint={n(f.amount_inr) > 0 ? `= ${lkr(r2(n(f.amount_inr) * rate))} at Rs ${rate.toFixed(2)} per ₹1` : ''} />
+        <PayStep title="How are you paying?">
           <select className="input" value={f.method} onChange={set('method')}>{PAY_METHODS_SUPPLIER.map((m) => <option key={m}>{m}</option>)}</select>
-        </Field>
-        <Field label="Date"><input type="date" className="input" value={f.date} onChange={set('date')} /></Field>
-        <Field label="Reference / slip no"><input className="input" value={f.reference} onChange={set('reference')} /></Field>
-        <Field label="Notes"><input className="input" value={f.notes} onChange={set('notes')} /></Field>
-        {total > 0 && <div className="span-2 row gap-s"><button type="button" className="btn btn-sm" onClick={() => setF((x) => ({ ...x, grn_id: '', amount_inr: total }))}>Pay full balance {inr(total)}</button></div>}
+        </PayStep>
+        <PayStep title="Reference & notes">
+          <div className="grid grid-2">
+            <Field label="Reference / slip no" hint="Optional"><input className="input" value={f.reference} onChange={set('reference')} /></Field>
+            <Field label="Notes" hint="Optional"><input className="input" value={f.notes} onChange={set('notes')} /></Field>
+          </div>
+        </PayStep>
       </form>
     </Modal>
   );
 }
 
-/* ================= RECEIVE FROM CUSTOMER ================= */
+/* ---------------- RECEIVE FROM CUSTOMER ---------------- */
 export function CustomerPaymentModal({ customer, bills = [], defaultSaleId, onClose, onSaved }) {
   const toast = useToast();
-  const open = bills.filter((b) => b.balance > 0.009);
-  const preset = open.find((b) => b.id === defaultSaleId);
-  const total = r2(open.reduce((a, b) => a + b.balance, 0));
-  const [f, set, setF] = useForm({ date: today(), sale_id: preset?.id ?? '', amount: preset ? preset.balance : '', method: 'Cash', reference: '', notes: '' });
+  const preset = bills.find((b) => b.id === defaultSaleId && b.balance > 0.009);
+  const [f, set, setF] = useForm({ date: today(), sale_id: preset?.id ?? '', amount: '', method: 'Cash', reference: '', notes: '' });
   const [busy, setBusy] = useState(false);
 
   const save = async (e) => {
     e.preventDefault();
+    if (!(n(f.amount) > 0)) return toast('Enter the amount you are receiving', 'error');
     setBusy(true);
     try {
       await api.post(`/customers/${customer.id}/payments`, { ...f, sale_id: f.sale_id || null });
@@ -157,26 +190,21 @@ export function CustomerPaymentModal({ customer, bills = [], defaultSaleId, onCl
   };
 
   return (
-    <Modal title={`Receive payment — ${customer.name}`} subtitle={`Due: ${lkr(total)}`} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="cp-form" disabled={busy}>Save payment</button></>}>
-      <form id="cp-form" onSubmit={save} className="grid grid-2">
-        <Field label="For which bill?" className="span-2" hint="'Oldest first' settles the oldest bills automatically">
-          <select className="input" value={f.sale_id} onChange={(e) => {
-            const b = open.find((x) => String(x.id) === e.target.value);
-            setF((x) => ({ ...x, sale_id: e.target.value, amount: b ? b.balance : x.amount }));
-          }}>
-            <option value="">Oldest first (automatic)</option>
-            {open.filter((b) => b.id).map((b) => <option key={b.id} value={b.id}>{b.invoice_no} · {b.date} · balance {lkr(b.balance)}</option>)}
-          </select>
-        </Field>
-        <Field label="Amount received (Rs)" required><NumInput autoFocus value={f.amount} onChange={set('amount')} /></Field>
-        <Field label="Date"><input type="date" className="input" value={f.date} onChange={set('date')} /></Field>
-        <Field label="Received by" className="span-2">
-          <Segmented value={f.method} onChange={set('method')} options={PAY_METHODS_CUSTOMER.map((m) => ({ value: m, label: m }))} />
-        </Field>
-        <Field label="Reference / cheque no"><input className="input" value={f.reference} onChange={set('reference')} /></Field>
-        <Field label="Notes"><input className="input" value={f.notes} onChange={set('notes')} /></Field>
-        {total > 0 && <div className="span-2"><button type="button" className="btn btn-sm" onClick={() => setF((x) => ({ ...x, sale_id: '', amount: total }))}>Full balance {lkr(total)}</button></div>}
+    <Modal title={`Receive from ${customer.name}`} subtitle="Money the customer pays you, in Sri Lankan Rupees (Rs)" onClose={onClose}
+      footer={<><button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" form="cp-form" disabled={busy}><Icon name="check" size={16} /> {busy ? 'Saving…' : n(f.amount) > 0 ? `Receive payment · ${lkr(f.amount)}` : 'Receive payment'}</button></>}>
+      <form id="cp-form" onSubmit={save} className="pay-form">
+        <BillAndAmount bills={bills} billKey="sale_id" billLabel={(b) => `${b.invoice_no} · ${b.date}`} f={f} setF={setF} set={set} money={lkr}
+          amountKey="amount" amountLabel="Amount receiving (Rs)" verb="receiving" />
+        <PayStep title="How are they paying?">
+          <select className="input" value={f.method} onChange={set('method')}>{PAY_METHODS_CUSTOMER.map((m) => <option key={m}>{m}</option>)}</select>
+        </PayStep>
+        <PayStep title="Reference & notes">
+          <div className="grid grid-2">
+            <Field label="Reference / cheque no" hint="Optional"><input className="input" value={f.reference} onChange={set('reference')} /></Field>
+            <Field label="Notes" hint="Optional"><input className="input" value={f.notes} onChange={set('notes')} /></Field>
+          </div>
+        </PayStep>
       </form>
     </Modal>
   );

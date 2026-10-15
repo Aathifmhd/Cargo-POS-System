@@ -67,7 +67,7 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
                       <td className="right text-green">{inr(b.paid)}</td>
                       <td className="right strong">{b.balance > 0 ? inr(b.balance) : '—'}</td>
                       <td><StatusBadge status={b.status} />{b.balance > 0 && b.due_date && <div className="sub">{dueText(b.due_date)}</div>}</td>
-                      <td>{b.balance > 0 && <button className="btn btn-sm" onClick={() => setPaying(b.id || true)}>Pay</button>}</td>
+                      <td>{b.balance > 0 && <button className="btn btn-sm btn-pay" onClick={() => setPaying(b.id || true)}><Icon name="wallet" size={14} /> Pay</button>}</td>
                     </tr>
                   ))}
                 </tbody>

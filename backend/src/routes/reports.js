@@ -88,6 +88,29 @@ const byDue = (a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999
 r.get('/dues/payables', async (req, res) => res.json((await allPayables()).sort(byDue)));
 r.get('/dues/receivables', async (req, res) => res.json((await allReceivables()).sort(byDue)));
 
+/** Payments Due → History: payments made to suppliers, or received from customers, newest first. */
+r.get('/dues/history', async (req, res) => {
+  const supplier = req.query.kind === 'payables';
+  const pays = await find(supplier ? 'supplier_payments' : 'customer_payments', {}, { sort: { date: -1, id: -1 }, limit: 1000 });
+  const whoIds = [...new Set(pays.map((p) => (supplier ? p.supplier_id : p.customer_id)))];
+  const billIds = [...new Set(pays.map((p) => (supplier ? p.grn_id : p.sale_id)).filter((x) => x != null))];
+  const [who, bills] = await inParallel(
+    () => (whoIds.length ? find(supplier ? 'suppliers' : 'customers', { id: { $in: whoIds } }, { project: { id: 1, name: 1 } }) : []),
+    () => (billIds.length ? find(supplier ? 'grns' : 'sales', { id: { $in: billIds } }, { project: { id: 1, grn_no: 1, invoice_no: 1 } }) : []),
+  );
+  const nameOf = Object.fromEntries(who.map((w) => [w.id, w.name]));
+  const billOf = Object.fromEntries(bills.map((b) => [b.id, b.grn_no || b.invoice_no]));
+  res.json(pays.map((p) => {
+    const whoId = supplier ? p.supplier_id : p.customer_id;
+    const billId = supplier ? p.grn_id : p.sale_id;
+    return {
+      id: p.id, date: p.date, who_id: whoId, who: nameOf[whoId] || '—', bill_id: billId ?? null, bill_no: billId != null ? billOf[billId] || null : null,
+      amount: supplier ? p.amount_inr : p.amount, amount_lkr: supplier ? p.amount_lkr : p.amount,
+      method: p.method || null, reference: p.reference || null, notes: p.notes || null,
+    };
+  }));
+});
+
 /* ---------------- shared sums ---------------- */
 const inRange = (from, to) => ({ $gte: from, $lte: to });
 /** totals of completed bills: count, sales, profit, cash, credit */

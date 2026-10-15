@@ -82,7 +82,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
                       <td className="right text-green">{lkr(b.paid)}</td>
                       <td className="right strong">{lkr(b.balance)}</td>
                       <td><StatusBadge status={b.status} /><div className="sub">{dueText(b.due_date)}</div></td>
-                      <td><button className="btn btn-sm" onClick={() => setPaying(b.id || true)}>Receive</button></td>
+                      <td><button className="btn btn-sm btn-receive" onClick={() => setPaying(b.id || true)}><Icon name="cash" size={14} /> Receive</button></td>
                     </tr>
                   ))}
                 </tbody>

@@ -70,6 +70,10 @@ export default function Dues() {
   const src = isPay ? pay : rec;
   const fmt = isPay ? inr : lkr;
   const rows = src.data || [];
+  // search: supplier / customer, phone, bill or GRN number
+  const [q, setQ] = useState('');
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = rows.filter((r) => !words.length || words.every((w) => [r.supplier_name, r.customer_name, r.customer_phone, r.grn_no, r.invoice_no].join(' ').toLowerCase().includes(w)));
   const sum = (k) => rows.filter((r) => !k || r.status === k).reduce((a, b) => a + b.balance, 0);
 
   const openPay = async (b) => {
@@ -93,13 +97,20 @@ export default function Dues() {
         <Stat icon="check" tone="green" label="Not due yet" value={fmt(sum('open'))} />
       </div>
 
+      <div className="toolbar">
+        <div className="search"><Icon name="search" size={16} /><input className="input" placeholder={isPay ? 'Search supplier or GRN…' : 'Search customer, phone or bill…'} value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        {q && <button className="btn btn-ghost" onClick={() => setQ('')}>Clear</button>}
+      </div>
+
       <ErrorBox error={src.error} onRetry={src.reload} />
-      {src.loading && !src.data ? <Loading /> : rows.length === 0 ? (
+      {src.loading && !src.data ? <Loading /> : rows.length > 0 && shown.length === 0 ? (
+        <Card><Empty icon="search" title="Nothing matches" text={`No ${isPay ? 'supplier bill' : 'customer bill'} for "${q}".`} action={<button className="btn" onClick={() => setQ('')}>Clear search</button>} /></Card>
+      ) : rows.length === 0 ? (
         <Card><Empty icon="check" title={isPay ? 'Nothing to pay suppliers' : 'No customer has dues'} text="Everything is settled. 🎉" /></Card>
       ) : (
         <div className="stack">
           {GROUPS.map((g) => {
-            const list = rows.filter((r) => r.status === g.key);
+            const list = shown.filter((r) => r.status === g.key);
             if (!list.length) return null;
             return (
               <Card key={g.key} title={<span className="row gap-s"><span className={`badge badge-${g.tone}`}>{list.length}</span> {g.title}</span>} actions={<b className="mono">{fmt(list.reduce((a, b) => a + b.balance, 0))}</b>} pad={false}>

@@ -56,7 +56,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
           <Card title="Items received" pad={false}>
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Product</th><th className="right">Received</th><th className="right">Bill ₹/pc</th><th className="right">Cost / piece</th><th className="right">Expected / piece</th><th className="right">MRP / piece</th><th className="right">Margin</th></tr></thead>
+                <thead><tr><th>Product</th><th className="right">Received</th><th className="right">Bill ₹/pc</th><th className="right">Cost / piece</th><th className="right">Expected / piece</th><th className="right">Margin</th></tr></thead>
                 <tbody>
                   {g.items.map((i) => {
                     const pcs = Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + i.extra_pcs - i.short_pcs);
@@ -73,7 +73,6 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
                         <td className="right">{money(i.cost_inr_per_set / (i.pcs_per_set || 1))}<div className="sub">{inr(i.line_inr)}</div></td>
                         <td className="right strong">{lkr(i.landed_per_pcs_lkr)}{(i.cargo_lkr > 0 || i.other_lkr > 0) && <div className="sub">incl. {[i.cargo_per_pcs > 0 && `cargo ${lkr(i.cargo_per_pcs)}`, i.other_per_pcs > 0 && `other ${lkr(i.other_per_pcs)}`].filter(Boolean).join(' + ') || 'cargo'}/pc</div>}</td>
                         <td className="right">{lkr(per(i.expected_per_set))}</td>
-                        <td className="right">{lkr(per(i.mrp_per_set))}</td>
                         <td className={`right ${margin(i.expected_per_set, i.landed_per_set_lkr) < 0 ? 'text-red' : 'text-green'}`}>{pct(margin(i.expected_per_set, i.landed_per_set_lkr))}</td>
                       </tr>
                     );

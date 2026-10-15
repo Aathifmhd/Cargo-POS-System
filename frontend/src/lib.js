@@ -245,7 +245,7 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
 export const PAY_METHODS_SUPPLIER = ['Bank transfer', 'Cash', 'Cheque', 'UPI / Online'];
 export const PAY_METHODS_CUSTOMER = ['Cash', 'Bank transfer', 'Cheque', 'Card', 'Online'];
 
-/* ---------------- automatic selling price & MRP (Settings → Price & billing) ---------------- */
+/* ---------------- automatic expected selling price (Settings → Price & billing; MRP is no longer shown) ---------------- */
 /** The pricing rules from settings: % added to the landed cost, and the step prices are rounded up to. */
 export const priceRules = (settings) => ({
   selling: n(settings?.selling_markup_percent ?? 30),

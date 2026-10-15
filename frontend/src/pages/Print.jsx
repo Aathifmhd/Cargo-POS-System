@@ -41,7 +41,6 @@ export function PrintSale() {
   const { data: s } = useApi(`/sales/${id}`);
   useAutoPrint(!!s);
   if (!s) return <Loading />;
-  const mrpTotal = s.items.reduce((a, i) => a + i.mrp_per_unit * i.qty, 0);
   const hasDisc = s.items.some((i) => i.disc > 0);
   return (
     <>
@@ -53,10 +52,10 @@ export function PrintSale() {
           {s.payment_type === 'credit' && <div className="right"><div className="muted">Payment due</div><b>{niceDate(s.due_date)}</b></div>}
         </div>
         <table>
-          <thead><tr><th>#</th><th>Item</th><th className="right">Qty</th><th className="right">MRP</th><th className="right">Rate</th>{hasDisc && <th className="right">Dis</th>}<th className="right">Amount</th></tr></thead>
+          <thead><tr><th>#</th><th>Item</th><th className="right">Qty</th><th className="right">Rate</th>{hasDisc && <th className="right">Dis</th>}<th className="right">Amount</th></tr></thead>
           <tbody>{s.items.map((i, idx) => (
             <tr key={i.id}><td>{idx + 1}</td><td>{i.name}<div className="muted small">{i.code}</div></td><td className="right">{int(i.pcs)} pcs</td>
-              <td className="right">{money(i.mrp_per_unit)}</td><td className="right">{money(i.price)}</td>
+              <td className="right">{money(i.price)}</td>
               {hasDisc && <td className="right">{i.disc ? `${i.disc_pct}%` : '—'}</td>}<td className="right">{money(i.line_total)}</td></tr>
           ))}</tbody>
         </table>
@@ -69,7 +68,6 @@ export function PrintSale() {
             <div><b>Balance on this bill</b><b>{money(s.total - s.paid_at_sale)}</b></div>
             {s.customer_balance != null && <div><span>Total outstanding</span><span>{lkr(s.customer_balance)}</span></div>}
           </>}
-          {mrpTotal > s.total && <div className="muted"><span>You saved vs MRP</span><span>{money(mrpTotal - s.total)}</span></div>}
         </div>
         <div className="print-foot">
           <div className="sign">Customer signature</div>
@@ -96,10 +94,10 @@ export function PrintGrn() {
           <div className="right"><div>Cargo: <b>{g.cargo_name || '—'}</b></div><div>Rate: <b>1 INR = Rs {g.exchange_rate}</b></div></div>
         </div>
         <table>
-          <thead><tr><th>Item</th><th className="right">Sets</th><th className="right">Pcs/set</th><th>Colours / Sizes</th><th className="right">Bill ₹/pc</th><th className="right">Cost Rs/pc</th><th className="right">Expected Rs/pc</th><th className="right">MRP Rs/pc</th></tr></thead>
+          <thead><tr><th>Item</th><th className="right">Sets</th><th className="right">Pcs/set</th><th>Colours / Sizes</th><th className="right">Bill ₹/pc</th><th className="right">Cost Rs/pc</th><th className="right">Expected Rs/pc</th></tr></thead>
           <tbody>{g.items.map((i) => (
             <tr key={i.id}><td>{i.name}<div className="muted small">{i.code}</div></td><td className="right">{i.sets}{i.extra_pcs > 0 && <div className="muted small">+{i.extra_pcs} extra pcs</div>}{i.extra_sets > 0 && <div className="muted small">+{i.extra_sets} free sets</div>}{(i.short_sets > 0 || i.short_pcs > 0) && <div className="muted small">−{i.short_sets * i.pcs_per_set + i.short_pcs} pcs short</div>}</td><td className="right">{i.pcs_per_set}</td><td>{i.colors_count || '—'} / {i.sizes || '—'}</td>
-              <td className="right">{money(i.cost_inr_per_set / (i.pcs_per_set || 1))}</td><td className="right">{money(i.landed_per_pcs_lkr)}</td><td className="right">{money(i.expected_per_set / (i.pcs_per_set || 1))}</td><td className="right">{money(i.mrp_per_set / (i.pcs_per_set || 1))}</td></tr>
+              <td className="right">{money(i.cost_inr_per_set / (i.pcs_per_set || 1))}</td><td className="right">{money(i.landed_per_pcs_lkr)}</td><td className="right">{money(i.expected_per_set / (i.pcs_per_set || 1))}</td></tr>
           ))}</tbody>
         </table>
         <div className="print-totals">

@@ -149,7 +149,7 @@ export default function POS() {
     if (!p) return;
     const unit = 'pcs';
     const u = unitInfo(p, unit, b);
-    setEntry({ q: p.code, pid: p.id, bid: b?.id ?? null, unit, qty: '1', price: String(u.expected || u.mrp || ''), disc_pct: '' });
+    setEntry({ q: p.code, pid: p.id, bid: b?.id ?? null, unit, qty: '1', price: String(u.expected || ''), disc_pct: '' });
     setHi(0);
     if (freePcs(p, b) <= 0) toast(`"${p.name}"${b ? ` (${b.ref})` : ''} has no stock left`, 'error');
     focus('tQty');
@@ -249,20 +249,20 @@ export default function POS() {
 
   /* ---------- totals ---------- */
   const T = useMemo(() => {
-    let sub = 0, lineDisc = 0, cost = 0, mrp = 0, pcs = 0;
+    let sub = 0, lineDisc = 0, cost = 0, pcs = 0;
     const rows = lines.map((l) => {
       const p = byId[l.product_id];
       if (!p) return null;
       const b = batchOf(p.id, l.batch_id);
       const u = unitInfo(p, l.unit, b);
       const c = lineCalc(l);
-      sub += c.gross; lineDisc += c.disc; cost += u.cost * n(l.qty); mrp += u.mrp * n(l.qty); pcs += n(l.qty) * u.per;
+      sub += c.gross; lineDisc += c.disc; cost += u.cost * n(l.qty); pcs += n(l.qty) * u.per;
       return { ...l, p, b, u, ...c, under: u.cost > 0 && c.net < u.cost };
     });
     const afterLines = sub - lineDisc;
     const bd = String(billDisc).trim().endsWith('%') ? (afterLines * n(String(billDisc).replace('%', ''))) / 100 : n(billDisc);
     const net = r2(afterLines - bd);
-    return { rows, sub: r2(sub), lineDisc: r2(lineDisc), billDisc: r2(bd), net, cost: r2(cost), gp: r2(net - cost), saved: r2(mrp - net), pcs };
+    return { rows, sub: r2(sub), lineDisc: r2(lineDisc), billDisc: r2(bd), net, cost: r2(cost), gp: r2(net - cost), pcs };
   }, [lines, byId, billDisc]);
   const owed = customer?.balance || 0;
   const overLimit = customer && customer.credit_limit > 0 && owed + T.net > customer.credit_limit;
@@ -421,8 +421,6 @@ export default function POS() {
             onChange={(e) => setEntry({ ...entry, qty: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tQty')} />
         </label>
         {showCost && <div className="f-ro"><span>COST</span><div className="till-ro cost">{cur ? money(eu.cost) : '—'}</div></div>}
-        <div className="f-ro"><span>MRP</span>
-          <div className="till-ro click" onClick={() => cur && setEntry({ ...entry, price: String(eu.mrp) })} title="Use MRP">{cur ? money(eu.mrp) : '—'}</div></div>
         <div className="f-ro"><span>EXPECTED</span>
           <div className="till-ro click exp" onClick={() => cur && setEntry({ ...entry, price: String(eu.expected) })} title="Use the expected price">{cur ? money(eu.expected) : '—'}</div></div>
         <label className="f-price"><span>LAST PRICE</span>
@@ -442,7 +440,7 @@ export default function POS() {
         {hitRows.length > 0 && (
           <div className="till-hits">
             <table>
-              <thead><tr><th>CODE</th><th>ITEM</th><th>STOCK FROM</th><th>SIZES</th><th className="n">IN STOCK</th><th className="n">COST / PC</th><th className="n">EXPECTED / PC</th><th className="n">MRP / PC</th></tr></thead>
+              <thead><tr><th>CODE</th><th>ITEM</th><th>STOCK FROM</th><th>SIZES</th><th className="n">IN STOCK</th><th className="n">COST / PC</th><th className="n">EXPECTED / PC</th></tr></thead>
               <tbody>
                 {hitRows.map(({ p, b, tier }, i) => {
                   const u = unitInfo(p, 'pcs', b);
@@ -457,7 +455,6 @@ export default function POS() {
                       <td className={`n ${stock <= 0 ? 'neg' : !many && stock < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{stock <= 0 ? 'none' : pcsText(stock)}</td>
                       <td className="n cost">{money(u.costPc)}</td>
                       <td className="p">{money(u.expectedPc)}</td>
-                      <td className="n">{money(u.mrpPc)}</td>
                     </tr>
                   );
                 })}
@@ -471,7 +468,7 @@ export default function POS() {
       <div className="till-main">
         <div className="till-lines" ref={billRef}>
           <table className="till-tbl">
-            <thead><tr><th className="c">#</th><th className="c">CODE</th><th>ITEM</th><th className="n">QTY (PCS)</th><th className="n">MRP</th><th className="n">PRICE</th><th className="n">DIS</th><th className="n">AMOUNT</th><th className="x"></th></tr></thead>
+            <thead><tr><th className="c">#</th><th className="c">CODE</th><th>ITEM</th><th className="n">QTY (PCS)</th><th className="n">EXPECTED</th><th className="n">PRICE</th><th className="n">DIS</th><th className="n">AMOUNT</th><th className="x"></th></tr></thead>
             <tbody>
               {T.rows.length === 0 && <tr><td colSpan={9} className="till-empty">Scan or key an item code above. The newest line sits at the top.</td></tr>}
               {T.rows.map((r, i) => r && (
@@ -486,7 +483,7 @@ export default function POS() {
                   <td className="n q">{edit?.i === i
                     ? <input id="lnQty" className="ln-in" inputMode="decimal" value={edit.qty} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} onKeyDown={editKey} onFocus={(e) => e.target.select()} />
                     : <b>{r.qty}</b>}</td>
-                  <td className="n mrp">{money(r.u.mrp)}</td>
+                  <td className="n mrp">{money(r.u.expected)}</td>
                   <td className={`n pr ${showCost && r.under ? 'under' : ''}`}>{edit?.i === i
                     ? <input id="lnPrice" className="ln-in" inputMode="decimal" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} onKeyDown={editKey} onFocus={(e) => e.target.select()} />
                     : money(r.price)}
@@ -515,7 +512,6 @@ export default function POS() {
               <input id="tBillDisc" value={billDisc} placeholder="0 or 5%" onFocus={(e) => e.target.select()} onChange={(e) => setBillDisc(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); toCode(); } }} /></div>
             {T.sub > 0 && (T.lineDisc || T.billDisc) > 0 && <div className="sum-line faint"><span>Total discount</span><b>{(((T.lineDisc + T.billDisc) / T.sub) * 100).toFixed(2)}%</b></div>}
-            {T.saved > 0 && <div className="sum-line saved"><span>Saves vs MRP</span><b>{money(T.saved)}</b></div>}
           </div>
           <div className="sum-net"><span>NET TOTAL</span><b>{money(T.net)}</b></div>
           {showCost && lines.length > 0 && <div className={`sum-gp ${T.gp < 0 ? 'neg' : ''}`}><span>GP</span><b>{money(T.gp)}</b><i>{pct(margin(T.net, T.cost))}</i></div>}

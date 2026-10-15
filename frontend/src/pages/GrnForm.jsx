@@ -208,14 +208,13 @@ export default function GrnForm() {
     setTimeout(() => document.querySelector('.item-entry')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   };
 
-  // Selling price & MRP follow the cost automatically (Settings → Price & billing) until you type your own
+  // The expected selling price follows the cost automatically (Settings → Price & billing) until you type your own
   useEffect(() => {
     const withAuto = (it, c) => {
       const auto = c && autoPrices(c.landed_per_pcs_lkr, c.pcs_per_set, rules);
       if (!auto) return it;
       const patch = {};
       if (!it.expectedManual && n(it.expected_per_pcs) !== auto.expected_per_pcs) patch.expected_per_pcs = auto.expected_per_pcs;
-      if (!it.mrpManual && n(it.mrp_per_pcs) !== auto.mrp_per_pcs) patch.mrp_per_pcs = auto.mrp_per_pcs;
       return Object.keys(patch).length ? { ...it, ...patch } : it;
     };
     setG((x) => {
@@ -569,7 +568,7 @@ export default function GrnForm() {
                     </div>
                   </div>
 
-                  {/* 5 · selling price & MRP — automatic from Settings → Price & billing, or typed in */}
+                  {/* 5 · expected selling price — automatic from Settings → Price & billing, or typed in (wholesale only: no MRP) */}
                   {(() => {
                     const auto = autoPrices(c.landed_per_pcs_lkr, c.pcs_per_set, rules);
                     const priceHint = (manual, key, pctRule) => {
@@ -583,13 +582,10 @@ export default function GrnForm() {
                     const perSet = (v) => (n(v) > 0 && c.pcs_per_set > 1 ? <> · {lkr(n(v) * c.pcs_per_set)} a set</> : null);
                     return (
                       <div className="item-fields">
-                        <Field label="Expected selling price / piece (Rs)" className="span-3"
+                        <Field label="Expected selling price / piece (Rs)" className="span-6"
                           hint={<>{priceHint(it.expectedManual, 'expected', rules.selling)}{perSet(it.expected_per_pcs)}
                             {c.landed_per_pcs_lkr > 0 && n(it.expected_per_pcs) > 0 && <span className={m < 0 ? 'text-red' : m < 15 ? 'text-amber' : 'text-green'}> · margin {pct(m)}</span>}</>}>
                           <NumInput value={it.expected_per_pcs} onChange={(v) => updItem(it.key, { expected_per_pcs: v, expectedManual: true })} placeholder="0.00" />
-                        </Field>
-                        <Field label="MRP / piece (Rs)" className="span-3" hint={<>{priceHint(it.mrpManual, 'mrp', rules.mrp)}{perSet(it.mrp_per_pcs)}</>}>
-                          <NumInput value={it.mrp_per_pcs} onChange={(v) => updItem(it.key, { mrp_per_pcs: v, mrpManual: true })} placeholder="0.00" />
                         </Field>
                       </div>
                     );

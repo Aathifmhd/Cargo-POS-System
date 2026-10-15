@@ -139,7 +139,7 @@ function Rules() {
   const list = [
     ['Customers', 'Changing credit days or old balance · making inactive · deleting · deleting a payment'],
     ['Billing', 'Selling below cost price · cancelling a bill'],
-    ['Stock & prices', 'Changing expected price, MRP or pieces per set · stock corrections · adding a product manually · deleting a product'],
+    ['Stock & prices', 'Changing expected price or pieces per set · stock corrections · adding a product manually · deleting a product'],
     ['Suppliers', 'Changing credit days, old balance or bank details · deleting · deleting a payment'],
     ['Shipments', 'Deleting a GRN'],
     ['System', 'Changing settings · downloading a full backup'],

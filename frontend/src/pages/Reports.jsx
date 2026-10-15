@@ -132,15 +132,14 @@ function StockReport() {
       <div className="stats">
         <Stat icon="box" label="Stock at cost" value={lkr(t.cost)} />
         <Stat icon="tag" tone="green" label="At expected price" value={lkr(t.exp)} sub={`Profit ${lkr(t.exp - t.cost)}`} />
-        <Stat icon="layers" tone="blue" label="At MRP" value={lkr(t.mrp)} />
       </div>
       <Card title="By category" pad={false}>
         <div className="table-wrap"><table className="table">
-          <thead><tr><th>Category</th><th className="right">Products</th><th className="right">Pieces</th><th className="right">Cost value</th><th className="right">Expected value</th><th className="right">MRP value</th></tr></thead>
+          <thead><tr><th>Category</th><th className="right">Products</th><th className="right">Pieces</th><th className="right">Cost value</th><th className="right">Expected value</th></tr></thead>
           <tbody>{d.categories.map((c) => (
-            <tr key={c.category}><td className="strong">{c.category}</td><td className="right">{c.products}</td><td className="right">{int(c.pcs)}</td><td className="right">{money(c.cost_value)}</td><td className="right">{money(c.expected_value)}</td><td className="right">{money(c.mrp_value)}</td></tr>
+            <tr key={c.category}><td className="strong">{c.category}</td><td className="right">{c.products}</td><td className="right">{int(c.pcs)}</td><td className="right">{money(c.cost_value)}</td><td className="right">{money(c.expected_value)}</td></tr>
           ))}</tbody>
-          <tfoot><tr><td>Total</td><td /><td /><td className="right">{money(t.cost)}</td><td className="right">{money(t.exp)}</td><td className="right">{money(t.mrp)}</td></tr></tfoot>
+          <tfoot><tr><td>Total</td><td /><td /><td className="right">{money(t.cost)}</td><td className="right">{money(t.exp)}</td></tr></tfoot>
         </table></div>
       </Card>
       <Card title="Slow moving — no sales in 60 days" pad={false}>

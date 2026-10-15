@@ -24,14 +24,13 @@ function SaleDetails({ s }) {
         <Card title="Items" pad={false}>
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Product</th><th className="right">Qty</th><th className="right">Price</th><th className="right">MRP</th><th className="right">Expected</th><th className="right">Cost</th><th className="right">Margin</th><th className="right">Amount</th></tr></thead>
+              <thead><tr><th>Product</th><th className="right">Qty</th><th className="right">Price</th><th className="right">Expected</th><th className="right">Cost</th><th className="right">Margin</th><th className="right">Amount</th></tr></thead>
               <tbody>
                 {s.items.map((i) => (
                   <tr key={i.id}>
                     <td><b>{i.name}</b><div className="sub">{i.code}</div></td>
                     <td className="right nowrap">{int(i.pcs)} pcs</td>
                     <td className="right">{money(i.price / (i.pcs / i.qty || 1))}</td>
-                    <td className="right muted">{money(i.mrp_per_unit / (i.pcs / i.qty || 1))}</td>
                     <td className="right muted">{money(i.expected_per_unit / (i.pcs / i.qty || 1))}</td>
                     <td className="right muted">{money(i.cost_per_unit / (i.pcs / i.qty || 1))}</td>
                     <td className={`right ${i.price < i.cost_per_unit ? 'text-red' : 'text-green'}`}>{pct(margin(i.price, i.cost_per_unit))}</td>

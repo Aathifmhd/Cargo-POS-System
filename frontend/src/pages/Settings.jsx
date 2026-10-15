@@ -18,7 +18,7 @@ const GROUPS = [
     heading: 'Stock & pricing',
     items: [
       { id: 'catalog', icon: 'layers', label: 'Categories & products', desc: 'Everything here feeds the Category, Products and Sizes choices on Receive Goods.' },
-      { id: 'price', icon: 'tag', label: 'Price & billing', desc: 'How Receive Goods works out the selling price and MRP from the cost.' },
+      { id: 'price', icon: 'tag', label: 'Price & billing', desc: 'How Receive Goods works out the expected selling price from the cost.' },
       { id: 'pricing', icon: 'chart', label: 'Exchange rate', desc: 'The fixed rate all costs use, and the live INR rate for reference.' },
     ],
   },
@@ -120,9 +120,6 @@ export default function Settings() {
                     <Field label="Expected selling price = cost +" hint="Added to the cost per piece">
                       <div className="input-affix"><span>+%</span><NumInput value={f.selling_markup_percent} onChange={set('selling_markup_percent')} /></div>
                     </Field>
-                    <Field label="MRP = cost +" hint="Added to the cost per piece">
-                      <div className="input-affix"><span>+%</span><NumInput value={f.mrp_markup_percent} onChange={set('mrp_markup_percent')} /></div>
-                    </Field>
                   </div>
                   <Field label="Round prices up to the nearest" hint="Per piece, e.g. Rs 343 → Rs 350">
                     <select className="input" value={f.price_round_to || '1'} onChange={set('price_round_to')} style={{ maxWidth: 220 }}>
@@ -133,11 +130,10 @@ export default function Settings() {
                     <div className="price-example">
                       <span>Example: cost <b>{lkr(250)}</b> a piece</span>
                       <span>→ selling price <b>{lkr(sample.expected_per_pcs)}</b></span>
-                      <span>→ MRP <b>{lkr(sample.mrp_per_pcs)}</b></span>
                     </div>
                   )}
-                  <div className="alert alert-blue small"><Icon name="info" size={16} /> On Receive Goods, the selling price and MRP fill in by themselves from each item's cost. You can still type your own price for any item; it then stays as you typed it.</div>
-                  <SaveBar keys={['selling_markup_percent', 'mrp_markup_percent', 'price_round_to']} />
+                  <div className="alert alert-blue small"><Icon name="info" size={16} /> On Receive Goods, the expected selling price fills in by itself from each item's cost. You can still type your own price for any item; it then stays as you typed it.</div>
+                  <SaveBar keys={['selling_markup_percent', 'price_round_to']} />
                 </div>
               );
             })()}

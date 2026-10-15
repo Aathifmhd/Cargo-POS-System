@@ -59,7 +59,7 @@ export default function Stock() {
         {loading && !data ? <Loading /> : rows.length === 0 ? <Empty title="No products here" text="Products are created automatically when you receive goods." /> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Code</th><th>Product</th><th>Pack</th><th>In stock</th><th className="right">Cost/pc</th><th className="right">Expected/pc</th><th className="right">MRP/pc</th><th className="right">Margin</th><th className="right">Stock value</th></tr></thead>
+              <thead><tr><th>Code</th><th>Product</th><th>Pack</th><th>In stock</th><th className="right">Cost/pc</th><th className="right">Expected/pc</th><th className="right">Margin</th><th className="right">Stock value</th></tr></thead>
               <tbody>
                 {rows.flatMap((p) => {
                   const low = p.stock_pcs < p.reorder_sets * p.pcs_per_set;
@@ -71,7 +71,6 @@ export default function Stock() {
                     const pcs = b ? b.left_pcs : p.stock_pcs;
                     const cost = b ? b.cost_per_pcs : p.cost_per_pcs;
                     const exp = b ? b.expected_per_pcs || p.expected_per_set / p.pcs_per_set : p.expected_per_set / p.pcs_per_set;
-                    const mrp = b ? b.mrp_per_pcs || p.mrp_per_set / p.pcs_per_set : p.mrp_per_set / p.pcs_per_set;
                     return (
                       <tr key={`${p.id}-${b?.id ?? 0}`} className={`click ${b && k > 0 ? 'batch-row' : ''}`} onClick={() => setOpen(p.id)}>
                         <td className="muted strong">{p.code}</td>
@@ -86,7 +85,6 @@ export default function Stock() {
                         </td>
                         <td className="right">{money(cost)}</td>
                         <td className="right strong">{money(exp)}</td>
-                        <td className="right">{money(mrp)}</td>
                         <td className={`right ${margin(exp, cost) < 0 ? 'text-red' : ''}`}>{pct(margin(exp, cost))}</td>
                         <td className="right">{money(pcs * cost)}</td>
                       </tr>
@@ -153,7 +151,7 @@ function ProductModal({ id, categories, onClose, onChanged }) {
           </div>
           {(p.batches || []).length > 0 && (
             <Card title="Stock by cost (batches)" pad={false}>
-              <table className="table"><thead><tr><th>From</th><th>Date</th><th className="right">In stock</th><th className="right">Cost / pc</th><th className="right">Expected / pc</th><th className="right">MRP / pc</th></tr></thead>
+              <table className="table"><thead><tr><th>From</th><th>Date</th><th className="right">In stock</th><th className="right">Cost / pc</th><th className="right">Expected / pc</th></tr></thead>
                 <tbody>{p.batches.map((b, k) => (
                   <tr key={b.id}>
                     <td className="strong">{b.ref || 'Stock'} <CostBadge tier={costTiers(p.batches)[b.id]} /></td>
@@ -161,7 +159,6 @@ function ProductModal({ id, categories, onClose, onChanged }) {
                     <td className="right strong">{int(b.left_pcs)} pcs</td>
                     <td className="right">{money(b.cost_per_pcs)}</td>
                     <td className="right">{money(b.expected_per_pcs)}</td>
-                    <td className="right">{money(b.mrp_per_pcs)}</td>
                   </tr>
                 ))}</tbody></table>
             </Card>
@@ -243,7 +240,6 @@ function ProductModal({ id, categories, onClose, onChanged }) {
             <SizePicker value={f.sizes || ''} options={cat?.sizes} hint={`${f.name} ${f.category || ''}`} onChange={(sizes) => setF((x) => ({ ...x, sizes }))} />
           </div>
           <Field label="Expected price / piece (Rs)"><NumInput value={f.expected_pc} onChange={set('expected_pc')} /></Field>
-          <Field label="MRP / piece (Rs)"><NumInput value={f.mrp_pc} onChange={set('mrp_pc')} /></Field>
           <Field label="Re-order at (sets)"><NumInput value={f.reorder_sets} onChange={set('reorder_sets')} /></Field>
           {!id && <>
             <Field label="Cost / piece (Rs)" hint="Cost of old stock"><NumInput value={f.cost_pc} onChange={set('cost_pc')} /></Field>

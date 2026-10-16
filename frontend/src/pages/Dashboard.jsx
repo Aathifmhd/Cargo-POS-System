@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useApi, lkr, inr, int, niceDate, dueText, stockText, pct } from '../lib.js';
+import { useApi, lkr, inr, supMoney, int, niceDate, dueText, stockText, pct } from '../lib.js';
 import { Card, Icon, Loading, ErrorBox, Stat, StatusBadge, Badge } from '../components/ui.jsx';
 import { useSettings } from '../App.jsx';
 import FxBar from '../components/FxBar.jsx';
@@ -45,8 +45,8 @@ export default function Dashboard() {
       <div className="stats mt">
         <Stat icon="users" tone={d.receivables.overdue > 0 ? 'red' : 'default'} label="To collect" value={lkr(d.receivables.total)}
           sub={d.receivables.overdue > 0 ? `${lkr(d.receivables.overdue)} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=receivables')} />
-        <Stat icon="factory" tone={d.payables.overdue_inr > 0 ? 'red' : 'amber'} label="To pay suppliers" value={inr(d.payables.total_inr)}
-          sub={d.payables.overdue_inr > 0 ? `${inr(d.payables.overdue_inr)} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=payables')} />
+        <Stat icon="factory" tone={d.payables.overdue_inr > 0 ? 'red' : 'amber'} label="To pay suppliers" value={[d.payables.total_inr > 0 || !d.payables.total_lkr ? inr(d.payables.total_inr) : null, d.payables.total_lkr > 0 ? lkr(d.payables.total_lkr) : null].filter(Boolean).join(' + ')}
+          sub={d.payables.overdue_inr > 0 || d.payables.overdue_lkr > 0 ? `${[d.payables.overdue_inr > 0 && inr(d.payables.overdue_inr), d.payables.overdue_lkr > 0 && lkr(d.payables.overdue_lkr)].filter(Boolean).join(' + ')} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=payables')} />
         <Stat icon="box" label="Stock value (cost)" value={lkr(d.stock.cost_value)} sub={`Can sell for ${lkr(d.stock.expected_value)}`} onClick={() => navigate('/stock')} />
         <Stat icon="alert" tone={d.stock.low_count ? 'amber' : 'green'} label="Low stock items" value={int(d.stock.low_count)}
           sub={d.stock.low_count ? 'Need to re-order' : 'All good'} onClick={() => navigate('/stock?low=1')} />
@@ -92,7 +92,7 @@ export default function Dashboard() {
             d.payables.upcoming.map((b) => (
               <Link key={`${b.supplier_id}-${b.id}`} to={`/suppliers/${b.supplier_id}`} className="list-row">
                 <div><div className="t">{b.supplier_name}</div><div className="s">{b.grn_no} · {dueText(b.due_date)}</div></div>
-                <div className="right"><div className="t">{inr(b.balance)}</div><StatusBadge status={b.status} /></div>
+                <div className="right"><div className="t">{supMoney(b)(b.balance)}</div><StatusBadge status={b.status} /></div>
               </Link>
             ))}
         </Card>

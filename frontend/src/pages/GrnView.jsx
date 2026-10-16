@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, useApi, lkr, inr, money, niceDate, int, dueText, margin, pct } from '../lib.js';
+import { api, useApi, lkr, inr, supMoney, isLocalSup, money, niceDate, int, dueText, margin, pct } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, Modal, useToast } from '../components/ui.jsx';
 import { SupplierPaymentModal } from '../components/forms.jsx';
 
@@ -17,6 +17,8 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
 
   if (error) return modal ? <Modal title="GRN" onClose={onClose}><ErrorBox error={error} onRetry={reload} /></Modal> : <ErrorBox error={error} onRetry={reload} />;
   if (!g) return modal ? <Modal title="GRN" onClose={onClose}><Loading /></Modal> : <Loading />;
+  const cur = supMoney(g);   // ₹ for an Indian supplier's GRN, Rs for a local one
+  const local = isLocalSup(g);
 
   const del = async () => {
     if (!confirm(`Delete ${g.grn_no}? Its stock will be removed and its payments deleted. This cannot be undone.`)) return;
@@ -42,13 +44,13 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
       <div className="stats mb">
         <div className="stat"><div className="stat-text"><div className="stat-label">Supplier billed</div><div className="stat-value" style={{ fontSize: 17 }}>{g.supplier_bill_date ? niceDate(g.supplier_bill_date) : '—'}</div>{g.supplier_invoice_no && <div className="stat-sub">Invoice {g.supplier_invoice_no}</div>}</div></div>
         <div className="stat"><div className="stat-text"><div className="stat-label">Cargo</div><div className="stat-value" style={{ fontSize: 17 }}>{g.cargo_name || '—'}</div></div></div>
-        <div className="stat"><div className="stat-text"><div className="stat-label">Costing rate</div><div className="stat-value" style={{ fontSize: 17 }}>1 ₹ = Rs {g.exchange_rate.toFixed(4)}</div></div></div>
+        <div className="stat"><div className="stat-text"><div className="stat-label">{local ? 'Supplier' : 'Costing rate'}</div><div className="stat-value" style={{ fontSize: 17 }}>{local ? '🇱🇰 Local · bill in Rs' : '1 ₹ = Rs ' + g.exchange_rate.toFixed(4)}</div></div></div>
       </div>
 
       <div className="alert alert-blue mb">
         <Icon name="lock" />
-        <span>Costed at the fixed rate <b>Rs {g.exchange_rate.toFixed(2)} per ₹1</b> (Settings → Exchange rate). The live rate does not change it.
-          {g.balance_inr > 0 ? <> Still to pay the supplier: <b>{inr(g.balance_inr)}</b>.</> : <> The supplier bill is paid.</>}</span>
+        <span>{local ? <>A local purchase: the bill is in <b>Rs</b>, so there is no exchange rate.</> : <>Costed at the fixed rate <b>Rs {g.exchange_rate.toFixed(2)} per ₹1</b> (Settings → Exchange rate). The live rate does not change it.</>}
+          {g.balance_inr > 0 ? <> Still to pay the supplier: <b>{cur(g.balance_inr)}</b>.</> : <> The supplier bill is paid.</>}</span>
       </div>
 
       <div className="grn-layout">
@@ -56,7 +58,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
           <Card title="Items received" pad={false}>
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Product</th><th className="right">Received</th><th className="right">Bill ₹/pc</th><th className="right">Cost / piece</th><th className="right">Expected / piece</th><th className="right">Margin</th></tr></thead>
+                <thead><tr><th>Product</th><th className="right">Received</th><th className="right">Bill {g.currency === 'LKR' ? 'Rs' : '₹'}/pc</th><th className="right">Cost / piece</th><th className="right">Expected / piece</th><th className="right">Margin</th></tr></thead>
                 <tbody>
                   {g.items.map((i) => {
                     const pcs = Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + i.extra_pcs - i.short_pcs);
@@ -70,7 +72,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
                           {i.extra_sets > 0 && <div className="sub text-green">+ {int(i.extra_sets)} free sets</div>}
                           {(i.short_sets > 0 || i.short_pcs > 0) && <div className="sub text-red">− {int(i.short_sets * i.pcs_per_set + i.short_pcs)} pcs short</div>}
                         </td>
-                        <td className="right">{money(i.cost_inr_per_set / (i.pcs_per_set || 1))}<div className="sub">{inr(i.line_inr)}</div></td>
+                        <td className="right">{money(i.cost_inr_per_set / (i.pcs_per_set || 1))}<div className="sub">{cur(i.line_inr)}</div></td>
                         <td className="right strong">{lkr(i.landed_per_pcs_lkr)}{(i.cargo_lkr > 0 || i.other_lkr > 0) && <div className="sub">incl. {[i.cargo_per_pcs > 0 && `cargo ${lkr(i.cargo_per_pcs)}`, i.other_per_pcs > 0 && `other ${lkr(i.other_per_pcs)}`].filter(Boolean).join(' + ') || 'cargo'}/pc</div>}</td>
                         <td className="right">{lkr(per(i.expected_per_set))}</td>
                         <td className={`right ${margin(i.expected_per_set, i.landed_per_set_lkr) < 0 ? 'text-red' : 'text-green'}`}>{pct(margin(i.expected_per_set, i.landed_per_set_lkr))}</td>
@@ -98,7 +100,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
             </Card>
             <Card title="Supplier payments">
               {g.payments.length === 0 ? <p className="muted">No payment linked to this GRN yet.</p> : g.payments.map((p) => (
-                <div key={p.id} className="list-row"><div><div className="t">{p.method}</div><div className="s">{niceDate(p.date)} {p.reference ? `· ${p.reference}` : ''}</div></div><div className="right"><b>{inr(p.amount_inr)}</b><div className="s">{lkr(p.amount_lkr)}</div></div></div>
+                <div key={p.id} className="list-row"><div><div className="t">{p.method}</div><div className="s">{niceDate(p.date)} {p.reference ? `· ${p.reference}` : ''}</div></div><div className="right"><b>{cur(p.amount_inr)}</b>{!local && <div className="s">{lkr(p.amount_lkr)}</div>}</div></div>
               ))}
               <p className="muted small mt-s">Payments made without choosing a GRN are applied to the oldest bills first.</p>
             </Card>
@@ -109,9 +111,9 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
         <div className="stack">
           <Card title="Cost breakdown">
             <dl className="kv">
-              <dt>Goods</dt><dd>{inr(g.goods_inr)}</dd>
-              {g.cargo_charge_inr > 0 && <><dt>Cargo charge (₹)</dt><dd>{inr(g.cargo_charge_inr)}</dd></>}
-              <dt>Goods in LKR (× {g.exchange_rate.toFixed(2)})</dt><dd>{lkr(g.goods_inr * g.exchange_rate)}</dd>
+              <dt>Goods</dt><dd>{cur(g.goods_inr)}</dd>
+              {g.cargo_charge_inr > 0 && <><dt>Cargo charge (₹)</dt><dd>{cur(g.cargo_charge_inr)}</dd></>}
+              {!local && <><dt>Goods in LKR (× {g.exchange_rate.toFixed(2)})</dt><dd>{lkr(g.goods_inr * g.exchange_rate)}</dd></>}
               {g.cargo_charge_inr > 0 && <><dt>Cargo in LKR (× {g.exchange_rate.toFixed(2)})</dt><dd>{lkr(g.cargo_charge_inr * g.exchange_rate)}</dd></>}
               <dt>Cargo charge</dt><dd>{lkr(g.expenses_lkr - (g.other_lkr || 0))}</dd>
               {g.other_lkr > 0 && <><dt>Other expenses</dt><dd>{lkr(g.other_lkr)}</dd></>}
@@ -122,9 +124,9 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
           </Card>
           <Card title="Supplier account">
             <dl className="kv">
-              <dt>Payable for this GRN</dt><dd>{inr(g.payable_inr)}</dd>
-              <dt>Paid</dt><dd className="text-green">{inr(g.paid_inr)}</dd>
-              <dt className="total">Balance</dt><dd className={`total ${g.balance_inr > 0 ? 'text-red' : ''}`}>{inr(g.balance_inr)}</dd>
+              <dt>Payable for this GRN</dt><dd>{cur(g.payable_inr)}</dd>
+              <dt>Paid</dt><dd className="text-green">{cur(g.paid_inr)}</dd>
+              <dt className="total">Balance</dt><dd className={`total ${g.balance_inr > 0 ? 'text-red' : ''}`}>{cur(g.balance_inr)}</dd>
               <dt>Due date</dt><dd>{niceDate(g.due_date)}</dd>
             </dl>
             <Link to={`/suppliers/${g.supplier_id}`} className="btn btn-block mt">Open {g.supplier_name}</Link>

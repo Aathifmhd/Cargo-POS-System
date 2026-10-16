@@ -73,14 +73,14 @@ export async function inParallel(...fns) {
 /* ---------------- defaults for new documents (what the old table columns defaulted to) ---------------- */
 export const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');   // "YYYY-MM-DD HH:MM:SS" (UTC)
 const DEFAULTS = {
-  suppliers: { contact_person: null, phone: null, whatsapp: null, email: null, city: null, state: null, address: null, gst_no: null,
+  suppliers: { origin: 'india', contact_person: null, phone: null, whatsapp: null, email: null, city: null, state: null, address: null, gst_no: null,
     bank_details: null, credit_days: 30, opening_balance_inr: 0, notes: null, active: 1 },
   customers: { shop_name: null, phone: null, whatsapp: null, city: null, address: null, credit_limit: 0, credit_days: 30,
     opening_balance: 0, notes: null, active: 1 },
   products: { category: null, subtype: null, pname: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, supplier_id: null,
     cost_per_pcs: 0, last_cost_per_pcs: 0, mrp_per_set: 0, expected_per_set: 0, stock_pcs: 0, reorder_sets: 0, active: 1,
     opening_pcs: 0, opening_cost_per_pcs: 0 },
-  grns: { supplier_invoice_no: null, supplier_bill_date: null, cargo_name: null, bale_no: null, lr_no: null, goods_inr: 0, cargo_charge_inr: 0, cargo_in_supplier_bill: 0,
+  grns: { currency: 'INR', supplier_invoice_no: null, supplier_bill_date: null, cargo_name: null, bale_no: null, lr_no: null, goods_inr: 0, cargo_charge_inr: 0, cargo_in_supplier_bill: 0,
     payable_inr: 0, expenses_lkr: 0, other_lkr: 0, total_lkr: 0, total_sets: 0, total_pcs: 0, payment_type: 'credit', due_date: null, notes: null,
     effective_rate: null, settled_at: null },
   grn_expenses: { category: null, amount_lkr: 0 },

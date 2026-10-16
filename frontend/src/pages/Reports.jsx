@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useApi, lkr, inr, money, niceDate, int, pct, margin, today, addDays, stockText } from '../lib.js';
+import { useApi, lkr, inr, bothMoney, supMoney, money, niceDate, int, pct, margin, today, addDays, stockText } from '../lib.js';
 import { PageHeader, Card, Loading, ErrorBox, Stat, Tabs, Segmented, Icon } from '../components/ui.jsx';
 
 const PRESETS = {
@@ -90,23 +90,23 @@ function ShipmentReport({ from, to }) {
     <div className="stack">
       <div className="stats">
         <Stat icon="truck" label="Shipments" value={d.grns.length} />
-        <Stat icon="layers" tone="blue" label="Goods bought" value={inr(t.goods)} />
+        <Stat icon="layers" tone="blue" label="Goods bought" value={bothMoney(d.grns, (g) => g.goods_inr)} sub="₹ from India · Rs from local suppliers" />
         <Stat icon="cash" tone="amber" label="Cargo charges" value={lkr(t.cargo + t.exp)} sub={t.total ? `${pct(((t.cargo + t.exp) / t.total) * 100)} of total cost` : ''} />
         <Stat icon="box" tone="green" label="Total cost" value={lkr(t.total)} />
       </div>
       <Card title="By cargo company" pad={false}>
         <div className="table-wrap"><table className="table">
-          <thead><tr><th>Cargo</th><th className="right">Shipments</th><th className="right">Pieces</th><th className="right">Goods ₹</th><th className="right">Cargo (Rs)</th><th className="right">Cargo per piece</th><th className="right">Cost LKR</th></tr></thead>
+          <thead><tr><th>Cargo</th><th className="right">Shipments</th><th className="right">Pieces</th><th className="right">Goods</th><th className="right">Cargo (Rs)</th><th className="right">Cargo per piece</th><th className="right">Cost LKR</th></tr></thead>
           <tbody>{d.byCargo.map((c) => (
-            <tr key={c.cargo_name}><td className="strong">{c.cargo_name}</td><td className="right">{c.shipments}</td><td className="right">{int(c.pcs)}</td><td className="right">{money(c.goods_inr)}</td><td className="right">{money(c.cargo_lkr)}</td><td className="right">{lkr(c.pcs ? c.cargo_lkr / c.pcs : 0)}</td><td className="right strong">{money(c.total_lkr)}</td></tr>
+            <tr key={c.cargo_name}><td className="strong">{c.cargo_name}</td><td className="right">{c.shipments}</td><td className="right">{int(c.pcs)}</td><td className="right">{[c.goods_inr > 0 && inr(c.goods_inr), c.goods_local_lkr > 0 && lkr(c.goods_local_lkr)].filter(Boolean).join(' + ') || '—'}</td><td className="right">{money(c.cargo_lkr)}</td><td className="right">{lkr(c.pcs ? c.cargo_lkr / c.pcs : 0)}</td><td className="right strong">{money(c.total_lkr)}</td></tr>
           ))}</tbody>
         </table></div>
       </Card>
       <Card title="By supplier" pad={false}>
         <div className="table-wrap"><table className="table">
-          <thead><tr><th>Supplier</th><th className="right">Shipments</th><th className="right">Goods ₹</th><th className="right">Avg rate</th><th className="right">Cost LKR</th></tr></thead>
+          <thead><tr><th>Supplier</th><th className="right">Shipments</th><th className="right">Goods</th><th className="right">Avg rate</th><th className="right">Cost LKR</th></tr></thead>
           <tbody>{d.bySupplier.map((s) => (
-            <tr key={s.supplier_name}><td className="strong">{s.supplier_name}</td><td className="right">{s.shipments}</td><td className="right">{money(s.goods_inr)}</td><td className="right">{s.avg_rate.toFixed(2)}</td><td className="right strong">{money(s.total_lkr)}</td></tr>
+            <tr key={s.supplier_name}><td className="strong">{s.supplier_name}</td><td className="right">{s.shipments}</td><td className="right">{supMoney(s)(s.goods_inr)}</td><td className="right">{s.currency === 'LKR' ? <span className="muted">Local · Rs</span> : s.avg_rate.toFixed(2)}</td><td className="right strong">{money(s.total_lkr)}</td></tr>
           ))}</tbody>
         </table></div>
       </Card>
@@ -114,7 +114,7 @@ function ShipmentReport({ from, to }) {
         <div className="table-wrap"><table className="table">
           <thead><tr><th>GRN</th><th>Date</th><th>Supplier</th><th>Cargo</th><th className="right">Rate</th><th className="right">Cost LKR</th></tr></thead>
           <tbody>{d.grns.map((g) => (
-            <tr key={g.id}><td><Link to={`/grn/${g.id}`}>{g.grn_no}</Link></td><td>{niceDate(g.date)}</td><td>{g.supplier_name}</td><td>{g.cargo_name || '—'}</td><td className="right">{g.exchange_rate}</td><td className="right strong">{money(g.total_lkr)}</td></tr>
+            <tr key={g.id}><td><Link to={`/grn/${g.id}`}>{g.grn_no}</Link></td><td>{niceDate(g.date)}</td><td>{g.supplier_name}</td><td>{g.cargo_name || '—'}</td><td className="right">{g.currency === 'LKR' ? <span className="muted">Local · Rs</span> : g.exchange_rate}</td><td className="right strong">{money(g.total_lkr)}</td></tr>
           ))}</tbody>
         </table></div>
       </Card>

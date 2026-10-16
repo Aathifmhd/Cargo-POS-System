@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { api, n, r2, today, lkr, inr, PAY_METHODS_CUSTOMER, PAY_METHODS_SUPPLIER, isAdmin, isSuper } from '../lib.js';
-import { Modal, Field, NumInput, useToast, Icon } from './ui.jsx';
+import { api, n, r2, today, lkr, inr, supMoney, isLocalSup, PAY_METHODS_CUSTOMER, PAY_METHODS_SUPPLIER, isAdmin, isSuper } from '../lib.js';
+import { Modal, Field, NumInput, useToast, Icon, Segmented } from './ui.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 
 function useForm(initial) {
@@ -47,10 +47,10 @@ export function CustomerForm({ customer, initialName = '', onClose, onSaved }) {
 }
 
 /* ================= SUPPLIER ================= */
-export function SupplierForm({ supplier, initialName = '', onClose, onSaved }) {
+export function SupplierForm({ supplier, initialName = '', initialOrigin = 'india', onClose, onSaved }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const [f, set] = useForm(supplier || { name: initialName, contact_person: '', phone: '', whatsapp: '', email: '', city: '', state: '', address: '', gst_no: '', bank_details: '', credit_days: 30, opening_balance_inr: 0, notes: '', active: 1 });
+  const [f, set] = useForm(supplier ? { ...supplier, origin: supplier.origin || 'india' } : { origin: initialOrigin, name: initialName, contact_person: '', phone: '', whatsapp: '', email: '', city: '', state: '', address: '', gst_no: '', bank_details: '', credit_days: 30, opening_balance_inr: 0, notes: '', active: 1 });
   const save = async (e) => {
     e.preventDefault();
     setBusy(true);
@@ -61,21 +61,27 @@ export function SupplierForm({ supplier, initialName = '', onClose, onSaved }) {
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
   return (
-    <Modal size="lg" title={supplier ? 'Edit supplier' : 'New supplier'} subtitle="Your suppliers in India" onClose={onClose}
+    <Modal size="lg" title={supplier ? 'Edit supplier' : 'New supplier'} subtitle={f.origin === 'local' ? 'A supplier in Sri Lanka — bills in Rs' : 'A supplier in India — bills in ₹'} onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="sup-form" disabled={busy}>Save supplier</button></>}>
       <form id="sup-form" onSubmit={save} className="grid grid-3">
+        <Field label="Supplier type" className="span-3" hint={supplier ? 'A supplier with GRNs or payments keeps its type' : 'Decides the bill currency on Receive Goods'}>
+          <Segmented value={f.origin} onChange={set('origin')} options={[
+            { value: 'india', label: '🇮🇳 Indian supplier (₹ INR)' },
+            { value: 'local', label: '🇱🇰 Local supplier (Rs LKR)' },
+          ]} />
+        </Field>
         <Field label="Supplier / company name" required className="span-2"><input className="input" autoFocus value={f.name} onChange={set('name')} /></Field>
         <Field label="Contact person"><input className="input" value={f.contact_person || ''} onChange={set('contact_person')} /></Field>
-        <Field label="Phone"><input className="input" value={f.phone || ''} onChange={set('phone')} placeholder="+91" /></Field>
-        <Field label="WhatsApp"><input className="input" value={f.whatsapp || ''} onChange={set('whatsapp')} placeholder="+91" /></Field>
+        <Field label="Phone"><input className="input" value={f.phone || ''} onChange={set('phone')} placeholder={f.origin === 'local' ? '07X XXX XXXX' : '+91'} /></Field>
+        <Field label="WhatsApp"><input className="input" value={f.whatsapp || ''} onChange={set('whatsapp')} placeholder={f.origin === 'local' ? '07X XXX XXXX' : '+91'} /></Field>
         <Field label="Email"><input className="input" type="email" value={f.email || ''} onChange={set('email')} /></Field>
-        <Field label="City"><input className="input" value={f.city || ''} onChange={set('city')} placeholder="Surat, Tiruppur…" /></Field>
+        <Field label="City"><input className="input" value={f.city || ''} onChange={set('city')} placeholder={f.origin === 'local' ? 'Colombo, Kandy…' : 'Surat, Tiruppur…'} /></Field>
         <Field label="State"><input className="input" value={f.state || ''} onChange={set('state')} /></Field>
-        <Field label="GST number"><input className="input" value={f.gst_no || ''} onChange={set('gst_no')} /></Field>
+        <Field label={f.origin === 'local' ? 'VAT / BR number' : 'GST number'}><input className="input" value={f.gst_no || ''} onChange={set('gst_no')} /></Field>
         <Field label="Address" className="span-2"><input className="input" value={f.address || ''} onChange={set('address')} /></Field>
         <Field label="Credit period (days)" hint="Default time to pay each GRN"><NumInput value={f.credit_days} onChange={set('credit_days')} /></Field>
-        <Field label="Bank / payment details" className="span-2"><textarea className="input" rows={2} value={f.bank_details || ''} onChange={set('bank_details')} placeholder="Bank, A/C no, IFSC, UPI…" /></Field>
-        {!supplier ? <Field label="Old balance to pay (₹ INR)" hint="Before starting this system"><NumInput value={f.opening_balance_inr} onChange={set('opening_balance_inr')} /></Field> : <div />}
+        <Field label="Bank / payment details" className="span-2"><textarea className="input" rows={2} value={f.bank_details || ''} onChange={set('bank_details')} placeholder={f.origin === 'local' ? 'Bank, branch, A/C no…' : 'Bank, A/C no, IFSC, UPI…'} /></Field>
+        {!supplier ? <Field label={f.origin === 'local' ? 'Old balance to pay (Rs)' : 'Old balance to pay (₹ INR)'} hint="Before starting this system"><NumInput value={f.opening_balance_inr} onChange={set('opening_balance_inr')} /></Field> : <div />}
         <Field label="Notes" className="span-2"><input className="input" value={f.notes || ''} onChange={set('notes')} /></Field>
         {supplier && <label className="check"><input type="checkbox" checked={!!f.active} onChange={set('active')} /> Active supplier</label>}
       </form>
@@ -135,8 +141,10 @@ export function SupplierPaymentModal({ supplier, bills = [], defaultGrnId, onClo
   const preset = bills.find((b) => b.id === defaultGrnId && b.balance > 0.009);
   const [f, set, setF] = useForm({ date: today(), grn_id: preset?.id ?? '', amount_inr: '', method: 'Bank transfer', reference: '', notes: '' });
   const [busy, setBusy] = useState(false);
-  // recorded at the fixed costing rate, like every cost
-  const rate = n(settings.costing_rate) || 3.5;
+  // recorded at the fixed costing rate, like every cost — a local supplier is paid in Rs (no rate)
+  const local = isLocalSup(supplier);
+  const rate = local ? 1 : n(settings.costing_rate) || 3.5;
+  const cur = supMoney(supplier);
 
   const save = async (e) => {
     e.preventDefault();
@@ -144,19 +152,19 @@ export function SupplierPaymentModal({ supplier, bills = [], defaultGrnId, onClo
     setBusy(true);
     try {
       await api.post(`/suppliers/${supplier.id}/payments`, { ...f, grn_id: f.grn_id || null });
-      toast(`Paid ${inr(f.amount_inr)} to ${supplier.name}`);
+      toast(`Paid ${cur(f.amount_inr)} to ${supplier.name}`);
       onSaved?.();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
 
   return (
-    <Modal title={`Pay ${supplier.name}`} subtitle="Money you pay the supplier, in Indian Rupees (₹)" onClose={onClose}
+    <Modal title={`Pay ${supplier.name}`} subtitle={local ? 'Money you pay the supplier, in Sri Lankan Rupees (Rs)' : 'Money you pay the supplier, in Indian Rupees (₹)'} onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" form="sp-form" disabled={busy}><Icon name="check" size={16} /> {busy ? 'Saving…' : n(f.amount_inr) > 0 ? `Make payment · ${inr(f.amount_inr)}` : 'Make payment'}</button></>}>
+        <button className="btn btn-primary" form="sp-form" disabled={busy}><Icon name="check" size={16} /> {busy ? 'Saving…' : n(f.amount_inr) > 0 ? `Make payment · ${cur(f.amount_inr)}` : 'Make payment'}</button></>}>
       <form id="sp-form" onSubmit={save} className="pay-form">
-        <BillAndAmount bills={bills} billKey="grn_id" billLabel={(b) => b.grn_no} f={f} setF={setF} set={set} money={inr}
-          amountKey="amount_inr" amountLabel="Amount paying (₹)" verb="paying"
-          amountHint={n(f.amount_inr) > 0 ? `= ${lkr(r2(n(f.amount_inr) * rate))} at Rs ${rate.toFixed(2)} per ₹1` : ''} />
+        <BillAndAmount bills={bills} billKey="grn_id" billLabel={(b) => b.grn_no} f={f} setF={setF} set={set} money={cur}
+          amountKey="amount_inr" amountLabel={local ? 'Amount paying (Rs)' : 'Amount paying (₹)'} verb="paying"
+          amountHint={!local && n(f.amount_inr) > 0 ? `= ${lkr(r2(n(f.amount_inr) * rate))} at Rs ${rate.toFixed(2)} per ₹1` : ''} />
         <PayStep title="How are you paying?">
           <select className="input" value={f.method} onChange={set('method')}>{PAY_METHODS_SUPPLIER.map((m) => <option key={m}>{m}</option>)}</select>
         </PayStep>

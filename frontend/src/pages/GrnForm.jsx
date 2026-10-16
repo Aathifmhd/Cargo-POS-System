@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api, n, r2, lkr, inr, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
+import { api, n, r2, lkr, inr, isLocalSup, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
 import { PageHeader, Card, Icon, Field, NumInput, Combobox, Segmented, useToast, Loading } from '../components/ui.jsx';
 import { SupplierForm } from '../components/forms.jsx';
 import SizePicker from '../components/SizePicker.jsx';
@@ -75,7 +75,7 @@ export default function GrnForm() {
       }
     } catch { /* ignore */ }
     return {
-      date: today(), supplier_id: null, supplier_invoice_no: '', supplier_bill_date: '', cargo_name: '',
+      origin: 'india', date: today(), supplier_id: null, supplier_invoice_no: '', supplier_bill_date: '', cargo_name: '',
       payment_type: 'credit', due_date: '', payment_method: 'Bank transfer', payment_reference: '', notes: '',
       expenses: [],   // older GRNs only: the cargo is now entered on each item
       items: [], entry: blankItem(), editingKey: null,
@@ -93,7 +93,7 @@ export default function GrnForm() {
     api.get(`/grns/${editId}`).then((d) => {
       const pp = (v, pps) => (n(v) > 0 ? r2(n(v) / Math.max(1, n(pps) || 1)) : '');
       setG({
-        date: d.date, supplier_id: d.supplier_id, supplier_invoice_no: d.supplier_invoice_no || '', supplier_bill_date: d.supplier_bill_date || '', cargo_name: d.cargo_name || '',
+        origin: d.currency === 'LKR' ? 'local' : 'india', date: d.date, supplier_id: d.supplier_id, supplier_invoice_no: d.supplier_invoice_no || '', supplier_bill_date: d.supplier_bill_date || '', cargo_name: d.cargo_name || '',
         payment_type: d.payment_type, due_date: d.due_date || '', payment_method: d.payments?.[0]?.method || 'Bank transfer', payment_reference: '', notes: d.notes || '',
         expenses: [],
         // an older GRN's shared cargo charges move onto its items (same costs)
@@ -122,6 +122,14 @@ export default function GrnForm() {
   }, []);
 
   const supplier = (suppliers || []).find((s) => s.id === g.supplier_id);
+  // Indian supplier (bill in ₹, costed at the fixed rate) or local supplier (bill in Rs, no exchange)
+  const local = (g.origin || 'india') === 'local';
+  const bill = local ? lkr : inr;   // the supplier bill's money
+  const supplierList = (suppliers || []).filter((s) => isLocalSup(s) === local);
+  const chooseOrigin = (origin) => setG((x) => {
+    const keep = (suppliers || []).find((s) => s.id === x.supplier_id);
+    return { ...x, origin, supplier_id: keep && isLocalSup(keep) === (origin === 'local') ? x.supplier_id : null, payment_method: origin === 'local' ? 'Cash' : 'Bank transfer' };
+  });
   // the due date follows the supplier's credit days — but a GRN loaded for editing keeps its own due date
   const keepDue = useRef(false);
   useEffect(() => {
@@ -131,7 +139,7 @@ export default function GrnForm() {
 
   // the bale's figures come from the added items only
   // every cost is worked out at the fixed costing rate (Settings → Exchange rate), never the live rate
-  const rate = n(settings.costing_rate) || 3.5;
+  const rate = local ? 1 : n(settings.costing_rate) || 3.5;   // a local bill is in Rs already
   const calc = useMemo(() => computeLanding({ ...g, exchange_rate: rate }), [g, rate]);
   // the entry card's own figures: worked out as if it were already in the list (charges are shared by value)
   const entryIdx = g.editingKey ? g.items.findIndex((i) => i.key === g.editingKey) : g.items.length;
@@ -338,12 +346,23 @@ export default function GrnForm() {
 
       <div className="grn-layout">
         <div className="stack">
+          {/* supplier type: decides the bill currency, the rate and the labels below */}
+          <label className="origin-pick">
+            <span className="origin-pick-label">Buying from</span>
+            <select className={`origin-badge origin-${local ? 'local' : 'india'}`} value={g.origin || 'india'} onChange={(e) => chooseOrigin(e.target.value)} disabled={Boolean(editId)}
+              title={editId ? 'A saved GRN keeps its supplier type' : 'Indian supplier: bill in ₹, costed at the fixed rate · Local supplier: bill in Rs, no exchange rate'}>
+              <option value="india">🇮🇳 Indian supplier (₹ INR)</option>
+              <option value="local">🇱🇰 Local supplier (Rs LKR)</option>
+            </select>
+            <span className="muted small">{local ? 'Bill in Rs · no exchange rate' : 'Bill in ₹ · costed at the fixed rate'}</span>
+          </label>
+
           {/* STEP 1 */}
           <Card title={<span className="step-title"><span className="step-no">1</span> Shipment details</span>}>
             <div className="grid grid-3">
               <Field label="Supplier" required>
-                <Combobox items={suppliers} value={g.supplier_id} onSelect={(s) => set('supplier_id')(s.id)} placeholder="Search supplier…"
-                  getSub={(s) => [s.city, s.balance_inr > 0 ? `to pay ${inr(s.balance_inr)}` : ''].filter(Boolean).join(' · ')}
+                <Combobox items={supplierList} value={g.supplier_id} onSelect={(s) => set('supplier_id')(s.id)} placeholder={local ? 'Search local supplier…' : 'Search Indian supplier…'}
+                  getSub={(s) => [s.city, s.balance_inr > 0 ? `to pay ${bill(s.balance_inr)}` : ''].filter(Boolean).join(' · ')}
                   onCreate={(name) => setNewSupplier(name)} createLabel={(q) => `Add new supplier “${q}”`} />
               </Field>
               <Field label="Supplier billed date" hint="The date on the supplier's bill">
@@ -524,9 +543,6 @@ export default function GrnForm() {
                       <div className="input input-static">{int(c.set_pcs)}</div>
                       <span className="field-hint">Sets × pieces per set</span>
                     </div>
-                    <Field label="Billed per piece (INR)" required hint="From the supplier's bill">
-                      <NumInput money value={it.cost_inr_per_pcs} onChange={(v) => updItem(it.key, { cost_inr_per_pcs: v })} placeholder="0.00" />
-                    </Field>
                   </div>
 
                   {/* 2 · what really came in the bale — folded away unless needed */}
@@ -569,8 +585,14 @@ export default function GrnForm() {
                               ...(count > 0 && (it.pcsAuto || !n(it.pcs_per_set)) ? { pcs_per_set: count, pcsAuto: true } : {}),
                             })} />
                         </div>
+                        {/* the supplier's price, after the sizes and before the cargo charge */}
+                        <div className="item-charges billed-row">
+                          <Field label={local ? 'Billed per piece (Rs)' : 'Billed per piece (INR)'} required hint="From the supplier's bill">
+                            <NumInput money value={it.cost_inr_per_pcs} onChange={(v) => updItem(it.key, { cost_inr_per_pcs: v })} placeholder="0.00" />
+                          </Field>
+                        </div>
                         <div className="item-charges">
-                          <Field label="Cargo charge / piece (Rs)" hint={total(it.cargo_per_pcs)}>
+                          <Field label={local ? 'Transport / piece (Rs)' : 'Cargo charge / piece (Rs)'} hint={total(it.cargo_per_pcs)}>
                             <NumInput money value={it.cargo_per_pcs ?? ''} onChange={(v) => updItem(it.key, { cargo_per_pcs: v, cargo_lkr: '' })} placeholder="0.00" />
                           </Field>
                           <Field label="Other expenses / piece (Rs)" hint={total(it.other_per_pcs)}>
@@ -584,7 +606,7 @@ export default function GrnForm() {
                   {/* 4 · cost */}
                   <div className="item-cost-row">
                     <div className="item-calc">
-                      <div className="calc-pill">Bill amount<b>{inr(c.line_inr)}</b><small>{int(c.billed_pcs)} pcs × {inr(c.billed_pcs ? c.line_inr / c.billed_pcs : 0)}</small></div>
+                      <div className="calc-pill">Bill amount<b>{bill(c.line_inr)}</b><small>{int(c.billed_pcs)} pcs × {bill(c.billed_pcs ? c.line_inr / c.billed_pcs : 0)}</small></div>
                       <div className="calc-pill hl">Cost / piece<b>{lkr(c.landed_per_pcs_lkr)}</b></div>
                     </div>
                   </div>
@@ -643,7 +665,9 @@ export default function GrnForm() {
             {g.payment_type === 'paid' && <Field label="Payment reference" className="mt"><input className="input" value={g.payment_reference} onChange={set('payment_reference')} /></Field>}
             <div className="alert alert-blue small mt">
               <Icon name="info" size={16} />
-              <span>All costs use the fixed rate <b>Rs {rate.toFixed(2)} per ₹1</b> (Settings → Exchange rate), paid now or on credit. The live rate does not change them.</span>
+              {local
+                ? <span>A local supplier bills in <b>Rs</b>, so there is no exchange rate: the bill price is the cost.</span>
+                : <span>All costs use the fixed rate <b>Rs {rate.toFixed(2)} per ₹1</b> (Settings → Exchange rate), paid now or on credit. The live rate does not change them.</span>}
             </div>
           </Card>
         </div>
@@ -652,17 +676,23 @@ export default function GrnForm() {
         <div className="grn-summary stack">
           <Card title="Cost summary">
             <dl className="kv">
-              <dt>Goods value</dt><dd>{inr(calc.goods_inr)}</dd>
-              <dt>× Costing rate</dt><dd>{rate.toFixed(2)}</dd>
-              <dt>= Goods in LKR</dt><dd>{lkr(calc.goods_inr * rate)}</dd>
-              <dt>+ Cargo charge</dt><dd>{lkr(calc.expenses_lkr - calc.other_lkr)}</dd>
+              {local ? <>
+                <dt>Goods value</dt><dd>{lkr(calc.goods_inr)}</dd>
+              </> : <>
+                <dt>Goods value</dt><dd>{inr(calc.goods_inr)}</dd>
+                <dt>× Costing rate</dt><dd>{rate.toFixed(2)}</dd>
+                <dt>= Goods in LKR</dt><dd>{lkr(calc.goods_inr * rate)}</dd>
+              </>}
+              <dt>{local ? '+ Transport' : '+ Cargo charge'}</dt><dd>{lkr(calc.expenses_lkr - calc.other_lkr)}</dd>
               <dt>+ Other expenses</dt><dd>{lkr(calc.other_lkr)}</dd>
               <dt className="total">Total cost</dt><dd className="total">{lkr(calc.total_lkr)}</dd>
             </dl>
-            <div className="formula mt">
-              <b>Cost factor: {calc.landing_factor ? calc.landing_factor.toFixed(3) : '—'}</b><br />
-              Every ₹1 of goods really costs <b>Rs {calc.landing_factor ? calc.landing_factor.toFixed(2) : '—'}</b> after the cargo charge.
-            </div>
+            {!local && (
+              <div className="formula mt">
+                <b>Cost factor: {calc.landing_factor ? calc.landing_factor.toFixed(3) : '—'}</b><br />
+                Every ₹1 of goods really costs <b>Rs {calc.landing_factor ? calc.landing_factor.toFixed(2) : '—'}</b> after the cargo charge.
+              </div>
+            )}
             {filledItems.length > 0 && (
               <div className="pcs-costs mt">
                 <div className="pcs-costs-title">Cost per piece (Rs)</div>
@@ -679,7 +709,7 @@ export default function GrnForm() {
               {shortPcs > 0 && <><dt>− Short (paid, not received)</dt><dd className="text-red">{int(shortPcs)} pcs</dd></>}
               <dt>Expected sales value</dt><dd>{lkr(expectedValue)}</dd>
               <dt>Expected profit</dt><dd className={expectedValue - calc.total_lkr < 0 ? 'text-red' : 'text-green'}>{lkr(expectedValue - calc.total_lkr)} ({pct(margin(expectedValue, calc.total_lkr))})</dd>
-              <dt>Payable to supplier</dt><dd>{inr(calc.goods_inr)}</dd>
+              <dt>Payable to supplier</dt><dd>{bill(calc.goods_inr)}</dd>
             </dl>
           </Card>
           <button className="btn btn-primary btn-lg btn-block" onClick={save} disabled={busy}><Icon name="check" /> {busy ? 'Saving…' : editId ? `Save changes to ${editing}` : 'Save GRN & add to stock'}</button>
@@ -688,7 +718,7 @@ export default function GrnForm() {
       </div>
 
       {newSupplier != null && (
-        <SupplierForm initialName={newSupplier} onClose={() => setNewSupplier(null)}
+        <SupplierForm initialName={newSupplier} initialOrigin={g.origin || 'india'} onClose={() => setNewSupplier(null)}
           onSaved={(s) => { setSuppliers((x) => [...x, { ...s, balance_inr: s.opening_balance_inr }]); set('supplier_id')(s.id); setNewSupplier(null); }} />
       )}
     </div>

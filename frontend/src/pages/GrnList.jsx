@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { GrnModal } from './GrnView.jsx';
-import { useApi, lkr, inr, niceDate, int, dueText } from '../lib.js';
+import { useApi, lkr, inr, supMoney, niceDate, int, dueText } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, StatusBadge } from '../components/ui.jsx';
 
 export default function GrnList() {
@@ -37,9 +37,9 @@ export default function GrnList() {
                     <td>{g.supplier_name}<div className="sub">{int(g.total_sets)} sets · {int(g.total_pcs)} pcs</div></td>
                     <td>{g.cargo_name || '—'}</td>
                     <td className="right">{g.exchange_rate.toFixed(2)}</td>
-                    <td className="right">{inr(g.goods_inr)}</td>
+                    <td className="right">{supMoney(g)(g.goods_inr)}</td>
                     <td className="right strong">{lkr(g.total_lkr)}</td>
-                    <td className="right">{g.balance_inr > 0 ? inr(g.balance_inr) : '—'}</td>
+                    <td className="right">{g.balance_inr > 0 ? supMoney(g)(g.balance_inr) : '—'}</td>
                     <td><StatusBadge status={g.pay_status} />{g.balance_inr > 0 && <div className="sub">{dueText(g.due_date)}</div>}</td>
                   </tr>
                 ))}

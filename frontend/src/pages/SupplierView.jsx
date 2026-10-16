@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, useApi, inr, lkr, niceDate, dueText } from '../lib.js';
+import { api, useApi, inr, lkr, supMoney, isLocalSup, niceDate, dueText } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, Stat, Tabs, Modal, useToast } from '../components/ui.jsx';
 import { SupplierForm, SupplierPaymentModal } from '../components/forms.jsx';
 
@@ -19,9 +19,10 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
 
   if (error) return modal ? <Modal title="Supplier" onClose={onClose}><ErrorBox error={error} onRetry={reload} /></Modal> : <ErrorBox error={error} onRetry={reload} />;
   if (!s) return modal ? <Modal title="Supplier" onClose={onClose}><Loading /></Modal> : <Loading />;
+  const cur = supMoney(s);   // ₹ for an Indian supplier, Rs for a local one
 
   const delPayment = async (p) => {
-    if (!confirm(`Delete payment of ${inr(p.amount_inr)} on ${niceDate(p.date)}?`)) return;
+    if (!confirm(`Delete payment of ${cur(p.amount_inr)} on ${niceDate(p.date)}?`)) return;
     try { await api.del(`/suppliers/${s.id}/payments/${p.id}`); toast('Payment deleted'); changed(); } catch (e) { toast(e.message, 'error'); }
   };
   const delSupplier = async () => {
@@ -43,8 +44,8 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
 
   const body = <>
     <div className="stats mb">
-      <Stat icon="wallet" tone={s.overdue_inr > 0 ? 'red' : 'amber'} label="To pay" value={inr(s.balance_inr)} sub={s.overdue_inr > 0 ? `${inr(s.overdue_inr)} overdue` : s.next_due ? dueText(s.next_due) : 'All settled'} />
-      <Stat icon="layers" label="Total purchased" value={inr(s.purchased_inr)} sub={`${s.grn_count} shipments`} />
+      <Stat icon="wallet" tone={s.overdue_inr > 0 ? 'red' : 'amber'} label="To pay" value={cur(s.balance_inr)} sub={s.overdue_inr > 0 ? `${cur(s.overdue_inr)} overdue` : s.next_due ? dueText(s.next_due) : 'All settled'} />
+      <Stat icon="layers" label="Total purchased" value={cur(s.purchased_inr)} sub={`${s.grn_count} shipments`} />
       <Stat icon="truck" tone="blue" label="Total cost" value={lkr(s.landed_lkr)} />
       <Stat icon="clock" tone="violet" label="Credit period" value={`${s.credit_days} days`} />
     </div>
@@ -63,9 +64,9 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
                     <tr key={b.id ?? 'open'}>
                       <td className="strong">{b.id ? <Link to={`/grn/${b.id}`}>{b.grn_no}</Link> : b.grn_no}</td>
                       <td>{niceDate(b.date)}</td>
-                      <td className="right">{inr(b.amount)}</td>
-                      <td className="right text-green">{inr(b.paid)}</td>
-                      <td className="right strong">{b.balance > 0 ? inr(b.balance) : '—'}</td>
+                      <td className="right">{cur(b.amount)}</td>
+                      <td className="right text-green">{cur(b.paid)}</td>
+                      <td className="right strong">{b.balance > 0 ? cur(b.balance) : '—'}</td>
                       <td><StatusBadge status={b.status} />{b.balance > 0 && b.due_date && <div className="sub">{dueText(b.due_date)}</div>}</td>
                       <td>{b.balance > 0 && <button className="btn btn-sm btn-pay" onClick={() => setPaying(b.id || true)}><Icon name="wallet" size={14} /> Pay</button>}</td>
                     </tr>
@@ -86,7 +87,7 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
                       <td>{niceDate(p.date)}</td>
                       <td>{p.method}<div className="sub">{p.reference}</div></td>
                       <td>{p.grn_no || 'Oldest bills'}</td>
-                      <td className="right strong">{inr(p.amount_inr)}</td>
+                      <td className="right strong">{cur(p.amount_inr)}</td>
                       <td className="right">{lkr(p.amount_lkr)}</td>
                       <td><button className="btn btn-icon btn-sm btn-ghost" onClick={() => delPayment(p)} title="Delete"><Icon name="trash" size={15} /></button></td>
                     </tr>

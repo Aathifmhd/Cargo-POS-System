@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, useApi, lkr, inr, niceDate, int, today } from '../lib.js';
+import { api, useApi, lkr, supMoney, bothMoney, niceDate, int, today } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Stat, Segmented, Modal, Field, useToast } from '../components/ui.jsx';
 
 /*
@@ -108,10 +108,10 @@ function LineModal({ r, onClose, onResolve, undoKind, onUndone }) {
             <dl className="kv">
               <dt>Code</dt><dd>{r.code}</dd>
               <dt>Sizes</dt><dd>{r.sizes || '—'}</dd>
-              <dt>Billed per piece</dt><dd>{inr(pcPrice)}</dd>
+              <dt>Billed per piece</dt><dd>{supMoney(r)(pcPrice)}</dd>
               <dt>Cost per piece</dt><dd className="strong">{lkr(r.landed_per_pcs_lkr)}</dd>
-              {f.extraInr > 0 && <><dt>Extra pieces' value</dt><dd className="text-green">{inr(f.extraInr)} · {lkr(f.extraLkr)}</dd></>}
-              {f.shortInr > 0 && <><dt>Short — paid, not received</dt><dd className="text-red">{inr(f.shortInr)} · {lkr(f.shortLkr)}</dd></>}
+              {f.extraInr > 0 && <><dt>Extra pieces' value</dt><dd className="text-green">{supMoney(r)(f.extraInr)} · {lkr(f.extraLkr)}</dd></>}
+              {f.shortInr > 0 && <><dt>Short — paid, not received</dt><dd className="text-red">{supMoney(r)(f.shortInr)} · {lkr(f.shortLkr)}</dd></>}
               {f.profit > 0 && <><dt>Profit</dt><dd className="text-green strong">+{lkr(f.profit)}</dd></>}
               {f.loss > 0 && <><dt>Loss</dt><dd className="text-red strong">−{lkr(f.loss)}</dd></>}
             </dl>
@@ -193,9 +193,9 @@ function ResolveModal({ r, onClose, onDone }) {
           ['lost', `Loss of ${lkr(f.shortLkr)}`],
         ], r.short_status)}
         {r.extra_pcs > 0 && section('extra', 'Extra pieces', r.extra_pcs, [
-          ['free', `Profit of ${lkr(f.extraLkr)} · ${inr(f.extraInr)} off the bill`],
-          ['billed', `${inr(f.extraInr)} stays on the bill`],
-          ['next', `${inr(f.extraInr)} off this bill`],
+          ['free', `Profit of ${lkr(f.extraLkr)} · ${supMoney(r)(f.extraInr)} off the bill`],
+          ['billed', `${supMoney(r)(f.extraInr)} stays on the bill`],
+          ['next', `${supMoney(r)(f.extraInr)} off this bill`],
         ], r.extra_status)}
         {!(f.shortPcs > 0) && !(r.extra_pcs > 0) && <p className="muted">These are free sets from an older GRN — nothing to resolve.</p>}
       </div>
@@ -315,8 +315,8 @@ export default function ExtraShort() {
       {data && rows.length > 0 && (
         <div className="stats es-stats">
           <Stat icon="layers" label="GRNs affected" value={int(grnCount)} sub={totals.toResolve ? `${totals.toResolve} of ${rows.length} lines to resolve` : `${rows.length} lines · all resolved`} />
-          <Stat icon="plus" tone="green" label="Extra pieces" value={`${int(totals.extraPcs)} pcs`} sub={`${inr(totals.extraInr)} on the bills`} />
-          <Stat icon="minus" tone="red" label="Short pieces" value={`${int(totals.shortPcs)} pcs`} sub={`${inr(totals.shortInr)} paid, not received`} />
+          <Stat icon="plus" tone="green" label="Extra pieces" value={`${int(totals.extraPcs)} pcs`} sub={`${bothMoney(rows, (r) => r.f.extraInr)} on the bills`} />
+          <Stat icon="minus" tone="red" label="Short pieces" value={`${int(totals.shortPcs)} pcs`} sub={`${bothMoney(rows, (r) => r.f.shortInr)} paid, not received`} />
           <Stat icon="wallet" tone={net < 0 ? 'red' : net > 0 ? 'green' : 'default'} label="Profit or loss" value={`${net < 0 ? '−' : net > 0 ? '+' : ''}${lkr(Math.abs(net))}`}
             sub={<>
               <span className="text-green">+{lkr(totals.profit)} free extras</span> · <span className="text-red">−{lkr(totals.loss)} shorts</span>

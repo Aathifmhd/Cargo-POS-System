@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, useApi, lkr, inr, niceDate, dueText } from '../lib.js';
+import { api, useApi, lkr, inr, supMoney, bothMoney, niceDate, dueText } from '../lib.js';
 import { PageHeader, Card, Loading, ErrorBox, Empty, Stat, Tabs, Icon } from '../components/ui.jsx';
 import { SupplierPaymentModal, CustomerPaymentModal } from '../components/forms.jsx';
 import { whatsappReminder } from './CustomerView.jsx';
@@ -21,10 +21,10 @@ function PaymentHistory({ isPay, version, onHide }) {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     return (data || []).filter((p) => !words.length || words.every((w) => [p.who, p.bill_no, p.method, p.reference, p.notes].join(' ').toLowerCase().includes(w)));
   }, [data, q]);
-  const total = rows.reduce((a, p) => a + p.amount, 0);
+  const total = bothMoney(rows, (p) => p.amount);
   return (
     <Card className="dues-history" title={<span className="row gap-s"><Icon name="clock" size={16} /> {isPay ? 'Payments made — history' : 'Payments received — history'} <span className="badge badge-grey">{rows.length}</span></span>}
-      actions={<><b className="mono">{fmt(total)}</b><button className="btn btn-sm btn-ghost" onClick={onHide}><Icon name="x" size={14} /> Hide</button></>}>
+      actions={<><b className="mono">{isPay ? total : fmt(rows.reduce((a, p) => a + p.amount, 0))}</b><button className="btn btn-sm btn-ghost" onClick={onHide}><Icon name="x" size={14} /> Hide</button></>}>
       <ErrorBox error={error} onRetry={reload} />
       <div className="toolbar"><div className="search"><Icon name="search" size={16} /><input className="input" placeholder={`Search ${isPay ? 'supplier' : 'customer'}, bill, method or reference…`} value={q} onChange={(e) => setQ(e.target.value)} /></div></div>
       {loading && !data ? <Loading /> : !rows.length ? (
@@ -41,7 +41,7 @@ function PaymentHistory({ isPay, version, onHide }) {
                   <td>{p.bill_no ? <Link to={isPay ? `/grn/${p.bill_id}` : `/sales/${p.bill_id}`}>{p.bill_no}</Link> : <span className="muted">Oldest first</span>}</td>
                   <td>{p.method || '—'}</td>
                   <td>{p.reference || <span className="muted">—</span>}{p.notes && <div className="sub">{p.notes}</div>}</td>
-                  <td className="right nowrap"><b className={isPay ? 'text-amber' : 'text-green'}>{fmt(p.amount)}</b>{isPay && p.amount_lkr ? <div className="sub">{lkr(p.amount_lkr)}</div> : null}</td>
+                  <td className="right nowrap"><b className={isPay ? 'text-amber' : 'text-green'}>{supMoney(p)(p.amount)}</b>{isPay && p.currency !== 'LKR' && p.amount_lkr ? <div className="sub">{lkr(p.amount_lkr)}</div> : null}</td>
                 </tr>
               ))}
             </tbody>
@@ -75,6 +75,8 @@ export default function Dues() {
   const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const shown = rows.filter((r) => !words.length || words.every((w) => [r.supplier_name, r.customer_name, r.customer_phone, r.grn_no, r.invoice_no].join(' ').toLowerCase().includes(w)));
   const sum = (k) => rows.filter((r) => !k || r.status === k).reduce((a, b) => a + b.balance, 0);
+  // supplier bills: ₹ (India) and Rs (local) kept apart; customer bills are all Rs
+  const sumText = (k) => (isPay ? bothMoney(rows.filter((r) => !k || r.status === k), (b) => b.balance) : fmt(sum(k)));
 
   const openPay = async (b) => {
     if (isPay) setModal({ type: 'sup', who: await api.get(`/suppliers/${b.supplier_id}`), id: b.id });
@@ -91,10 +93,10 @@ export default function Dues() {
       ]} />
 
       <div className="stats mb">
-        <Stat icon="wallet" tone="blue" label={isPay ? 'Total to pay' : 'Total to collect'} value={fmt(sum())} />
-        <Stat icon="alert" tone="red" label="Overdue" value={fmt(sum('overdue'))} />
-        <Stat icon="clock" tone="amber" label="Due in 7 days" value={fmt(sum('due-soon'))} />
-        <Stat icon="check" tone="green" label="Not due yet" value={fmt(sum('open'))} />
+        <Stat icon="wallet" tone="blue" label={isPay ? 'Total to pay' : 'Total to collect'} value={sumText()} />
+        <Stat icon="alert" tone="red" label="Overdue" value={sumText('overdue')} />
+        <Stat icon="clock" tone="amber" label="Due in 7 days" value={sumText('due-soon')} />
+        <Stat icon="check" tone="green" label="Not due yet" value={sumText('open')} />
       </div>
 
       <div className="toolbar">
@@ -113,7 +115,7 @@ export default function Dues() {
             const list = shown.filter((r) => r.status === g.key);
             if (!list.length) return null;
             return (
-              <Card key={g.key} title={<span className="row gap-s"><span className={`badge badge-${g.tone}`}>{list.length}</span> {g.title}</span>} actions={<b className="mono">{fmt(list.reduce((a, b) => a + b.balance, 0))}</b>} pad={false}>
+              <Card key={g.key} title={<span className="row gap-s"><span className={`badge badge-${g.tone}`}>{list.length}</span> {g.title}</span>} actions={<b className="mono">{isPay ? bothMoney(list, (b) => b.balance) : fmt(list.reduce((a, b) => a + b.balance, 0))}</b>} pad={false}>
                 <div className="table-wrap">
                   <table className="table">
                     <thead><tr><th>{isPay ? 'Supplier' : 'Customer'}</th><th>{isPay ? 'GRN · Bale' : 'Bill'}</th><th>Date</th><th>Due date</th><th className="right">Amount</th><th className="right">Balance</th><th></th></tr></thead>
@@ -124,8 +126,8 @@ export default function Dues() {
                           <td>{isPay ? (b.id ? <Link to={`/grn/${b.id}`}>{b.grn_no}</Link> : b.grn_no) : (b.id ? <Link to={`/sales/${b.id}`}>{b.invoice_no}</Link> : b.invoice_no)}</td>
                           <td>{niceDate(b.date)}</td>
                           <td>{niceDate(b.due_date)}<div className={`sub ${b.status === 'overdue' ? 'text-red' : ''}`}>{dueText(b.due_date)}</div></td>
-                          <td className="right">{fmt(b.amount)}</td>
-                          <td className="right strong">{fmt(b.balance)}</td>
+                          <td className="right">{(isPay ? supMoney(b) : fmt)(b.amount)}</td>
+                          <td className="right strong">{(isPay ? supMoney(b) : fmt)(b.balance)}</td>
                           <td className="nowrap right">
                             {!isPay && b.customer_phone && b.status === 'overdue' && (
                               <a className="btn btn-sm btn-ghost" title="Send WhatsApp reminder" target="_blank" rel="noreferrer"
@@ -141,7 +143,7 @@ export default function Dues() {
               </Card>
             );
           })}
-          <span className="muted small">Amounts for suppliers are in Indian Rupees (₹). Customer amounts are in Sri Lankan Rupees (Rs).</span>
+          <span className="muted small">Amounts for Indian suppliers are in Indian Rupees (₹), for local suppliers in Sri Lankan Rupees (Rs). Customer amounts are in Sri Lankan Rupees (Rs).</span>
         </div>
       )}
 

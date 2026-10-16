@@ -1,17 +1,18 @@
 import { Router } from 'express';
 import { find, findOne, insert, setById, updateMany, deleteMany, fail, num, round2, sum, todayStr, inParallel } from '../db.js';
-import { supplierLedgers, supplierBills, summarizeSupplier, revalueGrns, costingRate } from '../services.js';
+import { supplierLedgers, supplierBills, summarizeSupplier, revalueGrns, costingRate, isLocal } from '../services.js';
 import { guard } from '../auth.js';
 
 const r = Router();
 
-const FIELDS = ['name', 'contact_person', 'phone', 'whatsapp', 'email', 'city', 'state', 'address', 'gst_no', 'bank_details', 'credit_days', 'opening_balance_inr', 'notes', 'active'];
+const FIELDS = ['name', 'origin', 'contact_person', 'phone', 'whatsapp', 'email', 'city', 'state', 'address', 'gst_no', 'bank_details', 'credit_days', 'opening_balance_inr', 'notes', 'active'];
 
 function clean(body) {
   if (!String(body.name || '').trim()) fail('Supplier name is required');
   return {
     ...Object.fromEntries(FIELDS.map((f) => [f, body[f] === '' || body[f] === undefined ? null : body[f]])),
     name: String(body.name).trim(),
+    origin: body.origin === 'local' ? 'local' : 'india',   // Indian supplier (₹) or local supplier (Rs)
     credit_days: Math.round(num(body.credit_days, 30)),
     opening_balance_inr: round2(num(body.opening_balance_inr)),
     active: body.active === false || body.active === 0 ? 0 : 1,
@@ -63,7 +64,12 @@ r.put('/:id', async (req, res) => {
   const d = clean(req.body);
   const old = await findOne('suppliers', { id: num(req.params.id) });
   if (!old) fail('Supplier not found', 404);
+  // the currency follows the supplier: once it has GRNs or payments, it can't switch between India (₹) and local (Rs)
+  if ((old.origin || 'india') !== d.origin && (await findOne('grns', { supplier_id: old.id }) || await findOne('supplier_payments', { supplier_id: old.id }))) {
+    fail(`${old.name} already has GRNs or payments in ${old.origin === 'local' ? 'Rs' : '₹'}, so it can't change type. Add it as a new supplier instead.`);
+  }
   const changes = [];
+  if ((old.origin || 'india') !== d.origin) changes.push(`type → ${d.origin === 'local' ? 'local supplier (Rs)' : 'Indian supplier (₹)'}`);
   if (old.name !== d.name) changes.push(`name "${old.name}" → "${d.name}"`);
   if (old.credit_days !== d.credit_days) changes.push(`credit days ${old.credit_days} → ${d.credit_days}`);
   if (old.opening_balance_inr !== d.opening_balance_inr) changes.push(`old balance ₹${old.opening_balance_inr} → ₹${d.opening_balance_inr}`);
@@ -90,8 +96,9 @@ r.post('/:id/payments', async (req, res) => {
   const s = await findOne('suppliers', { id: num(req.params.id) });
   if (!s) fail('Supplier not found', 404);
   const amount = round2(num(req.body.amount_inr));
-  if (amount <= 0) fail('Enter the amount paid (INR)');
-  const rate = await costingRate();   // payments are recorded at the same fixed rate as the costs
+  if (amount <= 0) fail('Enter the amount paid');
+  // payments are recorded at the same rate as the costs: the fixed rate for an Indian supplier, 1 for a local one (Rs)
+  const rate = isLocal(s) ? 1 : await costingRate();
   const grnId = req.body.grn_id ? num(req.body.grn_id) : null;
   if (grnId && !(await findOne('grns', { id: grnId, supplier_id: s.id }))) fail('That GRN does not belong to this supplier');
   const p = await insert('supplier_payments', {

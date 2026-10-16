@@ -62,7 +62,7 @@ r.get('/extra-short', async (req, res) => {
       short_sets: i.short_sets, short_pcs: i.short_pcs, cost_inr_per_set: i.cost_inr_per_set, landed_per_pcs_lkr: i.landed_per_pcs_lkr,
       short_status: i.short_status, short_date: i.short_date, short_note: i.short_note,
       extra_status: i.extra_status, extra_date: i.extra_date, extra_note: i.extra_note,
-      exchange_rate: g.exchange_rate,
+      exchange_rate: g.exchange_rate, currency: g.currency || 'INR',
     };
   });
   rows.sort((a, b) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : a.grn_id !== b.grn_id ? b.grn_id - a.grn_id : a.id - b.id));

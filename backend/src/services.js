@@ -80,6 +80,9 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
   return { items: out, goods_inr, cargo_inr, expenses_lkr, other_lkr, total_sets, total_pcs, total_lkr: round2(goods_inr * rate + cargo_inr * cRate + expenses_lkr) };
 }
 
+/** A supplier from Sri Lanka bills in Rs (LKR); everyone else is an Indian supplier billing in ₹ (INR). */
+export const isLocal = (supplier) => supplier?.origin === 'local';
+
 /** The one rate every cost is worked out at (Settings → Exchange rate, 3.5 by default). The live rate never changes costs. */
 export const costingRate = async () => num((await getSettings()).costing_rate) || 3.5;
 
@@ -167,19 +170,20 @@ export async function revalueGrns() {
     for (const st of settle(s, mine, pays.filter((p) => p.supplier_id === s.id), rate)) {
       const g = st.grn;
       const settledAt = st.settled ? g.settled_at || new Date().toISOString() : null;
-      const sameRate = Math.abs((g.exchange_rate || 0) - rate) < 0.00005 && Math.abs((g.effective_rate ?? 0) - rate) < 0.00005;
+      const want = g.currency === 'LKR' ? 1 : rate;   // a local purchase is in Rs already
+      const sameRate = Math.abs((g.exchange_rate || 0) - want) < 0.00005 && Math.abs((g.effective_rate ?? 0) - want) < 0.00005;
       if (sameRate && (g.settled_at || null) === settledAt) continue;
-      actions.push({ g, settledAt, recost: !sameRate });
+      actions.push({ g, settledAt, recost: !sameRate, want });
     }
   }
   if (!actions.length) return 0;
   await tx(async () => {
     const touched = new Set();
-    for (const { g, settledAt, recost } of actions) {
+    for (const { g, settledAt, recost, want } of actions) {
       if (!recost) { await setById('grns', g.id, { settled_at: settledAt }); continue; }
-      const { total_lkr, productIds } = await recostGrn(g, rate);
+      const { total_lkr, productIds } = await recostGrn(g, want);
       productIds.forEach((p) => touched.add(p));
-      await setById('grns', g.id, { exchange_rate: rate, effective_rate: rate, total_lkr, settled_at: settledAt });
+      await setById('grns', g.id, { exchange_rate: want, effective_rate: want, total_lkr, settled_at: settledAt });
     }
     for (const pid of touched) await recomputeProductCost(pid);
   });
@@ -218,7 +222,7 @@ export async function supplierLedgers(ids = null) {
       const { supplier_id, payable_inr, ...rest } = g;
       docs.push({ ...rest, amount: payable_inr, linkedPaid: linked[g.id] || 0 });
     }
-    out.set(s.id, allocate(docs, unlinked).map((d) => ({ ...d, supplier_id: s.id, supplier_name: s.name, status: dueStatus(d.balance, d.due_date, today) })));
+    out.set(s.id, allocate(docs, unlinked).map((d) => ({ ...d, supplier_id: s.id, supplier_name: s.name, currency: isLocal(s) ? 'LKR' : 'INR', status: dueStatus(d.balance, d.due_date, today) })));
   }
   return out;
 }
@@ -288,7 +292,8 @@ async function saveGrn(body, editId = null) {
   const reorderOf = (category) => Math.round(num(catalog.find((c) => c.name.toLowerCase() === String(category || '').trim().toLowerCase())?.reorder_sets));
   const supplier = await findOne('suppliers', { id: num(body.supplier_id) });
   if (!supplier) fail('Please choose a supplier');
-  const rate = num(settings.costing_rate) || 3.5;   // fixed — the live rate does not change costs
+  // an Indian supplier's bill (₹) is costed at the fixed rate — the live rate does not change costs; a local one is in Rs already
+  const rate = isLocal(supplier) ? 1 : num(settings.costing_rate) || 3.5;
   const rawItems = (body.items || []).filter((i) => (i.product_id || String(i.name || '').trim()) && (num(i.sets) > 0 || num(i.extra_pcs) > 0));
   if (!rawItems.length) fail('Add at least one item with a quantity');
   const expenses = (body.expenses || []).filter((e) => String(e.label || '').trim() && num(e.amount_lkr) !== 0);
@@ -300,7 +305,7 @@ async function saveGrn(body, editId = null) {
   const paymentType = body.payment_type === 'paid' ? 'paid' : 'credit';
   const due_date = paymentType === 'credit' ? body.due_date || addDays(date, supplier.credit_days) : date;
   const head = {
-    date, supplier_id: supplier.id, supplier_invoice_no: body.supplier_invoice_no || null,
+    date, supplier_id: supplier.id, currency: isLocal(supplier) ? 'LKR' : 'INR', supplier_invoice_no: body.supplier_invoice_no || null,
     supplier_bill_date: /^\d{4}-\d{2}-\d{2}$/.test(String(body.supplier_bill_date || '')) ? body.supplier_bill_date : null, cargo_name: (body.cargo_name || '').trim() || null,
     exchange_rate: rate, goods_inr: calc.goods_inr, cargo_charge_inr: calc.cargo_inr, cargo_in_supplier_bill: cargoInBill, payable_inr,
     expenses_lkr: calc.expenses_lkr, other_lkr: calc.other_lkr, total_lkr: calc.total_lkr, total_sets: calc.total_sets, total_pcs: calc.total_pcs,

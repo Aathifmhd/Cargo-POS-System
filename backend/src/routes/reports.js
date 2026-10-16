@@ -114,10 +114,11 @@ r.get('/dues/history', async (req, res) => {
   const whoIds = [...new Set(pays.map((p) => (supplier ? p.supplier_id : p.customer_id)))];
   const billIds = [...new Set(pays.map((p) => (supplier ? p.grn_id : p.sale_id)).filter((x) => x != null))];
   const [who, bills] = await inParallel(
-    () => (whoIds.length ? find(supplier ? 'suppliers' : 'customers', { id: { $in: whoIds } }, { project: { id: 1, name: 1 } }) : []),
+    () => (whoIds.length ? find(supplier ? 'suppliers' : 'customers', { id: { $in: whoIds } }, { project: { id: 1, name: 1, origin: 1 } }) : []),
     () => (billIds.length ? find(supplier ? 'grns' : 'sales', { id: { $in: billIds } }, { project: { id: 1, grn_no: 1, invoice_no: 1 } }) : []),
   );
   const nameOf = Object.fromEntries(who.map((w) => [w.id, w.name]));
+  const localOf = Object.fromEntries(who.map((w) => [w.id, supplier && w.origin === 'local']));
   const billOf = Object.fromEntries(bills.map((b) => [b.id, b.grn_no || b.invoice_no]));
   res.json(pays.map((p) => {
     const whoId = supplier ? p.supplier_id : p.customer_id;
@@ -125,6 +126,7 @@ r.get('/dues/history', async (req, res) => {
     return {
       id: p.id, date: p.date, who_id: whoId, who: nameOf[whoId] || '—', bill_id: billId ?? null, bill_no: billId != null ? billOf[billId] || null : null,
       amount: supplier ? p.amount_inr : p.amount, amount_lkr: supplier ? p.amount_lkr : p.amount,
+      currency: !supplier || localOf[whoId] ? 'LKR' : 'INR',
       method: p.method || null, reference: p.reference || null, notes: p.notes || null,
     };
   }));
@@ -203,8 +205,10 @@ r.get('/dashboard', async (req, res) => {
     collectedToday: round2(collectedToday),
     last7,
     payables: {
-      total_inr: round2(sum(payables, (b) => b.balance)),
-      overdue_inr: round2(sum(payables.filter((b) => b.status === 'overdue'), (b) => b.balance)),
+      total_inr: round2(sum(payables.filter((b) => b.currency !== 'LKR'), (b) => b.balance)),
+      overdue_inr: round2(sum(payables.filter((b) => b.currency !== 'LKR' && b.status === 'overdue'), (b) => b.balance)),
+      total_lkr: round2(sum(payables.filter((b) => b.currency === 'LKR'), (b) => b.balance)),
+      overdue_lkr: round2(sum(payables.filter((b) => b.currency === 'LKR' && b.status === 'overdue'), (b) => b.balance)),
       upcoming: payables.filter((b) => b.due_date && b.due_date <= week).sort(byDue).slice(0, 6),
     },
     receivables: {
@@ -302,16 +306,17 @@ r.get('/reports/shipments', async (req, res) => {
   const supp = {};
   for (const g of grns) {
     const key = g.cargo_name ?? 'Not set';
-    const c = (cargo[key] ??= { cargo_name: key, shipments: 0, goods_inr: 0, cargo_inr: 0, cargo_lkr: 0, expenses_lkr: 0, total_lkr: 0, pcs: 0 });
+    const local = g.currency === 'LKR';   // a local purchase: its goods are in Rs, not ₹
+    const c = (cargo[key] ??= { cargo_name: key, shipments: 0, goods_inr: 0, goods_local_lkr: 0, cargo_inr: 0, cargo_lkr: 0, expenses_lkr: 0, total_lkr: 0, pcs: 0 });
     c.shipments++;
-    c.goods_inr += g.goods_inr;
+    if (local) c.goods_local_lkr += g.goods_inr; else c.goods_inr += g.goods_inr;
     c.cargo_inr += g.cargo_charge_inr;
     // cargo paid in rupees on the oldest GRNs + the cargo charges in LKR (on each item, or older shared ones), without other expenses
     c.cargo_lkr += g.cargo_charge_inr * g.exchange_rate + g.expenses_lkr - (g.other_lkr || 0);
     c.expenses_lkr += g.expenses_lkr;
     c.total_lkr += g.total_lkr;
     c.pcs += g.total_pcs;
-    const s = (supp[g.supplier_id] ??= { supplier_name: g.supplier_name, shipments: 0, goods_inr: 0, total_lkr: 0, rates: 0 });
+    const s = (supp[g.supplier_id] ??= { supplier_name: g.supplier_name, currency: local ? 'LKR' : 'INR', shipments: 0, goods_inr: 0, total_lkr: 0, rates: 0 });
     s.shipments++;
     s.goods_inr += g.goods_inr;
     s.total_lkr += g.total_lkr;

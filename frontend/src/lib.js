@@ -24,6 +24,19 @@ export function costTiers(batches) {
   return Object.fromEntries(list.map((b, i) => [b.id, i < low ? 'low' : i < list.length - high ? 'medium' : 'high']));
 }
 
+/** A supplier (or its GRN / bill) from Sri Lanka bills in Rs; Indian suppliers in ₹. */
+export const isLocalSup = (x) => x?.origin === 'local' || x?.currency === 'LKR';
+/** The money format for a supplier's amounts: Rs for a local supplier, ₹ for an Indian one. */
+export const supMoney = (x) => (isLocalSup(x) ? lkr : inr);
+/** Supplier money that may be in both currencies: "₹ 1,000.00 + Rs 5,000.00" (only the parts that are there). */
+export function bothMoney(list, amount, of = (x) => x) {
+  let inrT = 0;
+  let lkrT = 0;
+  for (const x of list || []) { const v = Number(amount(x)) || 0; if (isLocalSup(of(x))) lkrT += v; else inrT += v; }
+  if (lkrT && inrT) return `${inr(inrT)} + ${lkr(lkrT)}`;
+  return lkrT ? lkr(lkrT) : inr(inrT);
+}
+
 export const findCategory = (catalog, name) => catalog.find((c) => c.name.toLowerCase() === String(name || '').trim().toLowerCase());
 
 /* ---------------- theme (light by default, or dark) ---------------- */

@@ -74,7 +74,7 @@ export async function inParallel(...fns) {
 export const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' ');   // "YYYY-MM-DD HH:MM:SS" (UTC)
 const DEFAULTS = {
   suppliers: { origin: 'india', contact_person: null, phone: null, whatsapp: null, email: null, city: null, state: null, address: null, gst_no: null,
-    bank_details: null, credit_days: 30, opening_balance_inr: 0, notes: null, active: 1 },
+    bank_details: null, credit_days: 60, opening_balance_inr: 0, notes: null, active: 1 },
   customers: { shop_name: null, phone: null, whatsapp: null, city: null, address: null, credit_limit: 0, credit_days: 30,
     opening_balance: 0, notes: null, active: 1 },
   products: { category: null, subtype: null, pname: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, supplier_id: null,

@@ -13,7 +13,7 @@ function clean(body) {
     ...Object.fromEntries(FIELDS.map((f) => [f, body[f] === '' || body[f] === undefined ? null : body[f]])),
     name: String(body.name).trim(),
     origin: body.origin === 'local' ? 'local' : 'india',   // Indian supplier (₹) or local supplier (Rs)
-    credit_days: Math.round(num(body.credit_days, 30)),
+    credit_days: Math.round(num(body.credit_days, 60)),
     opening_balance_inr: round2(num(body.opening_balance_inr)),
     active: body.active === false || body.active === 0 ? 0 : 1,
   };

@@ -50,7 +50,7 @@ export function CustomerForm({ customer, initialName = '', onClose, onSaved }) {
 export function SupplierForm({ supplier, initialName = '', initialOrigin = 'india', onClose, onSaved }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const [f, set] = useForm(supplier ? { ...supplier, origin: supplier.origin || 'india' } : { origin: initialOrigin, name: initialName, contact_person: '', phone: '', whatsapp: '', email: '', city: '', state: '', address: '', gst_no: '', bank_details: '', credit_days: 30, opening_balance_inr: 0, notes: '', active: 1 });
+  const [f, set] = useForm(supplier ? { ...supplier, origin: supplier.origin || 'india' } : { origin: initialOrigin, name: initialName, contact_person: '', phone: '', whatsapp: '', email: '', city: '', state: '', address: '', gst_no: '', bank_details: '', credit_days: 60, opening_balance_inr: 0, notes: '', active: 1 });
   const save = async (e) => {
     e.preventDefault();
     setBusy(true);

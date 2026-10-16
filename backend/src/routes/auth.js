@@ -119,6 +119,25 @@ r.delete('/users/:id', requireAuth, adminOnly, async (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * Action Center (Super Admin only): the activity log, newest first; `after` returns only what is newer (for the live list).
+ * `super` marks what the Super Admin approved, or a Super Admin-level change.
+ */
+r.get('/action-center', requireAuth, async (req, res) => {
+  if (rankOf(req.user) < RANK.superadmin) fail('Only the Super Admin can open the Action Center', 403);
+  const after = num(req.query.after);
+  const [rows, users] = await Promise.all([
+    find('audit_log', after ? { id: { $gt: after } } : {}, { sort: { id: -1 }, limit: after ? 200 : 1000 }),
+    find('users', {}, { project: { username: 1, role: 1 } }),
+  ]);
+  const roleOf = Object.fromEntries(users.map((u) => [String(u.username).toLowerCase(), u.role]));
+  res.json(rows.map((a) => ({
+    ...a,
+    role: a.role || roleOf[String(a.username || '').toLowerCase()] || null,
+    super: a.level === 'superadmin' || Boolean(a.approved_by && roleOf[String(a.approved_by).toLowerCase()] === 'superadmin'),
+  })));
+});
+
 r.get('/audit', requireAuth, adminOnly, async (req, res) => {
   res.json(await find('audit_log', {}, { sort: { id: -1 }, limit: 500 }));
 });

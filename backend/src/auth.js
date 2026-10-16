@@ -159,8 +159,8 @@ export function adminOnly(req, res, next) {
   next();
 }
 
-export const audit = (user, action, approvedBy = null) =>
-  insert('audit_log', { at: stamp(), user_id: user?.id ?? null, username: user?.username ?? null, action, approved_by: approvedBy });
+export const audit = (user, action, approvedBy = null, level = null) =>
+  insert('audit_log', { at: stamp(), user_id: user?.id ?? null, username: user?.username ?? null, role: user?.role ?? null, action, approved_by: approvedBy, level });
 
 /**
  * Protected change. A user at or above `level` passes straight through. Anyone else needs a one-time
@@ -171,7 +171,7 @@ export const audit = (user, action, approvedBy = null) =>
  */
 export async function guard(req, action, level = 'admin', { always = false } = {}) {
   if (!always && rankOf(req.user) >= RANK[level]) {
-    await audit(req.user, action);
+    await audit(req.user, action, null, level);
     return req.user;
   }
   const p = verify(req.get('X-Approval'));
@@ -180,6 +180,6 @@ export async function guard(req, action, level = 'admin', { always = false } = {
   const ok = approver && !used && (approver.token_version ?? 0) === p.v && rankOf(approver) >= RANK[level];
   if (!ok) throw new HttpError(403, `${ROLE_NAME[level]} approval needed: ${action}`, { needApproval: true, action, level });
   await updateOne('used_approvals', { _id: p.n }, { $set: { exp: new Date(p.exp) } }, { upsert: true });   // one use only
-  await audit(req.user, action, approver.username);
+  await audit(req.user, action, approver.username, level);
   return approver;
 }

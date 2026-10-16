@@ -47,7 +47,7 @@ export function CustomerForm({ customer, initialName = '', onClose, onSaved }) {
 }
 
 /* ================= SUPPLIER ================= */
-export function SupplierForm({ supplier, initialName = '', initialOrigin = 'india', onClose, onSaved }) {
+export function SupplierForm({ supplier, initialName = '', initialOrigin = 'india', onClose, onSaved, onDeleted }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [f, set] = useForm(supplier ? { ...supplier, origin: supplier.origin || 'india' } : { origin: initialOrigin, name: initialName, contact_person: '', phone: '', whatsapp: '', email: '', city: '', state: '', address: '', gst_no: '', bank_details: '', credit_days: 60, opening_balance_inr: 0, notes: '', active: 1 });
@@ -62,7 +62,25 @@ export function SupplierForm({ supplier, initialName = '', initialOrigin = 'indi
   };
   return (
     <Modal size="lg" title={supplier ? 'Edit supplier' : 'New supplier'} subtitle={f.origin === 'local' ? 'A supplier in Sri Lanka — bills in Rs' : 'A supplier in India — bills in ₹'} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="sup-form" disabled={busy}>Save supplier</button></>}>
+      footer={<>
+        {supplier && onDeleted && (() => {
+          // only a supplier with nothing due can go; deleting always needs the Super Admin's password
+          const due = n(supplier.balance_inr) > 0.009;
+          const remove = async () => {
+            if (!confirm(`Delete ${supplier.name}?\n\nTheir GRNs and payments stay in the records; they just leave the supplier list.`)) return;
+            setBusy(true);
+            try { await api.del(`/suppliers/${supplier.id}`); toast(`${supplier.name} deleted`); onDeleted(); } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
+          };
+          return (
+            <button type="button" className="btn btn-danger" disabled={busy || due} onClick={remove}
+              title={due ? `${supMoney(supplier)(supplier.balance_inr)} is still due — settle it before deleting` : 'Delete this supplier (Super Admin)'}>
+              <Icon name="trash" size={15} /> Delete
+            </button>
+          );
+        })()}
+        <span className="spacer" />
+        <button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="sup-form" disabled={busy}>Save supplier</button>
+      </>}>
       <form id="sup-form" onSubmit={save} className="grid grid-3">
         <Field label="Supplier type" className="span-3" hint={supplier ? 'A supplier with GRNs or payments keeps its type' : 'Decides the bill currency on Receive Goods'}>
           <Segmented value={f.origin} onChange={set('origin')} options={[

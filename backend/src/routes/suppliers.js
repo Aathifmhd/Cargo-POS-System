@@ -23,7 +23,7 @@ const byActiveName = (a, b) => (b.active - a.active) || (a.name < b.name ? -1 : 
 
 r.get('/', async (req, res) => {
   const [list, grns, ledgers] = await inParallel(
-    () => find('suppliers'),
+    () => find('suppliers', { deleted: { $ne: 1 } }),
     () => find('grns', {}, { project: { supplier_id: 1, date: 1 } }),
     () => supplierLedgers(),
   );
@@ -80,15 +80,25 @@ r.put('/:id', async (req, res) => {
   res.json(await findOne('suppliers', { id: old.id }));
 });
 
+/**
+ * Delete a supplier (Super Admin): only when nothing is due to them. One with GRNs or payments is removed from the
+ * lists but kept in the records, so its GRNs, payments and stock history still show who they came from.
+ */
 r.delete('/:id', async (req, res) => {
   const id = num(req.params.id);
-  if (await findOne('grns', { supplier_id: id }) || await findOne('supplier_payments', { supplier_id: id })) {
-    fail('This supplier has GRNs or payments. Mark them inactive instead of deleting.');
+  const s = await findOne('suppliers', { id });
+  if (!s || s.deleted) fail('Supplier not found', 404);
+  const { balance_inr } = summarizeSupplier(await supplierBills(id));
+  if (balance_inr > 0.009) fail(`${s.name} still has dues of ${isLocal(s) ? 'Rs' : '₹'}${round2(balance_inr)}. Settle them first, then delete.`);
+  const history = await findOne('grns', { supplier_id: id }) || await findOne('supplier_payments', { supplier_id: id });
+  await guard(req, `Delete supplier ${s.name}`, 'superadmin', { always: true });
+  if (history) {
+    await setById('suppliers', id, { deleted: 1, active: 0 });
+  } else {
+    await updateMany('products', { supplier_id: id }, { $set: { supplier_id: null } });
+    await deleteMany('suppliers', { id });
   }
-  await guard(req, `Delete supplier ${(await findOne('suppliers', { id }))?.name || `#${id}`}`, 'superadmin', { always: true });
-  await updateMany('products', { supplier_id: id }, { $set: { supplier_id: null } });
-  await deleteMany('suppliers', { id });
-  res.json({ ok: true });
+  res.json({ ok: true, kept_history: Boolean(history) });
 });
 
 /* ---------- supplier payments ---------- */

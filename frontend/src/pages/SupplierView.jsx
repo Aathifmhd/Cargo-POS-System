@@ -26,7 +26,7 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
     try { await api.del(`/suppliers/${s.id}/payments/${p.id}`); toast('Payment deleted'); changed(); } catch (e) { toast(e.message, 'error'); }
   };
   const delSupplier = async () => {
-    if (!confirm(`Delete supplier ${s.name}?`)) return;
+    if (!confirm(`Delete ${s.name}?\n\nTheir GRNs and payments stay in the records; they just leave the supplier list.`)) return;
     try {
       await api.del(`/suppliers/${s.id}`);
       toast('Supplier deleted');
@@ -37,6 +37,9 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
   const subtitle = [s.contact_person, s.city, s.state, s.phone].filter(Boolean).join(' · ');
 
   const actions = <>
+    {/* only a supplier with nothing due can be deleted (Super Admin) */}
+    <button className="btn btn-danger" onClick={delSupplier} disabled={s.balance_inr > 0.009}
+      title={s.balance_inr > 0.009 ? `${cur(s.balance_inr)} is still due — settle it before deleting` : 'Delete this supplier (Super Admin)'}><Icon name="trash" /> Delete</button>
     <button className="btn" onClick={() => setEditing(true)}><Icon name="edit" /> Edit</button>
     <Link className="btn" to="/grn/new"><Icon name="truck" /> New GRN</Link>
     <button className="btn btn-primary" onClick={() => setPaying(true)} disabled={s.balance_inr <= 0}><Icon name="wallet" /> Record payment</button>
@@ -115,7 +118,8 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
       </div>
     </div>
 
-    {editing && <SupplierForm supplier={s} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); changed(); }} />}
+    {editing && <SupplierForm supplier={s} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); changed(); }}
+      onDeleted={() => { setEditing(false); if (modal) { onChanged?.(); onClose?.(); } else navigate('/suppliers'); }} />}
     {paying && <SupplierPaymentModal supplier={s} bills={s.bills} defaultGrnId={paying === true ? null : paying} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); changed(); }} />}
   </>;
 

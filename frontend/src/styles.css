@@ -277,6 +277,10 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .toolbar .search .input { padding-left: 34px; }
 .es-toolbar .es-supplier { width: auto; min-width: 170px; }
 .es-stats { margin-bottom: 18px; }
+/* Action Center */
+.nav-count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--red); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; }
+.table tr.ac-new td { background: var(--amber-soft); transition: background 1.2s; }
+.table tr.ac-login td { color: var(--muted); }
 /* DD/MM/YYYY date box with a calendar button */
 .date-input { position: relative; display: inline-flex; width: 100%; min-width: 150px; }
 .date-input > .input { padding-right: 38px; font-variant-numeric: tabular-nums; }

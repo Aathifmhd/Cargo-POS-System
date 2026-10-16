@@ -93,7 +93,7 @@ const DEFAULTS = {
   stock_moves: { ref: null, note: null, batch_id: null },
   batches: { grn_id: null, kind: 'grn', ref: null, cost_per_pcs: 0, expected_per_pcs: 0, mrp_per_pcs: 0, in_pcs: 0, left_pcs: 0 },
   users: { role: 'cashier', active: 1, last_login: null, token_version: 0 },
-  audit_log: { user_id: null, username: null, approved_by: null },
+  audit_log: { user_id: null, username: null, role: null, approved_by: null, level: null },
   fx_rates: { source: null },
 };
 

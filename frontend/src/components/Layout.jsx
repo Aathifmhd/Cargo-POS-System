@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon, ThemeSwitch } from './ui.jsx';
 import { ChangePasswordModal } from './auth.jsx';
-import { isAdmin, ROLE_NAME } from '../lib.js';
+import { api, isAdmin, isSuper, ROLE_NAME } from '../lib.js';
 import { useAuth, useFx, useSettings } from '../App.jsx';
 
 const NAV = [
+  { to: '/action-center', icon: 'bell', label: 'Action Center', super: true },
   { group: 'Daily work' },
   { to: '/', icon: 'dashboard', label: 'Dashboard', end: true, hint: 'F2' },
   { to: '/pos', icon: 'cart', label: 'New Sale', hint: 'F3', primary: true },
@@ -42,6 +43,22 @@ export default function Layout() {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
+  // Action Center (Super Admin): how many activities came in since it was last opened
+  const [unseen, setUnseen] = useState(0);
+  useEffect(() => {
+    if (!isSuper(user)) return undefined;
+    const seen = () => { try { return Number(localStorage.getItem('cargo-action-center-seen')) || 0; } catch { return 0; } };
+    const check = () => {
+      if (location.pathname === '/action-center') return setUnseen(0);
+      api.get(`/action-center?after=${seen()}`).then((l) => setUnseen(seen() ? l.length : 0)).catch(() => {});
+    };
+    check();
+    const t = setInterval(check, 15000);
+    const reset = () => setUnseen(0);
+    window.addEventListener('cargo-action-center-seen', reset);
+    return () => { clearInterval(t); window.removeEventListener('cargo-action-center-seen', reset); };
+  }, [user, location.pathname]);
+
   // Function keys anywhere: F2 dashboard · F3 billing · F9 bills · F7 take a payment
   useEffect(() => {
     const onKey = (e) => {
@@ -68,7 +85,7 @@ export default function Layout() {
           </div>
         </div>
         <nav>
-          {NAV.filter((i) => !i.admin || isAdmin(user)).map((item, i) =>
+          {NAV.filter((i) => (!i.admin || isAdmin(user)) && (!i.super || isSuper(user))).map((item, i) =>
             item.group ? (
               <div key={i} className="nav-group">{item.group}</div>
             ) : (
@@ -76,6 +93,7 @@ export default function Layout() {
                 <Icon name={item.icon} size={19} />
                 <span>{item.label}</span>
                 {item.hint && <kbd>{item.hint}</kbd>}
+                {item.super && unseen > 0 && <span className="nav-count">{unseen > 99 ? '99+' : unseen}</span>}
               </NavLink>
             )
           )}

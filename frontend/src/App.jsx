@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
-import { api, getToken, setToken, isAdmin } from './lib.js';
+import { api, getToken, setToken, isAdmin, isSuper } from './lib.js';
 import { ToastProvider, Loading } from './components/ui.jsx';
 import { Login, ApprovalProvider } from './components/auth.jsx';
 import Layout from './components/Layout.jsx';
@@ -21,6 +21,7 @@ import Dues from './pages/Dues.jsx';
 import Reports from './pages/Reports.jsx';
 import Settings from './pages/Settings.jsx';
 import Users from './pages/Users.jsx';
+import ActionCenter from './pages/ActionCenter.jsx';
 import { PrintSale, PrintGrn } from './pages/Print.jsx';
 
 const SettingsCtx = createContext({ settings: {}, reload: () => {} });
@@ -114,6 +115,7 @@ export default function App() {
                   <Route path="/reports" element={<Reports />} />
                   <Route path="/settings" element={<Settings />} />
                   {isAdmin(user) && <Route path="/users" element={<Users />} />}
+                  {isSuper(user) && <Route path="/action-center" element={<ActionCenter />} />}
                   <Route path="*" element={<Dashboard />} />
                 </Route>
               </Routes>

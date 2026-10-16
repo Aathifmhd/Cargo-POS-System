@@ -28,6 +28,7 @@ const ICONS = {
   back: <path d="M19 12H5M12 19l-7-7 7-7" />,
   phone: <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z" />,
   cash: <><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 12h.01M18 12h.01" /></>,
+  calendar: <><rect x="3" y="4.5" width="18" height="16.5" rx="2.5" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" /></>,
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
   tag: <><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z" /><circle cx="7" cy="7" r="1.5" /></>,
   download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5M12 15V3" /></>,
@@ -227,6 +228,54 @@ export function NumInput({ value, onChange, className = '', money = false, ...re
       onMouseUp={(e) => { if (fresh.current) { e.preventDefault(); fresh.current = false; } }}
       onBlur={() => { setTyping(false); fresh.current = false; }} onWheel={(e) => e.target.blur()}
       onChange={(e) => { setTyping(true); onChange(e.target.value); }} {...rest} />
+  );
+}
+
+/* ================= DATE (always DD/MM/YYYY) ================= */
+const isoToText = (v) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)}` : '');
+/** "31/12/2026" → "2026-12-31", or null when it is not a real date. */
+function textToIso(t) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t);
+  if (!m) return null;
+  const [, dd, mm, yyyy] = m;
+  const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+  return d.getFullYear() === Number(yyyy) && d.getMonth() === Number(mm) - 1 && d.getDate() === Number(dd) ? `${yyyy}-${mm}-${dd}` : null;
+}
+/**
+ * A date box that always reads DD/MM/YYYY (the browser's own date box follows the computer's region, e.g. MM/DD/YYYY).
+ * Type the digits (the slashes go in by themselves) or use the calendar button. The value stays 'YYYY-MM-DD', and
+ * onChange gets an event-like { target: { value } }, like a normal date input.
+ */
+export function DateInput({ value, onChange, className = '', style, min, max, disabled, ...rest }) {
+  const [text, setText] = useState(isoToText(value));
+  const [typing, setTyping] = useState(false);
+  const picker = useRef();
+  useEffect(() => { if (!typing) setText(isoToText(value)); }, [value, typing]);
+  const send = (v) => onChange?.({ target: { value: v, type: 'date' } });
+  const type = (raw) => {
+    // only the digits count: the slashes go back in by themselves (backspace over a slash removes the digit before it)
+    let d = raw.replace(/\D/g, '');
+    if (raw.length < text.length && d === text.replace(/\D/g, '')) d = d.slice(0, -1);
+    d = d.slice(0, 8);
+    const t = d.length > 4 ? `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}` : d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
+    setText(t);
+    if (!t) return send('');
+    const iso = textToIso(t);
+    if (iso) send(iso);
+  };
+  const bad = text && text.length === 10 && !textToIso(text);
+  return (
+    <span className={`date-input ${className}`} style={style}>
+      <input className={`input ${bad ? 'bad' : ''}`} inputMode="numeric" placeholder="DD/MM/YYYY" value={text} disabled={disabled} maxLength={10}
+        onFocus={(e) => { setTyping(true); e.target.select(); }} onBlur={() => { setTyping(false); setText(isoToText(value)); }}
+        onChange={(e) => type(e.target.value)} {...rest} />
+      <button type="button" className="date-input-btn" tabIndex={-1} disabled={disabled} title="Pick from the calendar"
+        onClick={() => { try { picker.current.showPicker(); } catch { picker.current.focus(); } }}>
+        <Icon name="calendar" size={15} />
+      </button>
+      <input ref={picker} type="date" className="date-input-native" tabIndex={-1} aria-hidden="true" value={value || ''} min={min} max={max}
+        onChange={(e) => send(e.target.value)} />
+    </span>
   );
 }
 

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, useApi, lkr, supMoney, bothMoney, niceDate, int, today } from '../lib.js';
-import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Stat, Segmented, Modal, Field, useToast } from '../components/ui.jsx';
+import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Stat, Segmented, Modal, Field, DateInput, useToast } from '../components/ui.jsx';
 
 /*
  * How a line's extra or short pieces were resolved (empty = still to resolve).
@@ -174,7 +174,7 @@ function ResolveModal({ r, onClose, onDone }) {
               ))}
             </div>
             <div className="grid grid-3">
-              <Field label="Date"><input type="date" className="input" value={v.date} onChange={(e) => upd(kind, { date: e.target.value })} /></Field>
+              <Field label="Date"><DateInput value={v.date} onChange={(e) => upd(kind, { date: e.target.value })} /></Field>
               <Field label="Note" hint="Optional" className="span-2"><input className="input" value={v.note} onChange={(e) => upd(kind, { note: e.target.value })} placeholder={kind === 'short' ? 'e.g. came with GRN-0007' : 'e.g. told by phone, 12 Oct'} /></Field>
             </div>
             <div className="row"><span className="spacer" /><button className="btn btn-primary" disabled={busy || !v.action} onClick={() => send(kind, v.action)}><Icon name="check" size={16} /> Save</button></div>
@@ -336,8 +336,8 @@ export default function ExtraShort() {
           <option value="">All suppliers</option>
           {suppliers.map(([id, name]) => <option key={id} value={String(id)}>{name}</option>)}
         </select>
-        <label className="row gap-s small muted">From <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-        <label className="row gap-s small muted">To <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        <label className="row gap-s small muted">From <DateInput value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label className="row gap-s small muted">To <DateInput value={to} onChange={(e) => setTo(e.target.value)} /></label>
         {filtered && <button className="btn btn-ghost" onClick={clearAll}>Clear filters</button>}
       </div>
 

@@ -303,7 +303,9 @@ async function saveGrn(body, editId = null) {
   const cargoInBill = body.cargo_in_supplier_bill ? 1 : 0;
   let payable_inr = round2(calc.goods_inr + (cargoInBill ? calc.cargo_inr : 0));
   const paymentType = body.payment_type === 'paid' ? 'paid' : 'credit';
-  const due_date = paymentType === 'credit' ? body.due_date || addDays(date, supplier.credit_days) : date;
+  // credit: due 60 days after the supplier's bill date (or the date received when that is not given), unless set by hand
+  const billDate = /^\d{4}-\d{2}-\d{2}$/.test(String(body.supplier_bill_date || '')) ? body.supplier_bill_date : null;
+  const due_date = paymentType === 'credit' ? body.due_date || addDays(billDate || date, 60) : date;
   const head = {
     date, supplier_id: supplier.id, currency: isLocal(supplier) ? 'LKR' : 'INR', supplier_invoice_no: body.supplier_invoice_no || null,
     supplier_bill_date: /^\d{4}-\d{2}-\d{2}$/.test(String(body.supplier_bill_date || '')) ? body.supplier_bill_date : null, cargo_name: (body.cargo_name || '').trim() || null,

@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, n, r2, lkr, inr, isLocalSup, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
-import { PageHeader, Card, Icon, Field, NumInput, Combobox, Segmented, useToast, Loading } from '../components/ui.jsx';
+import { PageHeader, Card, Icon, Field, NumInput, DateInput, Combobox, Segmented, useToast, Loading } from '../components/ui.jsx';
 import { SupplierForm } from '../components/forms.jsx';
 import SizePicker from '../components/SizePicker.jsx';
 import { useSettings } from '../App.jsx';
 
 const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR; each item has its own cargo charge
+/** A supplier bill is due this many days after the supplier's bill date. */
+const GRN_DUE_DAYS = 60;
 let keySeq = 1;
 const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', cargo_per_pcs: '', other_per_pcs: '', mrp_per_pcs: '', expected_per_pcs: '' });
 /**
@@ -130,12 +132,13 @@ export default function GrnForm() {
     const keep = (suppliers || []).find((s) => s.id === x.supplier_id);
     return { ...x, origin, supplier_id: keep && isLocalSup(keep) === (origin === 'local') ? x.supplier_id : null, payment_method: origin === 'local' ? 'Cash' : 'Bank transfer' };
   });
-  // the due date follows the supplier's credit days — but a GRN loaded for editing keeps its own due date
+  // the due date is 60 days from the supplier's bill date (or the date received, until the bill date is entered) —
+  // a GRN loaded for editing keeps its own due date
   const keepDue = useRef(false);
   useEffect(() => {
     if (keepDue.current) { keepDue.current = false; return; }
-    if (supplier && g.payment_type === 'credit') setG((x) => ({ ...x, due_date: addDays(x.date, supplier.credit_days) }));
-  }, [g.supplier_id, g.date, g.payment_type]); // eslint-disable-line
+    if (g.payment_type === 'credit') setG((x) => ({ ...x, due_date: addDays(x.supplier_bill_date || x.date, GRN_DUE_DAYS) }));
+  }, [g.supplier_bill_date, g.date, g.payment_type]); // eslint-disable-line
 
   // the bale's figures come from the added items only
   // every cost is worked out at the fixed costing rate (Settings → Exchange rate), never the live rate
@@ -366,9 +369,9 @@ export default function GrnForm() {
                   onCreate={(name) => setNewSupplier(name)} createLabel={(q) => `Add new supplier “${q}”`} />
               </Field>
               <Field label="Supplier billed date" hint="The date on the supplier's bill">
-                <input type="date" className="input" value={g.supplier_bill_date || ''} max={g.date || undefined} onChange={set('supplier_bill_date')} />
+                <DateInput value={g.supplier_bill_date || ''} max={g.date || undefined} onChange={set('supplier_bill_date')} />
               </Field>
-              <Field label="Date received"><input type="date" className="input" value={g.date} onChange={set('date')} /></Field>
+              <Field label="Date received"><DateInput value={g.date} onChange={set('date')} /></Field>
               <Field label="Cargo name" hint="Cargo / courier company">
                 <input className="input" list="cargo-list" value={g.cargo_name} onChange={set('cargo_name')} placeholder="e.g. Lanka Speed Cargo" />
                 <datalist id="cargo-list">{cargoNames.map((c) => <option key={c} value={c} />)}</datalist>
@@ -655,8 +658,8 @@ export default function GrnForm() {
                 ]} />
               </Field>
               {g.payment_type === 'credit' ? (
-                <Field label="Payment due date" hint={supplier ? `${supplier.name}: ${supplier.credit_days} days credit` : ''}>
-                  <input type="date" className="input" value={g.due_date} onChange={set('due_date')} />
+                <Field label="Payment due date" hint={`${GRN_DUE_DAYS} days from the ${g.supplier_bill_date ? 'supplier billed date' : 'date received (enter the billed date)'} · you can change it`}>
+                  <DateInput value={g.due_date} onChange={set('due_date')} />
                 </Field>
               ) : (
                 <Field label="Paid by"><select className="input" value={g.payment_method} onChange={set('payment_method')}>{PAY_METHODS_SUPPLIER.map((m) => <option key={m}>{m}</option>)}</select></Field>

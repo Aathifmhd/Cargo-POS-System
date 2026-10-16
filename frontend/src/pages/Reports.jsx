@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi, lkr, inr, bothMoney, supMoney, money, niceDate, int, pct, margin, today, addDays, stockText } from '../lib.js';
-import { PageHeader, Card, Loading, ErrorBox, Stat, Tabs, Segmented, Icon } from '../components/ui.jsx';
+import { PageHeader, Card, Loading, ErrorBox, Stat, Tabs, Segmented, Icon, DateInput } from '../components/ui.jsx';
 
 const PRESETS = {
   today: () => [today(), today()],
@@ -25,9 +25,9 @@ export default function Reports() {
       {tab !== 'stock' && (
         <div className="toolbar">
           <Segmented value={preset} onChange={choose} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: '7 days' }, { value: 'month', label: 'This month' }, { value: 'last30', label: '30 days' }, { value: 'year', label: 'This year' }]} />
-          <input type="date" className="input" style={{ width: 160 }} value={from} onChange={(e) => { setPreset(''); setRange([e.target.value, to]); }} />
+          <DateInput style={{ width: 160 }} value={from} onChange={(e) => { setPreset(''); setRange([e.target.value, to]); }} />
           <span className="muted">to</span>
-          <input type="date" className="input" style={{ width: 160 }} value={to} onChange={(e) => { setPreset(''); setRange([from, e.target.value]); }} />
+          <DateInput style={{ width: 160 }} value={to} onChange={(e) => { setPreset(''); setRange([from, e.target.value]); }} />
         </div>
       )}
       {tab === 'sales' && <SalesReport from={from} to={to} />}

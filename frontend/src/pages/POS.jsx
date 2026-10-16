@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers } from '../lib.js';
-import { Icon, Modal, Field, NumInput, CostBadge, useToast, Loading } from '../components/ui.jsx';
+import { Icon, Modal, Field, NumInput, DateInput, CostBadge, useToast, Loading } from '../components/ui.jsx';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 import { isAdmin, isSuper } from '../lib.js';
@@ -715,7 +715,7 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
         {!raising && (
           <div className="grid grid-2">
             <Field label="Paid now (advance)"><NumInput autoFocus value={paid} onChange={setPaid} placeholder="0.00" /></Field>
-            <Field label="Payment due on"><input type="date" className="input" value={due} onChange={(e) => setDue(e.target.value)} /></Field>
+            <Field label="Payment due on"><DateInput value={due} onChange={(e) => setDue(e.target.value)} /></Field>
           </div>
         )}
         <dl className="kv">

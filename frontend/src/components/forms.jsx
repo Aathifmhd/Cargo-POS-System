@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { api, n, r2, today, lkr, inr, supMoney, isLocalSup, PAY_METHODS_CUSTOMER, PAY_METHODS_SUPPLIER, isAdmin, isSuper } from '../lib.js';
-import { Modal, Field, NumInput, useToast, Icon, Segmented } from './ui.jsx';
+import { api, n, r2, today, niceDate, lkr, inr, supMoney, isLocalSup, PAY_METHODS_CUSTOMER, PAY_METHODS_SUPPLIER, isAdmin, isSuper } from '../lib.js';
+import { Modal, Field, NumInput, DateInput, useToast, Icon, Segmented } from './ui.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 
 function useForm(initial) {
@@ -128,7 +128,7 @@ function BillAndAmount({ bills, billKey, billLabel, f, setF, set, money, amountK
             <div className={`input input-static strong ${left <= 0 ? 'text-green' : 'text-red'}`}>{money(Math.max(0, left))}</div>
           </Field>
         </div>
-        <Field label="Date" className="pay-date"><input type="date" className="input" value={f.date} onChange={set('date')} /></Field>
+        <Field label="Date" className="pay-date"><DateInput value={f.date} onChange={set('date')} /></Field>
       </PayStep>
     </>
   );
@@ -202,7 +202,7 @@ export function CustomerPaymentModal({ customer, bills = [], defaultSaleId, onCl
       footer={<><button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" form="cp-form" disabled={busy}><Icon name="check" size={16} /> {busy ? 'Saving…' : n(f.amount) > 0 ? `Receive payment · ${lkr(f.amount)}` : 'Receive payment'}</button></>}>
       <form id="cp-form" onSubmit={save} className="pay-form">
-        <BillAndAmount bills={bills} billKey="sale_id" billLabel={(b) => `${b.invoice_no} · ${b.date}`} f={f} setF={setF} set={set} money={lkr}
+        <BillAndAmount bills={bills} billKey="sale_id" billLabel={(b) => `${b.invoice_no} · ${niceDate(b.date)}`} f={f} setF={setF} set={set} money={lkr}
           amountKey="amount" amountLabel="Amount receiving (Rs)" verb="receiving" />
         <PayStep title="How are they paying?">
           <select className="input" value={f.method} onChange={set('method')}>{PAY_METHODS_CUSTOMER.map((m) => <option key={m}>{m}</option>)}</select>

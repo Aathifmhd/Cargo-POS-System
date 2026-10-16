@@ -166,8 +166,8 @@ export function addDays(dateStr, days) {
 }
 export function niceDate(s) {
   if (!s) return '—';
-  const d = new Date(s.slice(0, 10) + 'T00:00:00');
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const v = String(s).slice(0, 10);   // 'YYYY-MM-DD' → 'DD/MM/YYYY'
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)}` : '—';
 }
 export function daysBetween(a, b) {
   return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);

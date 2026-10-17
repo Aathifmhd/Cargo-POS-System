@@ -23,7 +23,7 @@ const byActiveName = (a, b) => (b.active - a.active) || (a.name < b.name ? -1 : 
 
 r.get('/', async (req, res) => {
   const [list, sales, ledgers] = await inParallel(
-    () => find('customers'),
+    () => find('customers', { deleted: { $ne: 1 } }),
     () => find('sales', { status: 'completed', customer_id: { $ne: null } }, { project: { customer_id: 1, total: 1, date: 1 } }),
     () => customerLedgers(),
   );
@@ -97,14 +97,21 @@ r.put('/:id/credit-limit', async (req, res) => {
   res.json({ ...(await findOne('customers', { id: c.id })), ...(await summary()) });
 });
 
+/**
+ * Delete a customer (Super Admin): only when they owe nothing. One with bills or payments is removed from the lists
+ * but kept in the records, so their bills and payments still show who they were.
+ */
 r.delete('/:id', async (req, res) => {
   const id = num(req.params.id);
-  if (await findOne('sales', { customer_id: id }) || await findOne('customer_payments', { customer_id: id })) {
-    fail('This customer has bills or payments. Mark them inactive instead of deleting.');
-  }
-  await guard(req, `Delete customer ${(await findOne('customers', { id }))?.name || `#${id}`}`, 'superadmin', { always: true });
-  await deleteMany('customers', { id });
-  res.json({ ok: true });
+  const c = await findOne('customers', { id });
+  if (!c || c.deleted) fail('Customer not found', 404);
+  const { balance } = summarizeCustomer(await customerBills(id));
+  if (balance > 0.009) fail(`${c.name} still has dues of Rs ${round2(balance)}. Collect them first, then delete.`);
+  const history = await findOne('sales', { customer_id: id }) || await findOne('customer_payments', { customer_id: id });
+  await guard(req, `Delete customer ${c.name}`, 'superadmin', { always: true });
+  if (history) await setById('customers', id, { deleted: 1, active: 0 });
+  else await deleteMany('customers', { id });
+  res.json({ ok: true, kept_history: Boolean(history) });
 });
 
 /* ---------- customer payments (collections) ---------- */

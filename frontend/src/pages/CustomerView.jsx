@@ -35,7 +35,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
     try { await api.del(`/customers/${c.id}/payments/${p.id}`); toast('Payment deleted'); changed(); } catch (e) { toast(e.message, 'error'); }
   };
   const delCustomer = async () => {
-    if (!confirm(`Delete customer ${c.name}?`)) return;
+    if (!confirm(`Delete ${c.name}?\n\nTheir bills and payments stay in the records; they just leave the customer list.`)) return;
     try {
       await api.del(`/customers/${c.id}`);
       toast('Customer deleted');
@@ -47,6 +47,9 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
   const subtitle = [c.shop_name, c.city, c.phone].filter(Boolean).join(' · ');
 
   const actions = <>
+    {/* only a customer who owes nothing can be deleted (Super Admin) */}
+    <button className="btn btn-danger" onClick={delCustomer} disabled={c.balance > 0.009}
+      title={c.balance > 0.009 ? `${lkr(c.balance)} is still due — collect it before deleting` : 'Delete this customer (Super Admin)'}><Icon name="trash" /> Delete</button>
     <button className="btn" onClick={() => setEditing(true)}><Icon name="edit" /> Edit</button>
     {c.balance > 0 && (c.phone || c.whatsapp) && <a className="btn" href={whatsappReminder(c, c.balance, settings.shop_name)} target="_blank" rel="noreferrer"><Icon name="phone" /> WhatsApp reminder</a>}
     <button className="btn btn-primary" onClick={() => setPaying(true)} disabled={c.balance <= 0}><Icon name="cash" /> Receive payment</button>
@@ -132,7 +135,6 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
           </dl>
         </Card>
         <Link to="/pos" className="btn btn-block"><Icon name="cart" /> New sale</Link>
-        {c.bill_count === 0 && c.payments.length === 0 && <button className="btn btn-danger" onClick={delCustomer}><Icon name="trash" /> Delete customer</button>}
       </div>
     </div>
 

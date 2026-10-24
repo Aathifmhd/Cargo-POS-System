@@ -632,11 +632,15 @@ function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose
 /* ---------------- take payment (F10) ---------------- */
 function PayModal({ total, busy, onPay, onClose }) {
   const [got, setGot] = useState('');
-  // returns worth more than the sale: give the money back
+  const settled = useSettled();
+  const done = useRef(false);   // one bill per pop-up, however many times the button is pressed
+  useEffect(() => { if (!busy) done.current = false; }, [busy]);   // a save that failed can be tried again
+  const pay = (v) => { if (!settled() || done.current) return; done.current = true; onPay(v); };
+  // returns worth more than the sale: give the money back — the button is pressed on purpose (it does not take the focus)
   if (total < 0) {
     return (
       <Modal size="sm" title="Refund — cash" onClose={onClose}
-        footer={<><button className="btn" onClick={onClose}>Back</button><button className="btn btn-primary" autoFocus disabled={busy} onClick={() => onPay(total)}><Icon name="check" /> {busy ? 'Saving…' : 'Refund & finish (Enter)'}</button></>}>
+        footer={<><button className="btn" onClick={onClose}>Back</button><button className="btn btn-primary" disabled={busy} onClick={() => pay(total)} onKeyDown={noHeldEnter}><Icon name="check" /> {busy ? 'Saving…' : 'Refund & finish'}</button></>}>
         <div className="stack">
           <div className="pay-total refund"><span>Give back to the customer</span><b>{lkr(-total)}</b></div>
           <p className="muted small">The returned pieces go back into stock, and the bill is saved as a cash refund.</p>
@@ -645,11 +649,11 @@ function PayModal({ total, busy, onPay, onClose }) {
     );
   }
   const change = n(got) - total;
-  const go = (e) => { e.preventDefault(); if (n(got) && change < 0) return; onPay(n(got) || total); };
+  const go = (e) => { e.preventDefault(); if (n(got) && change < 0) return; pay(n(got) || total); };
   return (
     <Modal size="sm" title="Take payment — cash" onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>Back</button><button className="btn btn-primary" form="pay-form" disabled={busy || (n(got) > 0 && change < 0)}><Icon name="check" /> {busy ? 'Saving…' : 'Finish bill (Enter)'}</button></>}>
-      <form id="pay-form" className="stack" onSubmit={go}>
+      <form id="pay-form" className="stack" onSubmit={go} onKeyDown={noHeldEnter}>
         <div className="pay-total"><span>To pay</span><b>{lkr(total)}</b></div>
         <Field label="Cash received" hint="Leave empty if they paid the exact amount">
           <NumInput className="input-lg" autoFocus value={got} onChange={setGot} placeholder={money(total)} />
@@ -665,6 +669,18 @@ function PayModal({ total, busy, onPay, onClose }) {
     </Modal>
   );
 }
+
+/**
+ * Payment pop-ups finish a bill on Enter. An Enter from before the pop-up opened (the Enter Enter that opened
+ * payment, or a key held down) must never finish it: for a moment after opening, and for a held key, Enter is ignored.
+ */
+const SETTLE_MS = 700;
+function useSettled() {
+  const opened = useRef(Date.now());
+  return () => Date.now() - opened.current > SETTLE_MS;
+}
+/** onKeyDown for a pay pop-up: swallow a held-down Enter (it would press the finish button again and again). */
+const noHeldEnter = (e) => { if (e.key === 'Enter' && e.repeat) { e.preventDefault(); e.stopPropagation(); } };
 
 /* ---------------- take payment: cash or credit? ---------------- */
 function PayTypeModal({ total, customer, onChoose, onClose }) {
@@ -708,9 +724,13 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
   const [newLimit, setNewLimit] = useState(String(suggested));
   useEffect(() => { if (!raising) setNewLimit(String(suggested)); }, [suggested, raising]);
 
+  const settled = useSettled();
+  const done = useRef(false);   // one bill per pop-up
+  useEffect(() => { if (!busy) done.current = false; }, [busy]);   // a save that failed can be tried again
   const submit = (e) => {
     e.preventDefault();
-    if (!over) return onConfirm(paid, due);
+    if (!settled() || done.current) return;
+    if (!over) { done.current = true; return onConfirm(paid, due); }
     if (!raising) return setRaising(true);
     if (n(newLimit) < after) return;
     onRaise(n(newLimit), paid, due);
@@ -723,7 +743,7 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
           <Icon name={over ? 'shield' : 'check'} /> {busy ? 'Saving…' : refund ? 'Credit to account (Enter)' : !over ? 'Put on account (Enter)' : raising ? 'Raise limit & bill (Enter)' : 'Raise credit limit… (Enter)'}
         </button>
       </>}>
-      <form id="credit-form" className="stack" onSubmit={submit}>
+      <form id="credit-form" className="stack" onSubmit={submit} onKeyDown={noHeldEnter}>
         {refund
           ? <div className="pay-total refund"><span>Comes off what they owe</span><b>{lkr(-total)}</b></div>
           : <div className="pay-total amber"><span>This bill</span><b>{lkr(total)}</b></div>}

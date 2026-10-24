@@ -82,7 +82,7 @@ export default function Stock() {
                     const cost = src ? src.cost_per_pcs : p.cost_per_pcs;
                     const exp = src?.expected_per_pcs || p.expected_per_set / p.pcs_per_set;
                     return (
-                      <tr key={`${p.id}-${b?.id ?? 0}`} className={`click ${b && k > 0 ? 'batch-row' : ''}`} onClick={() => setOpen(p.id)}>
+                      <tr key={`${p.id}-${b?.id ?? 0}`} className={`click ${b ? 'multi-cost' : ''} ${b && k < lines.length - 1 ? 'multi-more' : ''}`} onClick={() => setOpen(p.id)}>
                         <td className="muted strong">{p.code}</td>
                         <td>
                           <b>{p.name}</b> {b && <CostBadge tier={tiers[b.id]} />}

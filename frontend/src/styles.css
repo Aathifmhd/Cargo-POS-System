@@ -309,7 +309,10 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .cost-medium { background: var(--amber-soft); color: var(--amber); }
 .cost-high { background: var(--red-soft); color: var(--red); }
 .till-hits .cost-badge { margin-left: 6px; font-size: 10.5px; letter-spacing: .02em; text-transform: uppercase; }
-.table tr.batch-row td { border-top-style: dashed; }
+/* Stock: the lines of one product bought at different costs share a light background, with no line between them */
+.table tbody tr.multi-cost td { background: var(--row-hover); }
+.table tbody tr.multi-cost.multi-more td { border-bottom-color: transparent; }
+.table tbody tr.multi-cost:hover td { background: var(--surface-3); }
 .item-size-row { display: flex; flex-direction: column; gap: 22px; }   /* sizes, then the cargo charge and other expenses below */
 .item-charges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }   /* two equal halves of the card */
 .item-size-row .billed-row { margin-top: 12px; margin-bottom: -12px; }   /* billed price sits close to the cargo charge below it */

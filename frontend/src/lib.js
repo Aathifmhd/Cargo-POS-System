@@ -11,17 +11,20 @@ export function parseCatalog(settings) {
   } catch { return []; }
 }
 /**
- * Low / medium / high cost for one product's stock batches (cheapest first, as the server sends them).
- * The dearest third (at least one) is high, the rest split evenly with the extra one going to low:
+ * Low / medium / high cost for one product's stock batches. The badge goes by the cost itself, so batches that cost
+ * the same (e.g. the same price, different expected selling price) get the same badge. Over the different costs:
+ * the dearest third (at least one) is high, the rest split evenly with the extra one going to low —
  * 2 costs → low, high · 3 → low, medium, high · 5 → low, low, medium, medium, high.
- * Returns batch id → 'low' | 'medium' | 'high' (empty when there is only one cost).
+ * Returns batch id → 'low' | 'medium' | 'high' (empty when every batch costs the same).
  */
 export function costTiers(batches) {
-  const list = [...(batches || [])].sort((a, b) => a.cost_per_pcs - b.cost_per_pcs);
-  if (list.length < 2) return {};
-  const high = Math.max(1, Math.floor(list.length / 3));
-  const low = Math.ceil((list.length - high) / 2);
-  return Object.fromEntries(list.map((b, i) => [b.id, i < low ? 'low' : i < list.length - high ? 'medium' : 'high']));
+  const costOf = (b) => Math.round((Number(b.cost_per_pcs) || 0) * 100);   // to the cent
+  const costs = [...new Set((batches || []).map(costOf))].sort((a, b) => a - b);
+  if (costs.length < 2) return {};
+  const high = Math.max(1, Math.floor(costs.length / 3));
+  const low = Math.ceil((costs.length - high) / 2);
+  const tierOf = Object.fromEntries(costs.map((c, i) => [c, i < low ? 'low' : i < costs.length - high ? 'medium' : 'high']));
+  return Object.fromEntries((batches || []).map((b) => [b.id, tierOf[costOf(b)]]));
 }
 
 /** A supplier (or its GRN / bill) from Sri Lanka bills in Rs; Indian suppliers in ₹. */

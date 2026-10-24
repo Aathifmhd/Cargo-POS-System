@@ -239,7 +239,7 @@ export async function customerLedgers(ids = null) {
   const of = ids ? { customer_id: { $in: ids } } : { customer_id: { $ne: null } };
   const [customers, saleList, pays] = await inParallel(
     () => find('customers', ids ? { id: { $in: ids } } : {}),
-    () => find('sales', { ...of, status: 'completed', $expr: { $gt: [{ $subtract: ['$total', '$paid_at_sale'] }, 0.009] } },
+    () => find('sales', { ...of, status: 'completed', $expr: { $gt: [{ $abs: { $subtract: ['$total', '$paid_at_sale'] } }, 0.009] } },
       { project: { id: 1, invoice_no: 1, date: 1, due_date: 1, total: 1, paid_at_sale: 1, payment_type: 1, customer_id: 1 } }),
     () => find('customer_payments', of, { project: { customer_id: 1, sale_id: 1, amount: 1 } }),
   );
@@ -258,6 +258,8 @@ export async function customerLedgers(ids = null) {
       docs.push({ id: null, invoice_no: 'Opening balance', date: String(c.created_at).slice(0, 10), due_date: null, amount: c.opening_balance, linkedPaid: 0 });
     }
     for (const s of sales.filter((x) => x.customer_id === c.id)) {
+      // a return on account: what the customer is owed comes off their other bills (oldest first)
+      if (s.total - s.paid_at_sale < 0) { unlinked += round2(s.paid_at_sale - s.total); continue; }
       docs.push({
         id: s.id, invoice_no: s.invoice_no, date: s.date, due_date: s.due_date, total: s.total, paid_at_sale: s.paid_at_sale,
         amount: round2(s.total - s.paid_at_sale), payment_type: s.payment_type, linkedPaid: linked[s.id] || 0,
@@ -534,10 +536,15 @@ export async function deleteGrn(id) {
 /* =========================================================
    SALES
    ========================================================= */
-/** approve(action) is called when the bill needs an admin's OK (below cost). */
+/**
+ * approve(action) is called when the bill needs an admin's OK (below cost).
+ * A line with a negative quantity is a customer RETURN: its pieces go back into stock (the batch picked, at that
+ * batch's cost), and it takes its amount off the bill. A bill that comes to less than zero is a refund: cash given
+ * back, or (credit) money the customer has on account, which comes off what they owe.
+ */
 export async function createSale(body, approve) {
   const settings = await getSettings();
-  const items = (body.items || []).filter((i) => num(i.qty) > 0);
+  const items = (body.items || []).filter((i) => num(i.qty) !== 0);
   if (!items.length) fail('The bill is empty');
   const paymentType = body.payment_type === 'credit' ? 'credit' : 'cash';
   const customer = body.customer_id ? await findOne('customers', { id: num(body.customer_id) }) : null;
@@ -554,10 +561,15 @@ export async function createSale(body, approve) {
       const per = unit === 'set' ? p.pcs_per_set : 1;
       const qty = num(i.qty);
       const pcs = Math.round(qty * per);
-      if (pcs > p.stock_pcs) fail(`Not enough stock for "${p.name}". Available: ${p.stock_pcs} pcs`);
-      // taken now (the whole bill is undone if anything below fails), so the cost is the batch's own
-      const taken = await moveStock(p.id, -pcs, 'sale', invoice_no, `${qty} ${unit}`, date, { batchId: Array.isArray(i.batch_ids) && i.batch_ids.length > 1 ? null : i.batch_id ?? null, batchIds: Array.isArray(i.batch_ids) ? i.batch_ids : null });
-      const costPc = pcs ? sum(taken, (t) => -t.pcs * t.cost_per_pcs) / pcs : p.cost_per_pcs;
+      const back = pcs < 0;   // a return from the customer
+      if (!back && pcs > p.stock_pcs) fail(`Not enough stock for "${p.name}". Available: ${p.stock_pcs} pcs`);
+      // moved now (the whole bill is undone if anything below fails), so the cost is the batch's own:
+      // a sale takes from the batch picked (or the oldest first); a return goes back into the batch picked (or the newest)
+      const ids = Array.isArray(i.batch_ids) ? i.batch_ids : null;
+      const taken = back
+        ? await moveStock(p.id, -pcs, 'return', invoice_no, `Returned ${-qty} ${unit}`, date, { batchId: i.batch_id ?? ids?.[0] ?? null })
+        : await moveStock(p.id, -pcs, 'sale', invoice_no, `${qty} ${unit}`, date, { batchId: ids && ids.length > 1 ? null : i.batch_id ?? null, batchIds: ids });
+      const costPc = pcs ? sum(taken, (t) => Math.abs(t.pcs) * t.cost_per_pcs) / Math.abs(pcs) : p.cost_per_pcs;
       const batch = taken.length === 1 ? await findOne('batches', { id: taken[0].batch_id }) : null;
       const price = num(i.price);
       const disc_pct = Math.min(100, Math.max(0, num(i.disc_pct)));
@@ -573,14 +585,16 @@ export async function createSale(body, approve) {
       });
     }
     const subtotal = round2(sum(lines, (l) => l.line_total));
-    const discount = Math.min(round2(num(body.discount)), subtotal);
+    // a bill discount only on what is sold (never on a refund)
+    const discount = subtotal > 0 ? Math.min(Math.max(0, round2(num(body.discount))), subtotal) : 0;
     const total = round2(subtotal - discount);
-    const cost_total = round2(sum(lines, (l) => l.cost * l.qty));
-    const paid = paymentType === 'cash' ? total : Math.min(round2(num(body.paid_amount)), total);
+    const cost_total = round2(sum(lines, (l) => l.cost * l.qty));   // returns take their cost back off
+    // cash: paid in full (or refunded in full); credit: what was paid now — a credit refund stays on the account
+    const paid = paymentType === 'cash' ? total : total <= 0 ? 0 : Math.min(Math.max(0, round2(num(body.paid_amount))), total);
     const due_date = paymentType === 'credit' ? body.due_date || addDays(date, customer.credit_days) : null;
 
     const reasons = [];
-    const below = lines.filter((l) => l.cost > 0 && l.net < l.cost);
+    const below = lines.filter((l) => l.qty > 0 && l.cost > 0 && l.net < l.cost);
     if (below.length) reasons.push(`Sell below cost: ${below.map((l) => `${l.p.name} at Rs ${l.net} (cost Rs ${l.cost})`).join('; ')}`);
     if (paymentType === 'credit' && customer.credit_limit > 0) {
       const after = round2((await customerSummary(customer.id)).balance + total - paid);

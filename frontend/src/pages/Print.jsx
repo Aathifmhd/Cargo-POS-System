@@ -46,10 +46,10 @@ export function PrintSale() {
     <>
       <PrintBar />
       <div className="print-page">
-        <ShopHead title={s.status === 'void' ? 'CANCELLED BILL' : s.payment_type === 'credit' ? 'CREDIT INVOICE' : 'CASH BILL'} no={s.invoice_no} date={s.date} />
+        <ShopHead title={s.status === 'void' ? 'CANCELLED BILL' : s.total < 0 ? (s.payment_type === 'credit' ? 'RETURN · CREDIT NOTE' : 'RETURN · CASH REFUND') : s.payment_type === 'credit' ? 'CREDIT INVOICE' : 'CASH BILL'} no={s.invoice_no} date={s.date} />
         <div className="print-meta">
           <div><div className="muted">Bill to</div><b>{s.customer_name}</b>{s.customer_shop && <div>{s.customer_shop}</div>}{s.customer_address && <div>{s.customer_address}</div>}{s.customer_phone && <div>{s.customer_phone}</div>}</div>
-          {s.payment_type === 'credit' && <div className="right"><div className="muted">Payment due</div><b>{niceDate(s.due_date)}</b></div>}
+          {s.payment_type === 'credit' && s.total >= 0 && <div className="right"><div className="muted">Payment due</div><b>{niceDate(s.due_date)}</b></div>}
         </div>
         <table>
           <thead><tr><th>#</th><th>Item</th><th className="right">Qty</th><th className="right">Rate</th>{hasDisc && <th className="right">Dis</th>}<th className="right">Amount</th></tr></thead>
@@ -63,7 +63,7 @@ export function PrintSale() {
           <div><span>Subtotal</span><span>{money(s.subtotal)}</span></div>
           {s.discount > 0 && <div><span>Discount</span><span>- {money(s.discount)}</span></div>}
           <div className="grand"><span>Total</span><span>{lkr(s.total)}</span></div>
-          {s.payment_type === 'credit' && <>
+          {s.payment_type === 'credit' && s.total >= 0 && <>
             <div><span>Paid</span><span>{money(s.paid_at_sale)}</span></div>
             <div><b>Balance on this bill</b><b>{money(s.total - s.paid_at_sale)}</b></div>
             {s.customer_balance != null && <div><span>Total outstanding</span><span>{lkr(s.customer_balance)}</span></div>}

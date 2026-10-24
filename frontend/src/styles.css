@@ -277,6 +277,11 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .toolbar .search .input { padding-left: 34px; }
 .es-toolbar .es-supplier { width: auto; min-width: 170px; }
 .es-stats { margin-bottom: 18px; }
+/* New sale: return lines (negative quantity) and refunds */
+.till-tbl .tag.return { display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 800; letter-spacing: .03em; background: #E6F0FF; color: #1F57B8; }
+.till-tbl tr.return td { background: #F3F7FF; }
+.till-tbl tr.return td.n.am b, .till-tbl tr.return td.n.q b { color: #1F57B8; }
+.pay-total.refund { background: #E6F0FF; color: #1F57B8; border-color: #B9CFF3; }
 /* Action Center */
 .nav-count { margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--red); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; }
 .table tr.ac-new td { background: var(--amber-soft); transition: background 1.2s; }

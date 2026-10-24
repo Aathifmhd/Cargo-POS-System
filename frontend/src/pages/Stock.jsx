@@ -144,7 +144,7 @@ function ProductModal({ id, categories, onClose, onChanged }) {
 
   if (!f) return <Modal title="Loading…" onClose={onClose}><Loading /></Modal>;
   const cat = findCategory(catalog, f.category);
-  const moveLabel = { grn: 'Received', 'grn-edit': 'GRN edited', 'grn-delete': 'GRN deleted', sale: 'Sold', void: 'Bill cancelled', adjust: 'Adjustment', 'short-received': 'Short pieces received', 'short-undo': 'Short pieces taken back' };
+  const moveLabel = { grn: 'Received', 'grn-edit': 'GRN edited', 'grn-delete': 'GRN deleted', sale: 'Sold', return: 'Customer return', void: 'Bill cancelled', adjust: 'Adjustment', 'short-received': 'Short pieces received', 'short-undo': 'Short pieces taken back' };
 
   return (
     <Modal size="lg" title={id ? p.name : 'Add product manually'} subtitle={id ? `${p.code} · ${stockText(p.stock_pcs, p.pcs_per_set)} in stock` : 'Use this for opening stock. Normally products are added through Receive Goods.'} onClose={onClose}

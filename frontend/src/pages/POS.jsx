@@ -16,6 +16,7 @@ const writeLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } 
 export const POS_KEYS = [
   ['F1', 'Back to the code box'],
   ['Enter', 'Next box · add the line'],
+  ['- in front of the qty', 'A return from the customer (e.g. -2): back into stock'],
   ['← →', 'Previous / next box'],
   ['Esc', 'Clear the entry row'],
   ['* in code box', 'List every product'],
@@ -166,13 +167,13 @@ export default function POS() {
     const p = cur;
     if (!p) { toast('Scan or type a product code first', 'error'); return toCode(); }
     const qty = n(entry.qty);
-    if (qty <= 0) { toast('Enter a quantity', 'error'); return focus('tQty'); }
+    if (!qty) { toast('Enter a quantity (put - in front for a return, e.g. -2)', 'error'); return focus('tQty'); }
     const per = unitInfo(p, entry.unit).per;
     const free = freePcs(p, curB);
-    if (qty * per > free) { toast(`Only ${pcsText(Math.max(0, free))} of ${p.name}${curB ? ` (${curB.ref})` : ''} left`, 'error'); return focus('tQty'); }
+    if (qty > 0 && qty * per > free) { toast(`Only ${pcsText(Math.max(0, free))} of ${p.name}${curB ? ` (${curB.ref})` : ''} left`, 'error'); return focus('tQty'); }
     const line = { product_id: p.id, batch_id: curB?.id ?? null, unit: entry.unit, qty, price: n(entry.price), disc_pct: n(entry.disc_pct) };
     setLines((ls) => {
-      const i = ls.findIndex((l) => l.product_id === line.product_id && (l.batch_id ?? null) === line.batch_id && l.unit === line.unit && n(l.price) === line.price && n(l.disc_pct) === line.disc_pct);
+      const i = ls.findIndex((l) => l.product_id === line.product_id && Math.sign(n(l.qty)) === Math.sign(line.qty) && (l.batch_id ?? null) === line.batch_id && l.unit === line.unit && n(l.price) === line.price && n(l.disc_pct) === line.disc_pct);
       if (i >= 0) return ls.map((l, j) => (j === i ? { ...l, qty: n(l.qty) + qty } : l));
       return [line, ...ls];   // newest line on top
     });
@@ -228,8 +229,8 @@ export default function POS() {
     const l = lines[edit.i];
     const p = byId[l.product_id];
     const qty = n(edit.qty);
-    if (qty <= 0) return toast('Quantity must be more than 0', 'error');
-    if (p && qty * unitInfo(p, edit.unit).per > freePcs(p, batchOf(p.id, l.batch_id), edit.i)) return toast(`Not enough stock of ${p.name}`, 'error');
+    if (!qty) return toast('Quantity can\'t be 0 (put - in front for a return)', 'error');
+    if (p && qty > 0 && qty * unitInfo(p, edit.unit).per > freePcs(p, batchOf(p.id, l.batch_id), edit.i)) return toast(`Not enough stock of ${p.name}`, 'error');
     update(edit.i, { unit: edit.unit, qty, price: n(edit.price) });
     setEdit(null);
   };
@@ -265,7 +266,7 @@ export default function POS() {
       const u = unitInfo(p, l.unit, b);
       const c = lineCalc(l);
       sub += c.gross; lineDisc += c.disc; cost += u.cost * n(l.qty); pcs += n(l.qty) * u.per;
-      return { ...l, p, b, u, ...c, under: u.cost > 0 && c.net < u.cost };
+      return { ...l, p, b, u, ...c, back: n(l.qty) < 0, under: n(l.qty) > 0 && u.cost > 0 && c.net < u.cost };
     });
     const afterLines = sub - lineDisc;
     const bd = String(billDisc).trim().endsWith('%') ? (afterLines * n(String(billDisc).replace('%', ''))) / 100 : n(billDisc);
@@ -301,7 +302,7 @@ export default function POS() {
     try {
       const sale = await api.post('/sales', {
         customer_id: customerId, payment_type: type, discount: T.billDisc,
-        paid_amount: type === 'credit' ? n(paid) : T.net, due_date: type === 'credit' ? due : null,
+        paid_amount: type === 'credit' ? (T.net < 0 ? 0 : n(paid)) : T.net, due_date: type === 'credit' ? due : null,
         items: lines.map((l) => ({ product_id: l.product_id, batch_id: l.batch_id ?? null, batch_ids: batchOf(l.product_id, l.batch_id)?.ids || null, unit: l.unit, qty: n(l.qty), price: n(l.price), disc_pct: n(l.disc_pct) })),
       });
       writeLS(LAST_KEY, sale.id);
@@ -367,8 +368,8 @@ export default function POS() {
         if (k === ' ') return take(() => startEdit(sel, 'lnQty'));
         if (k === 'Enter') return take(doubleEnter);
         if (k.toLowerCase() === 'p') return take(() => startEdit(sel, 'lnPrice'));
-        if (k === '+' || k === '=') return take(() => update(sel, { qty: n(lines[sel].qty) + 1 }));
-        if (k === '-') return take(() => update(sel, { qty: Math.max(1, n(lines[sel].qty) - 1) }));
+        if (k === '+' || k === '=') return take(() => update(sel, { qty: n(lines[sel].qty) < 0 ? n(lines[sel].qty) - 1 : n(lines[sel].qty) + 1 }));
+        if (k === '-') return take(() => update(sel, { qty: n(lines[sel].qty) < 0 ? Math.min(-1, n(lines[sel].qty) + 1) : Math.max(1, n(lines[sel].qty) - 1) }));
         if (k === 'Delete' || k === 'Backspace') return take(() => remove(sel));
         if (k === 'Escape') return take(toCode);
       }
@@ -426,7 +427,7 @@ export default function POS() {
         </div>
         <label className="f-qty"><span>QTY (PCS)</span>
           <input id="tQty" inputMode="decimal" autoComplete="off" value={entry.qty} {...selectAll}
-            onChange={(e) => setEntry({ ...entry, qty: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tQty')} />
+            onChange={(e) => setEntry({ ...entry, qty: e.target.value.replace(/[^\d.-]/g, '').replace(/(?!^)-/g, '') })} onKeyDown={entryKey('tQty')} />
         </label>
         {showCost && <div className="f-ro"><span>COST</span><div className="till-ro cost">{cur ? money(eu.cost) : '—'}</div></div>}
         <div className="f-ro"><span>EXPECTED</span>
@@ -480,12 +481,13 @@ export default function POS() {
             <tbody>
               {T.rows.length === 0 && <tr><td colSpan={9} className="till-empty">Scan or key an item code above. The newest line sits at the top.</td></tr>}
               {T.rows.map((r, i) => r && (
-                <tr key={i} className={`${i === sel ? 'on' : ''} ${edit?.i === i ? 'editing' : ''}`} onClick={(e) => { if (!typingIn(e.target) && e.target.tagName !== 'BUTTON') { setSel(i); document.activeElement?.blur(); } }}>
+                <tr key={i} className={`${i === sel ? 'on' : ''} ${edit?.i === i ? 'editing' : ''} ${r.back ? 'return' : ''}`} onClick={(e) => { if (!typingIn(e.target) && e.target.tagName !== 'BUTTON') { setSel(i); document.activeElement?.blur(); } }}>
                   <td className="c">{T.rows.length - i}</td>
                   <td className="c">{r.p.code}</td>
                   <td className="d">
                     <b>{r.p.name.toUpperCase()}</b>
                     <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{r.b && groupsOf(r.p).length > 1 ? `${batchText(r.b)} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}expected {money(r.u.expectedPc)}</em>
+                    {r.back && <span className="tag return">RETURN · back to stock</span>}
                     {showCost && r.under && <span className="tag bad">under cost</span>}
                   </td>
                   <td className="n q">{edit?.i === i
@@ -630,6 +632,18 @@ function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose
 /* ---------------- take payment (F10) ---------------- */
 function PayModal({ total, busy, onPay, onClose }) {
   const [got, setGot] = useState('');
+  // returns worth more than the sale: give the money back
+  if (total < 0) {
+    return (
+      <Modal size="sm" title="Refund — cash" onClose={onClose}
+        footer={<><button className="btn" onClick={onClose}>Back</button><button className="btn btn-primary" autoFocus disabled={busy} onClick={() => onPay(total)}><Icon name="check" /> {busy ? 'Saving…' : 'Refund & finish (Enter)'}</button></>}>
+        <div className="stack">
+          <div className="pay-total refund"><span>Give back to the customer</span><b>{lkr(-total)}</b></div>
+          <p className="muted small">The returned pieces go back into stock, and the bill is saved as a cash refund.</p>
+        </div>
+      </Modal>
+    );
+  }
   const change = n(got) - total;
   const go = (e) => { e.preventDefault(); if (n(got) && change < 0) return; onPay(n(got) || total); };
   return (
@@ -666,16 +680,16 @@ function PayTypeModal({ total, customer, onChoose, onClose }) {
     else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!e.repeat) onChoose(type); }
   };
   return (
-    <Modal size="sm" title="Take payment" subtitle={`${lkr(total)} · how is the customer paying?`} onClose={onClose}
+    <Modal size="sm" title={total < 0 ? 'Refund' : 'Take payment'} subtitle={total < 0 ? `${lkr(-total)} to give back · how?` : `${lkr(total)} · how is the customer paying?`} onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>Back</button><button className="btn btn-primary" onClick={() => onChoose(type)}><Icon name="arrowRight" /> Continue (Enter)</button></>}>
       <div className="paytype" ref={boxRef} tabIndex={-1} onKeyDown={onKey} role="radiogroup" aria-label="Payment type">
         <button tabIndex={-1} className={`pt-card ${type === 'cash' ? 'on' : ''}`} onClick={() => setType('cash')} onDoubleClick={() => onChoose('cash')}>
           <span className="pt-icon"><Icon name="cash" size={24} /></span>
-          <b>Cash</b><small>Paid now in full</small><kbd>1</kbd>
+          <b>Cash</b><small>{total < 0 ? 'Give the money back now' : 'Paid now in full'}</small><kbd>1</kbd>
         </button>
         <button tabIndex={-1} className={`pt-card credit ${type === 'credit' ? 'on' : ''}`} onClick={() => setType('credit')} onDoubleClick={() => onChoose('credit')}>
           <span className="pt-icon"><Icon name="clock" size={24} /></span>
-          <b>Credit</b><small>{customer ? `On ${customer.name}'s account` : 'Registered customers only'}</small><kbd>2</kbd>
+          <b>{total < 0 ? 'To account' : 'Credit'}</b><small>{total < 0 ? (customer ? `Off what ${customer.name} owes` : 'Registered customers only') : customer ? `On ${customer.name}'s account` : 'Registered customers only'}</small><kbd>2</kbd>
         </button>
       </div>
     </Modal>
@@ -687,7 +701,8 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
   const [paid, setPaid] = useState('');
   const [due, setDue] = useState(addDays(today(), customer.credit_days || 0));
   const [raising, setRaising] = useState(false);
-  const after = r2(customer.balance + total - n(paid));
+  const refund = total < 0;   // returns worth more than the sale: the money stays on the customer's account
+  const after = r2(customer.balance + total - (refund ? 0 : n(paid)));
   const over = customer.credit_limit > 0 && after > customer.credit_limit;
   const suggested = Math.ceil(after / 1000) * 1000;
   const [newLimit, setNewLimit] = useState(String(suggested));
@@ -701,20 +716,22 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
     onRaise(n(newLimit), paid, due);
   };
   return (
-    <Modal size="sm" title={`On account — ${customer.name}`} subtitle={customer.shop_name || ''} onClose={onClose}
+    <Modal size="sm" title={refund ? `Return to account — ${customer.name}` : `On account — ${customer.name}`} subtitle={customer.shop_name || ''} onClose={onClose}
       footer={<>
         <button className="btn" onClick={raising ? () => setRaising(false) : onClose}>Back</button>
         <button className="btn btn-primary" form="credit-form" disabled={busy || (raising && n(newLimit) < after)}>
-          <Icon name={over ? 'shield' : 'check'} /> {busy ? 'Saving…' : !over ? 'Put on account (Enter)' : raising ? 'Raise limit & bill (Enter)' : 'Raise credit limit… (Enter)'}
+          <Icon name={over ? 'shield' : 'check'} /> {busy ? 'Saving…' : refund ? 'Credit to account (Enter)' : !over ? 'Put on account (Enter)' : raising ? 'Raise limit & bill (Enter)' : 'Raise credit limit… (Enter)'}
         </button>
       </>}>
       <form id="credit-form" className="stack" onSubmit={submit}>
-        <div className="pay-total amber"><span>This bill</span><b>{lkr(total)}</b></div>
+        {refund
+          ? <div className="pay-total refund"><span>Comes off what they owe</span><b>{lkr(-total)}</b></div>
+          : <div className="pay-total amber"><span>This bill</span><b>{lkr(total)}</b></div>}
         <div className="row gap-s small">
           <span className="muted">Customer:</span> <b>{customer.name}</b>
           <button type="button" className="link-btn" style={{ marginLeft: 'auto' }} onClick={onChangeCustomer}>Change customer</button>
         </div>
-        {!raising && (
+        {!raising && !refund && (
           <div className="grid grid-2">
             <Field label="Paid now (advance)"><NumInput autoFocus value={paid} onChange={setPaid} placeholder="0.00" /></Field>
             <Field label="Payment due on"><DateInput value={due} onChange={(e) => setDue(e.target.value)} /></Field>
@@ -722,7 +739,7 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
         )}
         <dl className="kv">
           <dt>Due now</dt><dd>{lkr(customer.balance)}</dd>
-          <dt>Due after this bill</dt><dd className={over ? 'text-red' : ''}>{lkr(after)}</dd>
+          <dt>{refund ? 'Due after this return' : 'Due after this bill'}</dt><dd className={over ? 'text-red' : ''}>{lkr(after)}</dd>
           <dt>Credit limit</dt><dd>{customer.credit_limit > 0 ? lkr(customer.credit_limit) : 'No limit set'}</dd>
         </dl>
         {over && !raising && (
@@ -754,6 +771,7 @@ function DoneModal({ sale, change, onClose, onView }) {
     return () => window.removeEventListener('keydown', k);
   }, [sale.id]);
   const credit = sale.payment_type === 'credit';
+  const refund = sale.total < 0;
   return (
     <Modal size="sm" title={printed ? 'Bill saved ✔' : 'Printing bill…'} subtitle={`${sale.invoice_no} · ${sale.customer_name}`} onClose={onClose}
       footer={<>
@@ -774,15 +792,15 @@ function DoneModal({ sale, change, onClose, onView }) {
               <div key={i.id} className="rc-line"><span>{i.qty} × {i.name}</span><span>{money(i.line_total)}</span></div>
             ))}{sale.items.length > 4 && <div className="rc-line muted"><span>+ {sale.items.length - 4} more</span><span /></div>}</div>
             <div className="rc-total"><span>TOTAL</span><span>{money(sale.total)}</span></div>
-            <div className="rc-foot">{credit ? 'ON ACCOUNT' : 'PAID · CASH'}</div>
+            <div className="rc-foot">{refund ? (credit ? 'RETURN · TO ACCOUNT' : 'REFUND · CASH') : credit ? 'ON ACCOUNT' : 'PAID · CASH'}</div>
             <div className="rc-zigzag" />
           </div>
         </div>
       </div>
       <dl className={`kv done-kv ${printed ? 'show' : ''}`}>
-        <dt>Bill total</dt><dd>{lkr(sale.total)}</dd>
-        <dt>Type</dt><dd>{credit ? 'On account' : 'Cash'}</dd>
-        {credit && <><dt>Paid now</dt><dd>{lkr(sale.paid_at_sale)}</dd><dt>Due on</dt><dd>{niceDate(sale.due_date)}</dd></>}
+        <dt>{refund ? 'Refund' : 'Bill total'}</dt><dd>{lkr(refund ? -sale.total : sale.total)}</dd>
+        <dt>Type</dt><dd>{refund ? (credit ? 'Off their account' : 'Cash given back') : credit ? 'On account' : 'Cash'}</dd>
+        {credit && !refund && <><dt>Paid now</dt><dd>{lkr(sale.paid_at_sale)}</dd><dt>Due on</dt><dd>{niceDate(sale.due_date)}</dd></>}
         {change != null && <><dt className="total">Balance to give</dt><dd className="total">{lkr(change)}</dd></>}
       </dl>
     </Modal>

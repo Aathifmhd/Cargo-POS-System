@@ -556,7 +556,7 @@ export async function createSale(body, approve) {
       const pcs = Math.round(qty * per);
       if (pcs > p.stock_pcs) fail(`Not enough stock for "${p.name}". Available: ${p.stock_pcs} pcs`);
       // taken now (the whole bill is undone if anything below fails), so the cost is the batch's own
-      const taken = await moveStock(p.id, -pcs, 'sale', invoice_no, `${qty} ${unit}`, date, { batchId: i.batch_id ?? null });
+      const taken = await moveStock(p.id, -pcs, 'sale', invoice_no, `${qty} ${unit}`, date, { batchId: Array.isArray(i.batch_ids) && i.batch_ids.length > 1 ? null : i.batch_id ?? null, batchIds: Array.isArray(i.batch_ids) ? i.batch_ids : null });
       const costPc = pcs ? sum(taken, (t) => -t.pcs * t.cost_per_pcs) / pcs : p.cost_per_pcs;
       const batch = taken.length === 1 ? await findOne('batches', { id: taken[0].batch_id }) : null;
       const price = num(i.price);

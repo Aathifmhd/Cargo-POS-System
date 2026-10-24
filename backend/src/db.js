@@ -324,18 +324,30 @@ async function logMove(productId, pcs, type, ref, note, date, batchId) {
  * `newBatch` (e.g. opening stock) — or a product with no batch yet — starts a new one.
  * Returns where the pieces went: [{ batch_id, pcs, cost_per_pcs }] (pcs negative when taken out).
  */
-export async function moveStock(productId, pcs, type, ref, note, date = todayStr(), { batchId = null, newBatch = null } = {}) {
+export async function moveStock(productId, pcs, type, ref, note, date = todayStr(), { batchId = null, batchIds = null, newBatch = null } = {}) {
   pcs = Math.round(pcs);
   if (!pcs) return [];
   const p = await findOne('products', { id: productId });
   if (!p) fail('Product not found', 404);
   const batches = (await find('batches', { product_id: productId })).sort(batchOrder);
-  const chosen = batchId != null ? batches.find((b) => b.id === Number(batchId)) : null;
-  if (batchId != null && !chosen && pcs < 0) fail(`That stock batch of "${p.name}" no longer exists. Pick the item again.`);
+  // several batches at the same cost (one row on the screens): taken from the oldest of them first
+  const pool = Array.isArray(batchIds) && batchIds.length > 1 ? batches.filter((b) => batchIds.map(Number).includes(b.id)) : null;
+  if (pool && !pool.length && pcs < 0) fail(`That stock of "${p.name}" no longer exists. Pick the item again.`);
+  const one = batchId ?? (Array.isArray(batchIds) && batchIds.length === 1 ? batchIds[0] : null);
+  const chosen = !pool && one != null ? batches.find((b) => b.id === Number(one)) : null;
+  if (!pool && one != null && !chosen && pcs < 0) fail(`That stock batch of "${p.name}" no longer exists. Pick the item again.`);
   const moves = [];
   if (pcs < 0) {
     let need = -pcs;
-    if (chosen) {
+    if (pool) {
+      const have = pool.reduce((t, b) => t + Math.max(0, b.left_pcs), 0);
+      if (have < need) fail(`Only ${have} pcs of "${p.name}" are left at this cost.`);
+      for (const b of pool) {
+        if (need <= 0) break;
+        const take = Math.min(Math.max(0, b.left_pcs), need);
+        if (take > 0) { moves.push({ b, pcs: -take }); need -= take; }
+      }
+    } else if (chosen) {
       if (chosen.left_pcs < need) fail(`Only ${chosen.left_pcs} pcs of "${p.name}" are left in the ${chosen.ref} batch.`);
       moves.push({ b: chosen, pcs: -need });
     } else {

@@ -11,6 +11,28 @@ export function parseCatalog(settings) {
   } catch { return []; }
 }
 /**
+ * A product's stock batches that cost the same, put together (colours, pieces per set and expected price don't
+ * split them): [{ id (the oldest batch), ids, cost_per_pcs, expected_per_pcs (the newest batch's), left_pcs, ref, date }],
+ * cheapest first. Selling from a group takes the oldest of its batches first.
+ */
+export function costGroups(batches) {
+  const byCost = new Map();
+  for (const b of [...(batches || [])].sort((a, c) => (a.date === c.date ? a.id - c.id : a.date < c.date ? -1 : 1))) {
+    const k = Math.round((Number(b.cost_per_pcs) || 0) * 100);
+    if (!byCost.has(k)) byCost.set(k, []);
+    byCost.get(k).push(b);
+  }
+  return [...byCost.values()].map((list) => {
+    const newest = list[list.length - 1];
+    return {
+      id: list[0].id, ids: list.map((b) => b.id), cost_per_pcs: list[0].cost_per_pcs,
+      expected_per_pcs: newest.expected_per_pcs || list.find((b) => b.expected_per_pcs)?.expected_per_pcs || 0,
+      left_pcs: list.reduce((t, b) => t + b.left_pcs, 0),
+      ref: list.map((b) => b.ref || 'Stock').join(' + '), date: newest.date, count: list.length,
+    };
+  }).sort((a, b) => a.cost_per_pcs - b.cost_per_pcs);
+}
+/**
  * Low / medium / high cost for one product's stock batches. The badge goes by the cost itself, so batches that cost
  * the same (e.g. the same price, different expected selling price) get the same badge. Over the different costs:
  * the dearest third (at least one) is high, the rest split evenly with the extra one going to low —

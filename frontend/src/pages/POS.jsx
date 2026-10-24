@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers } from '../lib.js';
+import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers, costGroups } from '../lib.js';
 import { Icon, Modal, Field, NumInput, DateInput, CostBadge, useToast, Loading } from '../components/ui.jsx';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
@@ -119,7 +119,9 @@ export default function POS() {
   const customer = customers.find((c) => c.id === customerId);
   const cur = entry.pid ? byId[entry.pid] : null;
   // the stock batch a line (or the entry) sells from: the same product bought at different costs is kept apart
-  const batchOf = (pid, bid) => (bid != null ? (byId[pid]?.batches || []).find((b) => b.id === bid) || null : null);
+  // a product's stock, one group per cost (batches that cost the same are sold as one)
+  const groupsOf = (p) => costGroups(p?.batches);
+  const batchOf = (pid, bid) => (bid != null ? groupsOf(byId[pid]).find((g) => g.ids.includes(bid)) || null : null);
   const curB = cur ? batchOf(cur.id, entry.bid) : null;
 
   /* ---------- matches for the code box ---------- */
@@ -129,15 +131,15 @@ export default function POS() {
     const all = (products || []).filter((p) => s === '*' || p.code.toLowerCase().includes(s) || p.name.toLowerCase().includes(s) || (p.category || '').toLowerCase().includes(s));
     return all.sort((a, b) => (a.code.toLowerCase() === s ? -1 : 0) - (b.code.toLowerCase() === s ? -1 : 0) || (b.stock_pcs > 0) - (a.stock_pcs > 0)).slice(0, 60);
   }, [products, entry.q, entry.pid]);
-  // one row per stock batch when a product was bought at different costs (cheapest first, badged low / medium / high)
+  // one row per cost when a product was bought at different costs (cheapest first, badged low / medium / high)
   const hitRows = useMemo(() => hits.flatMap((p) => {
-    const bs = p.batches || [];
-    if (bs.length < 2) return [{ p, b: bs[0] || null, tier: null }];
-    const tiers = costTiers(bs);
-    return bs.map((b) => ({ p, b, tier: tiers[b.id] }));
+    const gs = costGroups(p.batches);
+    if (gs.length < 2) return [{ p, b: gs[0] || null, tier: null }];
+    const tiers = costTiers(gs);
+    return gs.map((g) => ({ p, b: g, tier: tiers[g.id] }));
   }), [hits]);
 
-  const inBillPcs = (pid, except = -1, bid = null) => lines.reduce((s, l, i) => (l.product_id === pid && i !== except && byId[pid] && (bid == null || l.batch_id === bid) ? s + n(l.qty) * unitInfo(byId[pid], l.unit).per : s), 0);
+  const inBillPcs = (pid, except = -1, bid = null) => lines.reduce((s, l, i) => (l.product_id === pid && i !== except && byId[pid] && (bid == null || l.batch_id === bid || (batchOf(pid, bid)?.ids || []).includes(l.batch_id)) ? s + n(l.qty) * unitInfo(byId[pid], l.unit).per : s), 0);
   // pieces still free to bill: of the batch when one is picked, never more than the product has
   const freePcs = (p, b, except = -1) => Math.min(p.stock_pcs - inBillPcs(p.id, except), b ? b.left_pcs - inBillPcs(p.id, except, b.id) : Infinity);
   // Move the cursor straight away, so fast typing / a barcode scanner never lands in the wrong box.
@@ -300,7 +302,7 @@ export default function POS() {
       const sale = await api.post('/sales', {
         customer_id: customerId, payment_type: type, discount: T.billDisc,
         paid_amount: type === 'credit' ? n(paid) : T.net, due_date: type === 'credit' ? due : null,
-        items: lines.map((l) => ({ product_id: l.product_id, batch_id: l.batch_id ?? null, unit: l.unit, qty: n(l.qty), price: n(l.price), disc_pct: n(l.disc_pct) })),
+        items: lines.map((l) => ({ product_id: l.product_id, batch_id: l.batch_id ?? null, batch_ids: batchOf(l.product_id, l.batch_id)?.ids || null, unit: l.unit, qty: n(l.qty), price: n(l.price), disc_pct: n(l.disc_pct) })),
       });
       writeLS(LAST_KEY, sale.id);
       setDone({ sale, change: type === 'cash' && n(paid) > 0 ? r2(n(paid) - sale.total) : null });
@@ -418,7 +420,7 @@ export default function POS() {
           <div className={`till-item ${cur ? 'has' : ''}`}>
             {cur ? <>
               <b>{cur.name.toUpperCase()}</b>
-              <em>{cur.code}{cur.sizes ? ` · ${cur.sizes}` : ''}{curB && (cur.batches || []).length > 1 ? ` · ${batchText(curB)}` : ''} · stock {pcsText(freePcs(cur, curB))}</em>
+              <em>{cur.code}{cur.sizes ? ` · ${cur.sizes}` : ''}{curB && groupsOf(cur).length > 1 ? ` · ${batchText(curB)}` : ''} · stock {pcsText(freePcs(cur, curB))}</em>
             </> : <i>scan or key a code — F1</i>}
           </div>
         </div>
@@ -451,7 +453,7 @@ export default function POS() {
                 {hitRows.map(({ p, b, tier }, i) => {
                   const u = unitInfo(p, 'pcs', b);
                   const stock = b ? b.left_pcs : p.stock_pcs;
-                  const many = (p.batches || []).length > 1;
+                  const many = groupsOf(p).length > 1;
                   return (
                     <tr key={`${p.id}-${b?.id ?? 0}`} className={`${i === hi ? 'on' : ''} ${many ? 'batch' : ''}`} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p, b); }}>
                       <td className="c">{p.code}</td>
@@ -483,7 +485,7 @@ export default function POS() {
                   <td className="c">{r.p.code}</td>
                   <td className="d">
                     <b>{r.p.name.toUpperCase()}</b>
-                    <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{r.b && (r.p.batches || []).length > 1 ? `${batchText(r.b)} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}expected {money(r.u.expectedPc)}</em>
+                    <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{r.b && groupsOf(r.p).length > 1 ? `${batchText(r.b)} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}expected {money(r.u.expectedPc)}</em>
                     {showCost && r.under && <span className="tag bad">under cost</span>}
                   </td>
                   <td className="n q">{edit?.i === i

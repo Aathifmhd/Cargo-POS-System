@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, useApi, n, r2, lkr, money, niceDate, int, stockText, margin, pct, parseCatalog, findCategory, costTiers } from '../lib.js';
+import { api, useApi, n, r2, lkr, money, niceDate, int, stockText, margin, pct, parseCatalog, findCategory, costTiers, costGroups } from '../lib.js';
 import { useSettings } from '../App.jsx';
 import SizePicker from '../components/SizePicker.jsx';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, CostBadge, Modal, Field, NumInput, Segmented, Tabs, Stat, useToast } from '../components/ui.jsx';
@@ -70,7 +70,7 @@ export default function Stock() {
               <tbody>
                 {rows.flatMap((p) => {
                   const low = p.stock_pcs < p.reorder_sets * p.pcs_per_set;
-                  const batches = p.batches || [];
+                  const batches = costGroups(p.batches);   // batches that cost the same are one line
                   // a product bought at different costs: one line per cost, each with its own badge
                   const lines = batches.length > 1 ? batches : [null];
                   const tiers = costTiers(batches);

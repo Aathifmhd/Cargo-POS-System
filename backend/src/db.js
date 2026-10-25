@@ -79,7 +79,7 @@ const DEFAULTS = {
     opening_balance: 0, notes: null, active: 1 },
   products: { category: null, subtype: null, pname: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, supplier_id: null,
     cost_per_pcs: 0, last_cost_per_pcs: 0, mrp_per_set: 0, expected_per_set: 0, stock_pcs: 0, reorder_sets: 0, active: 1,
-    opening_pcs: 0, opening_cost_per_pcs: 0 },
+    opening_pcs: 0, opening_cost_per_pcs: 0, damaged_pcs: 0 },
   grns: { currency: 'INR', supplier_invoice_no: null, supplier_bill_date: null, cargo_name: null, bale_no: null, lr_no: null, goods_inr: 0, cargo_charge_inr: 0, cargo_in_supplier_bill: 0,
     payable_inr: 0, expenses_lkr: 0, other_lkr: 0, total_lkr: 0, total_sets: 0, total_pcs: 0, payment_type: 'credit', due_date: null, notes: null,
     effective_rate: null, settled_at: null },
@@ -90,9 +90,10 @@ const DEFAULTS = {
   cargo_payments: { method: null, reference: null, notes: null, cheque_id: null },
   cheques: { party_id: null, bill_id: null, owner: null, bank: null, no_auto: 0, notes: null, payment_id: null, passed_on: null, history: [] },
   sales: { customer_id: null, customer_name: null, discount: 0, paid_at_sale: 0, cost_total: 0, due_date: null, notes: null, status: 'completed' },
-  sale_items: { batch_id: null, batches: [], no_stock_pcs: 0, code: null, mrp_per_unit: 0, expected_per_unit: 0, cost_per_unit: 0, disc: 0, disc_pct: 0 },
+  sale_items: { batch_id: null, batches: [], no_stock_pcs: 0, damaged: false, damaged_cost: 0, damaged_takes: [], code: null, mrp_per_unit: 0, expected_per_unit: 0, cost_per_unit: 0, disc: 0, disc_pct: 0 },
   customer_payments: { sale_id: null, method: null, reference: null, notes: null, cheque_id: null },
   stock_moves: { ref: null, note: null, batch_id: null },
+  damaged: { sale_id: null, ref: null, cost_per_pcs: 0, in_pcs: 0, left_pcs: 0 },
   batches: { grn_id: null, kind: 'grn', ref: null, cost_per_pcs: 0, expected_per_pcs: 0, mrp_per_pcs: 0, in_pcs: 0, left_pcs: 0 },
   users: { role: 'cashier', active: 1, last_login: null, token_version: 0 },
   audit_log: { user_id: null, username: null, role: null, approved_by: null, level: null, key: null },
@@ -135,7 +136,7 @@ export const bumpCounter = (name, n) => col('counters').updateOne({ _id: name },
 
 export const COLLECTIONS = ['settings', 'suppliers', 'customers', 'products', 'grns', 'grn_expenses', 'grn_items', 'supplier_payments',
   'sales', 'sale_items', 'customer_payments', 'stock_moves', 'users', 'audit_log', 'fx_rates', 'batches',
-  'cargo_payments', 'cheques', 'customer_ids'];
+  'cargo_payments', 'cheques', 'customer_ids', 'damaged'];
 
 /* ---------------- errors & small helpers ---------------- */
 export class HttpError extends Error {

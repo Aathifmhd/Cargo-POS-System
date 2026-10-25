@@ -61,7 +61,7 @@ const lineCalc = (l) => {
   return { gross, disc, amount: r2(gross - disc), net: n(l.qty) ? (gross - disc) / n(l.qty) : n(l.price) };
 };
 const pcsText = (pcs) => `${int(pcs)} pcs`;
-const blankEntry = { q: '', pid: null, bid: null, unit: 'pcs', qty: '1', price: '', disc_pct: '' };   // sold by the piece only; bid = the stock batch
+const blankEntry = { q: '', pid: null, bid: null, damaged: false, unit: 'pcs', qty: '1', price: '', disc_pct: '' };   // damaged: selling damaged pieces   // sold by the piece only; bid = the stock batch
 // one click in a box selects all of it, ready to type over (the mouse coming up would otherwise drop the selection)
 const selectAll = {
   onFocus: (e) => { e.target.dataset.fresh = '1'; e.target.select(); },
@@ -88,6 +88,7 @@ export default function POS() {
   const [showCost, setShowCost] = useState(() => readLS('pos-show-cost', true));
   const [held, setHeld] = useState(() => readLS(HELD_KEY, []));
   const [modal, setModal] = useState(null);        // 'customer' | 'pay' | 'credit' | 'held' | 'keys' | {newCustomer}
+  const [askReturn, setAskReturn] = useState(null);   // a return waiting for "normal or damaged?": (damaged) => void
   const [after, setAfter] = useState(null);        // what to open after picking a customer
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
@@ -135,12 +136,14 @@ export default function POS() {
   // one row per cost when a product was bought at different costs (cheapest first, badged low / medium / high)
   const hitRows = useMemo(() => hits.flatMap((p) => {
     const gs = costGroups(p.batches);
-    if (gs.length < 2) return [{ p, b: gs[0] || null, tier: null }];
+    const dmg = p.damaged?.pcs > 0 ? [{ p, b: null, tier: null, damaged: true }] : [];
+    if (gs.length < 2) return [{ p, b: gs[0] || null, tier: null }, ...dmg];
     const tiers = costTiers(gs);
-    return gs.map((g) => ({ p, b: g, tier: tiers[g.id] }));
+    return [...gs.map((g) => ({ p, b: g, tier: tiers[g.id] })), ...dmg];
   }), [hits]);
 
-  const inBillPcs = (pid, except = -1, bid = null) => lines.reduce((s, l, i) => (l.product_id === pid && i !== except && byId[pid] && (bid == null || l.batch_id === bid || (batchOf(pid, bid)?.ids || []).includes(l.batch_id)) ? s + n(l.qty) * unitInfo(byId[pid], l.unit).per : s), 0);
+  const inBillDamaged = (pid, except = -1) => lines.reduce((s, l, i) => (l.product_id === pid && i !== except && l.damaged && n(l.qty) > 0 && byId[pid] ? s + n(l.qty) * unitInfo(byId[pid], l.unit).per : s), 0);
+  const inBillPcs = (pid, except = -1, bid = null) => lines.reduce((s, l, i) => (l.product_id === pid && i !== except && !l.damaged && byId[pid] && (bid == null || l.batch_id === bid || (batchOf(pid, bid)?.ids || []).includes(l.batch_id)) ? s + n(l.qty) * unitInfo(byId[pid], l.unit).per : s), 0);
   // pieces still free to bill: of the batch when one is picked, never more than the product has
   const freePcs = (p, b, except = -1) => Math.min(p.stock_pcs - inBillPcs(p.id, except), b ? b.left_pcs - inBillPcs(p.id, except, b.id) : Infinity);
   // Move the cursor straight away, so fast typing / a barcode scanner never lands in the wrong box.
@@ -154,27 +157,37 @@ export default function POS() {
   const toCode = () => { setSel(-1); setEdit(null); focus(codeRef); };
 
   /* ---------- entry row ---------- */
-  const pick = (p, b = null) => {
+  const pick = (p, b = null, damaged = false) => {
     if (!p) return;
     const unit = 'pcs';
     const u = unitInfo(p, unit, b);
-    setEntry({ q: p.code, pid: p.id, bid: b?.id ?? null, unit, qty: '1', price: u.expected ? u.expected.toFixed(2) : '', disc_pct: '' });
+    // damaged pieces: the price starts at their cost — sell it under cost as agreed with the customer
+    const price = damaged ? p.damaged?.cost_per_pcs : u.expected;
+    setEntry({ q: p.code, pid: p.id, bid: damaged ? null : b?.id ?? null, damaged, unit, qty: '1', price: price ? price.toFixed(2) : '', disc_pct: '' });
     setHi(0);
+    if (damaged) { toast(`Selling damaged ${p.name} — ${pcsText(p.damaged.pcs)} damaged left. Type the agreed price.`); return focus('tQty'); }
     if (p.stock_pcs - inBillPcs(p.id) <= 0) toast(`"${p.name}" shows no stock — it can still be billed (sold without stock)`);
     focus('tQty');
   };
-  const commit = () => {
+  const commit = (returnDamaged) => {
     const p = cur;
     if (!p) { toast('Scan or type a product code first', 'error'); return toCode(); }
     const qty = n(entry.qty);
     if (!qty) { toast('Enter a quantity (put - in front for a return, e.g. -2)', 'error'); return focus('tQty'); }
     const per = unitInfo(p, entry.unit).per;
+    // a return: ask whether it is damaged (kept apart, a loss) or normal (back to stock)
+    if (qty < 0 && returnDamaged === undefined) return setAskReturn(() => (d) => commit(d));
+    const damaged = qty < 0 ? Boolean(returnDamaged) : Boolean(entry.damaged);
+    if (damaged && qty > 0) {
+      const left = (p.damaged?.pcs || 0) - inBillDamaged(p.id);
+      if (qty * per > left) { toast(`Only ${pcsText(Math.max(0, left))} damaged ${p.name} left`, 'error'); return focus('tQty'); }
+    }
     // more than is in stock is allowed (a stock or billing mistake): the line is marked "sold without stock"
     const free = p.stock_pcs - inBillPcs(p.id);
-    if (qty > 0 && qty * per > free) toast(`${pcsText(qty * per - Math.max(0, free))} of ${p.name} sold without stock — the Super Admin is told`);
-    const line = { product_id: p.id, batch_id: curB?.id ?? null, unit: entry.unit, qty, price: n(entry.price), disc_pct: n(entry.disc_pct) };
+    if (!damaged && qty > 0 && qty * per > free) toast(`${pcsText(qty * per - Math.max(0, free))} of ${p.name} sold without stock — the Super Admin is told`);
+    const line = { product_id: p.id, batch_id: damaged && qty > 0 ? null : curB?.id ?? null, damaged, unit: entry.unit, qty, price: n(entry.price), disc_pct: n(entry.disc_pct) };
     setLines((ls) => {
-      const i = ls.findIndex((l) => l.product_id === line.product_id && Math.sign(n(l.qty)) === Math.sign(line.qty) && (l.batch_id ?? null) === line.batch_id && l.unit === line.unit && n(l.price) === line.price && n(l.disc_pct) === line.disc_pct);
+      const i = ls.findIndex((l) => l.product_id === line.product_id && Math.sign(n(l.qty)) === Math.sign(line.qty) && Boolean(l.damaged) === damaged && (l.batch_id ?? null) === line.batch_id && l.unit === line.unit && n(l.price) === line.price && n(l.disc_pct) === line.disc_pct);
       if (i >= 0) return ls.map((l, j) => (j === i ? { ...l, qty: n(l.qty) + qty } : l));
       return [line, ...ls];   // newest line on top
     });
@@ -199,7 +212,7 @@ export default function POS() {
         // an exact code picks its highlighted row (the cheapest batch first); otherwise the highlighted row
         const exact = hitRows[hi]?.p.code.toLowerCase() === entry.q.trim().toLowerCase() ? hitRows[hi] : hitRows.find((r) => r.p.code.toLowerCase() === entry.q.trim().toLowerCase());
         const row = exact || hitRows[hi];
-        if (row) return pick(row.p, row.b);
+        if (row) return pick(row.p, row.b, row.damaged);
         if (entry.q.trim()) toast(`Nothing matches “${entry.q}”`, 'error');
         return;
       }
@@ -231,6 +244,11 @@ export default function POS() {
     const p = byId[l.product_id];
     const qty = n(edit.qty);
     if (!qty) return toast('Quantity can\'t be 0 (put - in front for a return)', 'error');
+    if (qty < 0 && n(l.qty) > 0) {
+      const e = edit;
+      return setAskReturn(() => (d) => { update(e.i, { unit: e.unit, qty, price: n(e.price), damaged: d, batch_id: d ? l.batch_id : l.batch_id }); setEdit(null); });
+    }
+    if (l.damaged && qty > 0 && p && qty * unitInfo(p, edit.unit).per > (p.damaged?.pcs || 0) - inBillDamaged(p.id, edit.i)) return toast(`Only ${pcsText((p.damaged?.pcs || 0) - inBillDamaged(p.id, edit.i))} damaged ${p.name} left`, 'error');
     update(edit.i, { unit: edit.unit, qty, price: n(edit.price) });
     setEdit(null);
   };
@@ -264,7 +282,7 @@ export default function POS() {
     for (let i = lines.length - 1; i >= 0; i--) {
       const l = lines[i];
       const p = byId[l.product_id];
-      if (!p || n(l.qty) <= 0) continue;
+      if (!p || n(l.qty) <= 0 || l.damaged) continue;
       const want = n(l.qty) * unitInfo(p, l.unit).per;
       const have = avail[p.id] ?? Math.max(0, p.stock_pcs);
       const take = Math.min(have, want);
@@ -275,7 +293,8 @@ export default function POS() {
       const p = byId[l.product_id];
       if (!p) return null;
       const b = batchOf(p.id, l.batch_id);
-      const u = unitInfo(p, l.unit, b);
+      const u0 = unitInfo(p, l.unit, b);
+      const u = l.damaged ? { ...u0, cost: 0, costPc: 0, dmgCost: r2((p.damaged?.cost_per_pcs ?? u0.costPc) * u0.per) } : u0;
       const c = lineCalc(l);
       sub += c.gross; lineDisc += c.disc; cost += u.cost * n(l.qty); pcs += n(l.qty) * u.per;
       return { ...l, p, b, u, ...c, back: n(l.qty) < 0, under: n(l.qty) > 0 && u.cost > 0 && c.net < u.cost, noStock: noStock.get(i) || 0 };
@@ -315,7 +334,7 @@ export default function POS() {
       const sale = await api.post('/sales', {
         customer_id: customerId, payment_type: type, discount: T.billDisc,
         paid_amount: type === 'credit' ? (T.net < 0 ? 0 : n(paid)) : T.net, due_date: type === 'credit' ? due : null,
-        items: lines.map((l) => ({ product_id: l.product_id, batch_id: l.batch_id ?? null, batch_ids: batchOf(l.product_id, l.batch_id)?.ids || null, unit: l.unit, qty: n(l.qty), price: n(l.price), disc_pct: n(l.disc_pct) })),
+        items: lines.map((l) => ({ product_id: l.product_id, batch_id: l.batch_id ?? null, batch_ids: batchOf(l.product_id, l.batch_id)?.ids || null, damaged: Boolean(l.damaged), unit: l.unit, qty: n(l.qty), price: n(l.price), disc_pct: n(l.disc_pct) })),
       });
       writeLS(LAST_KEY, sale.id);
       setDone({ sale, change: type === 'cash' && n(paid) > 0 ? r2(n(paid) - sale.total) : null });
@@ -453,7 +472,7 @@ export default function POS() {
             onChange={(e) => setEntry({ ...entry, disc_pct: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tDis')} />
         </label>
         <div className="f-amt"><span>AMOUNT</span><div className={`till-amt ${eUnder && showCost ? 'under' : ''}`}>{cur ? money(eAmt) : '0.00'}</div></div>
-        <button className="till-add" onClick={commit} disabled={!cur}>ADD<i>Enter</i></button>
+        <button className="till-add" onClick={() => commit()} disabled={!cur}>ADD<i>Enter</i></button>
       </div>
 
       {/* ================= MATCH LIST ================= */}
@@ -463,7 +482,20 @@ export default function POS() {
             <table>
               <thead><tr><th>CODE</th><th>ITEM</th><th>STOCK FROM</th><th>SIZES</th><th className="n">IN STOCK</th><th className="n">COST / PC</th><th className="n">EXPECTED / PC</th></tr></thead>
               <tbody>
-                {hitRows.map(({ p, b, tier }, i) => {
+                {hitRows.map(({ p, b, tier, damaged }, i) => {
+                  if (damaged) {
+                    return (
+                      <tr key={`${p.id}-dmg`} className={`${i === hi ? 'on' : ''} batch dmg`} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p, null, true); }}>
+                        <td className="c">{p.code}</td>
+                        <td className="d">{p.name} <span className="dmg-badge">Damaged</span></td>
+                        <td className="s">Damaged returns</td>
+                        <td className="s">{p.sizes || '—'}</td>
+                        <td className="n">{pcsText(p.damaged.pcs)}</td>
+                        <td className="n cost">{money(p.damaged.cost_per_pcs)}</td>
+                        <td className="p">sell under cost</td>
+                      </tr>
+                    );
+                  }
                   const u = unitInfo(p, 'pcs', b);
                   const stock = b ? b.left_pcs : p.stock_pcs;
                   const many = groupsOf(p).length > 1;
@@ -499,7 +531,9 @@ export default function POS() {
                   <td className="d">
                     <b>{r.p.name.toUpperCase()}</b>
                     <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{r.b && groupsOf(r.p).length > 1 ? `${batchText(r.b)} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}expected {money(r.u.expectedPc)}</em>
-                    {r.back && <span className="tag return">RETURN · back to stock</span>}
+                    {r.back && !r.damaged && <span className="tag return">RETURN · back to stock</span>}
+                    {r.back && r.damaged && <span className="tag damaged">RETURN · DAMAGED — not to stock</span>}
+                    {!r.back && r.damaged && <span className="tag damaged">DAMAGED · cost written off</span>}
                     {r.noStock > 0 && <span className="tag nostock" title="More than the stock shows — kept at the last GRN cost; the Super Admin is told">SOLD WITHOUT STOCK · {pcsText(r.noStock)}</span>}
                     {showCost && r.under && <span className="tag bad">under cost</span>}
                   </td>
@@ -553,6 +587,9 @@ export default function POS() {
       </div>
 
       {/* ================= POP-UPS ================= */}
+      {askReturn && (
+        <ReturnKind onChoose={(d) => { const go = askReturn; setAskReturn(null); go(d); }} onClose={() => { setAskReturn(null); focus('tQty'); }} />
+      )}
       {(modal === 'customer' || modal === 'customer-credit') && (
         <CustomerPicker customers={customers} current={customerId} creditOnly={modal === 'customer-credit'}
           onPick={(id) => { setCustomerId(id); setModal(after === 'credit' && id ? 'credit' : null); setAfter(null); if (after !== 'credit' || !id) toCode(); }}
@@ -601,6 +638,39 @@ export default function POS() {
           onView={() => navigate(`/sales/${done.sale.id}`)} footer={settings.invoice_footer} />
       )}
     </div>
+  );
+}
+
+/* ---------------- a return: normal or damaged? ---------------- */
+/** ← → picks Normal or Damaged, Enter chooses it (the highlighted one), Esc goes back. */
+export function ReturnKind({ onChoose, onClose }) {
+  const [sel, setSel] = useState(0);   // 0 = normal, 1 = damaged
+  const refs = [useRef(), useRef()];
+  const opened = useRef(Date.now());   // an Enter still held from adding the line doesn't choose
+  useEffect(() => { refs[sel].current?.focus(); }, [sel]);   // eslint-disable-line
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); setSel(e.key === 'ArrowLeft' ? 0 : 1); }
+      if (e.key === 'Enter') {
+        e.preventDefault(); e.stopPropagation();
+        if (e.repeat || Date.now() - opened.current < 350) return;
+        onChoose(document.activeElement === refs[1].current);
+      }
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, [onChoose]); // eslint-disable-line
+  return (
+    <Modal size="sm" title="What kind of return is this?" subtitle="← → to pick · Enter to choose" onClose={onClose}>
+      <div className="return-kinds">
+        <button type="button" ref={refs[0]} className={`return-kind normal ${sel === 0 ? 'on' : ''}`} onFocus={() => setSel(0)} onClick={() => onChoose(false)}>
+          <b>Normal return</b><small>In good condition — goes back into the stock</small>
+        </button>
+        <button type="button" ref={refs[1]} className={`return-kind damaged ${sel === 1 ? 'on' : ''}`} onFocus={() => setSel(1)} onClick={() => onChoose(true)}>
+          <b>Damaged return</b><small>Kept apart as damaged stock — its cost is counted as a loss</small>
+        </button>
+      </div>
+    </Modal>
   );
 }
 

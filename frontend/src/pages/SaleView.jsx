@@ -28,7 +28,8 @@ function SaleDetails({ s }) {
               <tbody>
                 {s.items.map((i) => (
                   <tr key={i.id}>
-                    <td><b>{i.name}</b><div className="sub">{i.code}</div>{i.no_stock_pcs > 0 && <span className="chq-wait">{i.no_stock_pcs} pcs sold without stock</span>}</td>
+                    <td><b>{i.name}</b><div className="sub">{i.code}</div>{i.no_stock_pcs > 0 && <span className="chq-wait">{i.no_stock_pcs} pcs sold without stock</span>}
+                    {i.damaged && <span className="badge-damaged">{i.qty < 0 ? 'Damaged return — not to stock' : 'Damaged — sold under cost'}</span>}</td>
                     <td className="right nowrap">{int(i.pcs)} pcs</td>
                     <td className="right">{money(i.price / (i.pcs / i.qty || 1))}</td>
                     <td className="right muted">{money(i.expected_per_unit / (i.pcs / i.qty || 1))}</td>

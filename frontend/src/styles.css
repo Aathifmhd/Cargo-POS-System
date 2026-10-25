@@ -1276,3 +1276,24 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .nic-thumb span { font-size: 12px; font-weight: 650; padding: 0 8px 6px; text-align: left; }
 .nic-large { display: block; max-width: 100%; max-height: 75vh; margin: 0 auto; border-radius: 8px; }
 @media (max-width: 520px) { .nic-photos { grid-template-columns: 1fr; } }
+
+/* Damaged returns */
+.till-tbl .tag.damaged { display: inline-block; margin-top: 3px; margin-left: 4px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 800; letter-spacing: .03em; background: var(--red-soft); color: var(--red); }
+.dmg-badge, .badge-damaged { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 800; background: var(--red-soft); color: var(--red); vertical-align: middle; }
+.till-hits tr.dmg td { background: color-mix(in srgb, var(--red-soft) 60%, transparent); }
+.return-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.return-kind { font: inherit; position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 14px; text-align: left; border: 2px solid var(--border); border-radius: 12px; background: var(--surface); color: inherit; cursor: pointer; }
+.return-kind b { font-size: 15.5px; }
+.return-kind small { color: var(--text-3, #64748b); font-size: 12.5px; }
+.return-kind.normal:hover, .return-kind.normal.on { border-color: var(--green); background: var(--green-soft); outline: none; }
+.return-kind.normal b { color: var(--green); }
+.return-kind.damaged:hover, .return-kind.damaged.on { border-color: var(--red); background: var(--red-soft); outline: none; }
+.return-kind.damaged b { color: var(--red); }
+@media (max-width: 520px) { .return-kinds { grid-template-columns: 1fr; } }
+.table tr.damaged-row > td { background: color-mix(in srgb, var(--red-soft) 55%, transparent); }
+
+/* Sales & Profit → Profit & loss */
+.pl-note { margin: -4px 0 0; }
+.pl-reasons { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.pl-reason { font: inherit; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1.5px solid var(--border); border-radius: 999px; background: var(--surface); color: inherit; cursor: pointer; }
+.pl-reason.on { border-color: var(--primary, #1e293b); background: var(--surface-2); }

@@ -226,6 +226,58 @@ export async function relabelCustomers(ids = null) {
   }
 }
 
+/* =========================================================
+   DAMAGED STOCK
+   A damaged return doesn't go back into the stock: it is kept apart (collection 'damaged', and products.damaged_pcs)
+   at the cost it had. The return takes the cost off the bill's profit as a loss (the bill's cost for it is 0), so the
+   whole cost is written off. If a damaged piece is sold later (under cost), the bill's cost for it is 0 as well: the
+   price comes back as profit, so in the end only the difference between the cost and the price is the loss.
+   ========================================================= */
+async function syncDamagedPcs(productId) {
+  const left = sum(await find('damaged', { product_id: productId, left_pcs: { $gt: 0 } }, { project: { left_pcs: 1 } }), (d) => d.left_pcs);
+  await setById('products', productId, { damaged_pcs: left });
+}
+/** A damaged return: kept apart from the stock, at its cost. */
+async function addDamaged(productId, pcs, costPc, ref, date, saleId) {
+  await insert('damaged', { product_id: productId, sale_id: saleId, ref, date, cost_per_pcs: round2(costPc), in_pcs: pcs, left_pcs: pcs });
+  await syncDamagedPcs(productId);
+}
+/** Selling damaged pieces: from the oldest damaged returns first. */
+async function takeDamaged(p, pcs) {
+  const list = (await find('damaged', { product_id: p.id, left_pcs: { $gt: 0 } })).sort(byDateId);
+  const have = sum(list, (d) => d.left_pcs);
+  if (have < pcs) fail(`Only ${have} damaged pcs of "${p.name}" are left`);
+  const takes = [];
+  let need = pcs;
+  for (const d of list) {
+    if (need <= 0) break;
+    const take = Math.min(d.left_pcs, need);
+    await updateOne('damaged', { id: d.id }, { $inc: { left_pcs: -take } });
+    takes.push({ damaged_id: d.id, pcs: take, cost_per_pcs: d.cost_per_pcs });
+    need -= take;
+  }
+  await syncDamagedPcs(p.id);
+  return takes;
+}
+/** Cancelling a bill: damaged pieces it sold go back to the damaged stock; damaged pieces it took back come off again. */
+async function undoDamaged(s, it) {
+  if (it.pcs > 0) {
+    for (const t of it.damaged_takes || []) await updateOne('damaged', { id: t.damaged_id }, { $inc: { left_pcs: t.pcs } });
+  } else {
+    const recs = await find('damaged', { product_id: it.product_id, sale_id: s.id, left_pcs: { $gt: 0 } });
+    const left = sum(recs, (d) => d.left_pcs);
+    if (left < -it.pcs) fail(`${-it.pcs - left} damaged pcs of "${it.name}" from this bill are already sold — cancel that bill first.`);
+    let need = -it.pcs;
+    for (const d of recs) {
+      if (need <= 0) break;
+      const take = Math.min(d.left_pcs, need);
+      await updateOne('damaged', { id: d.id }, { $inc: { left_pcs: -take } });
+      need -= take;
+    }
+  }
+  await syncDamagedPcs(it.product_id);
+}
+
 /** Map of supplier id → its bills (GRNs and old balance) with paid / balance / status. */
 export async function supplierLedgers(ids = null) {
   const of = ids ? { supplier_id: { $in: ids } } : {};
@@ -619,6 +671,24 @@ export async function createSale(body, approve) {
       // moved now (the whole bill is undone if anything below fails), so the cost is the batch's own:
       // a sale takes from the batch picked (or the oldest first); a return goes back into the batch picked (or the newest)
       const ids = Array.isArray(i.batch_ids) ? i.batch_ids : null;
+      const damaged = Boolean(i.damaged);
+      if (damaged) {
+        // a damaged return: kept apart at its cost (written off); damaged pieces sold: their cost was written off already
+        const b = !back ? null : i.batch_id != null ? await findOne('batches', { id: num(i.batch_id) }) : null;
+        const takes = back ? [] : await takeDamaged(p, pcs);
+        const origPc = back ? (b?.cost_per_pcs ?? p.cost_per_pcs) : sum(takes, (t) => t.pcs * t.cost_per_pcs) / pcs;
+        if (back) await addDamaged(p.id, -pcs, origPc, invoice_no, date, null);
+        const price = num(i.price);
+        const disc_pct = Math.min(100, Math.max(0, num(i.disc_pct)));
+        const disc = round2((qty * price * disc_pct) / 100);
+        lines.push({
+          p, unit, qty, pcs, price, disc, disc_pct, damaged: true, damaged_cost: round2(origPc * per), damaged_takes: takes,
+          net: qty ? round2((qty * price - disc) / qty) : price,
+          mrp: round2((p.mrp_per_set / p.pcs_per_set) * per), expected: round2((p.expected_per_set / p.pcs_per_set) * per),
+          cost: 0, batches: [], no_stock_pcs: 0, stock_before: p.stock_pcs, line_total: round2(qty * price - disc),
+        });
+        continue;
+      }
       const taken = back
         ? await moveStock(p.id, -pcs, 'return', invoice_no, `Returned ${-qty} ${unit}`, date, { batchId: i.batch_id ?? ids?.[0] ?? null })
         : await moveStock(p.id, -pcs, 'sale', invoice_no, `${qty} ${unit}`, date, { batchId: ids && ids.length > 1 ? null : i.batch_id ?? null, batchIds: ids });
@@ -669,8 +739,11 @@ export async function createSale(body, approve) {
         sale_id: sale.id, product_id: l.p.id, code: l.p.code, name: l.p.name, unit: l.unit, qty: l.qty, pcs: l.pcs, price: l.price,
         mrp_per_unit: l.mrp, expected_per_unit: l.expected, cost_per_unit: l.cost, line_total: l.line_total, disc: l.disc, disc_pct: l.disc_pct,
         batch_id: l.batches.length === 1 ? l.batches[0].batch_id : null, batches: l.batches, no_stock_pcs: l.no_stock_pcs,
+        damaged: Boolean(l.damaged), damaged_cost: l.damaged_cost || 0, damaged_takes: l.damaged_takes || [],
       });
     }
+    // the damaged returns belong to this bill (so cancelling it takes them off again)
+    await updateMany('damaged', { ref: invoice_no, sale_id: null }, { $set: { sale_id: sale.id } });
     return { id: sale.id, short: lines.filter((l) => l.no_stock_pcs > 0) };
   }).then(async ({ id, short }) => {
     const s = await getSale(id);
@@ -716,6 +789,7 @@ export async function getSale(id) {
 /** A cancelled or deleted bill: each line's pieces go back to the batches they were sold from. */
 async function returnStock(s, note) {
   for (const it of s.items) {
+    if (it.damaged) { await undoDamaged(s, it); continue; }
     const from = it.batches?.length ? it.batches : [{ batch_id: it.batch_id ?? null, pcs: it.pcs }];
     for (const b of from) {
       const there = b.batch_id != null && await findOne('batches', { id: b.batch_id });

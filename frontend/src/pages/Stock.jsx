@@ -11,6 +11,9 @@ export default function Stock() {
   const [cat, setCat] = useState('');
   const [filter, setFilter] = useState(params.get('low') ? 'low' : 'all');
   const { data, error, loading, reload } = useApi('/products?active=all');
+  // damaged returns kept apart from the stock (their cost is written off as a loss)
+  const damagedPcs = (data || []).reduce((t, p) => t + (p.damaged?.pcs || 0), 0);
+  const damagedValue = (data || []).reduce((t, p) => t + (p.damaged?.value || 0), 0);
   const [open, setOpen] = useState(null); // product id | 'new'
 
   const categories = useMemo(() => [...new Set((data || []).map((p) => p.category).filter(Boolean))].sort(), [data]);
@@ -19,7 +22,7 @@ export default function Stock() {
     return (data || []).filter((p) =>
       (!s || p.name.toLowerCase().includes(s) || p.code.toLowerCase().includes(s)) &&
       (!cat || p.category === cat) &&
-      (filter === 'all' ? p.active : filter === 'low' ? p.active && p.stock_pcs < p.reorder_sets * p.pcs_per_set : filter === 'out' ? p.active && p.stock_pcs <= 0 : !p.active));
+      (filter === 'all' ? p.active : filter === 'low' ? p.active && p.stock_pcs < p.reorder_sets * p.pcs_per_set : filter === 'out' ? p.active && p.stock_pcs <= 0 : filter === 'damaged' ? p.damaged?.pcs > 0 : !p.active));
   }, [data, q, cat, filter]);
 
   const active = (data || []).filter((p) => p.active);
@@ -45,6 +48,7 @@ export default function Stock() {
         <Stat icon="box" label="Products in stock" value={int(active.filter((p) => p.stock_pcs > 0).length)} sub={`${int(active.reduce((s, p) => s + Math.max(0, p.stock_pcs), 0))} pieces${active.some((p) => p.stock_pcs < 0) ? ` · ${active.filter((p) => p.stock_pcs < 0).length} sold without stock` : ''}`} />
         <Stat icon="cash" tone="blue" label="Stock value at cost" value={lkr(costValue)} />
         <Stat icon="tag" tone="green" label="Value at expected price" value={lkr(sellValue)} sub={`Potential profit ${lkr(sellValue - costValue)}`} />
+        {damagedPcs > 0 && <Stat icon="alert" tone="red" label="Damaged stock" value={`${int(damagedPcs)} pcs`} sub={`Cost written off ${lkr(damagedValue)}`} onClick={() => setFilter('damaged')} />}
         <Stat icon="alert" tone="amber" label="Low / out of stock" value={`${active.filter((p) => p.stock_pcs < p.reorder_sets * p.pcs_per_set).length} / ${active.filter((p) => p.stock_pcs <= 0).length}`} />
       </div>
 
@@ -52,6 +56,7 @@ export default function Stock() {
         { value: 'all', label: 'All products', count: active.length },
         { value: 'low', label: 'Low stock', count: active.filter((p) => p.stock_pcs < p.reorder_sets * p.pcs_per_set).length },
         { value: 'out', label: 'Out of stock', count: active.filter((p) => p.stock_pcs <= 0).length },
+        { value: 'damaged', label: 'Damaged', count: (data || []).filter((p) => p.damaged?.pcs > 0).length },
         { value: 'inactive', label: 'Inactive', count: (data || []).length - active.length },
       ]} />
       <div className="toolbar">
@@ -100,7 +105,19 @@ export default function Stock() {
                         <td className="right">{money(Math.max(0, pcs) * cost)}</td>
                       </tr>
                     );
-                  });
+                  }).concat(p.damaged?.pcs > 0 ? [
+                    <tr key={`${p.id}-dmg`} className="click damaged-row" onClick={() => setOpen(p.id)} title="Damaged returns — kept apart from the stock">
+                      <td className="muted strong">{p.code}</td>
+                      <td><b>{p.name}</b> <span className="badge-damaged">Damaged</span>
+                        <div className="sub">Damaged returns{p.damaged.refs?.length ? ` · ${p.damaged.refs.slice(0, 3).join(', ')}${p.damaged.refs.length > 3 ? '…' : ''}` : ''}</div></td>
+                      <td className="nowrap">{p.pcs_per_set} pcs/set</td>
+                      <td><Badge tone="red">{stockText(p.damaged.pcs, p.pcs_per_set)}</Badge></td>
+                      <td className="right">{money(p.damaged.cost_per_pcs)}</td>
+                      <td className="right muted">sell under cost</td>
+                      <td className="right muted">—</td>
+                      <td className="right"><span className="muted">written off</span><div className="sub">{money(p.damaged.value)} at cost</div></td>
+                    </tr>,
+                  ] : []);
                 })}
               </tbody>
             </table>

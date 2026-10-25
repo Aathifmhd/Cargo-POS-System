@@ -125,6 +125,8 @@ async function stockReport(book, from, to, period) {
     }
     if (!groups.size && p.stock_pcs > 0) groups.set(p.cost_per_pcs, { p, cost: p.cost_per_pcs, pcs: p.stock_pcs, value: p.stock_pcs * p.cost_per_pcs, expected: p.stock_pcs * p.expected_per_set / (p.pcs_per_set || 1), refs: [] });
     rows.push(...groups.values());
+    // damaged returns kept apart: listed, worth nothing (their cost is written off)
+    if (p.damaged_pcs > 0) rows.push({ p, cost: 0, pcs: p.damaged_pcs, value: 0, expected: 0, refs: ['DAMAGED (cost written off)'] });
     // sold without stock: listed with its pieces below zero, worth nothing
     if (p.stock_pcs < 0) rows.push({ p, cost: p.last_cost_per_pcs || p.cost_per_pcs, pcs: p.stock_pcs, value: 0, expected: 0, refs: ['Sold without stock'] });
   }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useApi, lkr, inr, bothMoney, supMoney, money, niceDate, int, pct, margin, today, addDays, stockText } from '../lib.js';
-import { PageHeader, Card, Loading, ErrorBox, Stat, Tabs, Segmented, Icon, DateInput } from '../components/ui.jsx';
+import { useApi, lkr, inr, bothMoney, supMoney, money, niceDate, int, pct, margin, today, addDays, stockText, niceTime } from '../lib.js';
+import { PageHeader, Card, Loading, ErrorBox, Stat, Tabs, Segmented, Icon, DateInput, Badge } from '../components/ui.jsx';
 
 export const PRESETS = {
   today: () => [today(), today()],
@@ -12,7 +12,7 @@ export const PRESETS = {
 };
 
 export default function Reports() {
-  const [tab, setTab] = useState('sales');
+  const [tab, setTab] = useState('stock');
   const [preset, setPreset] = useState('month');
   const [[from, to], setRange] = useState(PRESETS.month());
   const choose = (p) => { setPreset(p); setRange(PRESETS[p]()); };
@@ -21,7 +21,7 @@ export default function Reports() {
     <div>
       <PageHeader title="Reports" subtitle="See how the business is doing."
         actions={<button className="btn" onClick={() => window.print()}><Icon name="print" /> Print</button>} />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'sales', label: 'Sales & profit' }, { value: 'stock', label: 'Stock value' }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'stock', label: 'Stock value' }]} />
       {tab !== 'stock' && (
         <div className="toolbar">
           <Segmented value={preset} onChange={choose} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: '7 days' }, { value: 'month', label: 'This month' }, { value: 'last30', label: '30 days' }, { value: 'year', label: 'This year' }]} />
@@ -30,13 +30,13 @@ export default function Reports() {
           <DateInput style={{ width: 160 }} value={to} onChange={(e) => { setPreset(''); setRange([from, e.target.value]); }} />
         </div>
       )}
-      {tab === 'sales' && <SalesReport from={from} to={to} />}
       {tab === 'stock' && <StockReport />}
     </div>
   );
 }
 
-function SalesReport({ from, to }) {
+/** Sales of a period (Sales & Profit → Sales). withBills: every bill of the period listed too. */
+export function SalesReport({ from, to, withBills = false }) {
   const { data: d, error, reload } = useApi(`/reports/sales?from=${from}&to=${to}`);
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!d) return <Loading />;
@@ -45,7 +45,7 @@ function SalesReport({ from, to }) {
     <div className="stack">
       <div className="stats">
         <Stat icon="receipt" label="Sales" value={lkr(s.sales)} sub={`${s.bills} bills${s.voided ? ` · ${s.voided} cancelled` : ''}`} />
-        <Stat icon="chart" tone="green" label="Gross profit" value={lkr(s.profit)} sub={`Margin ${pct(margin(s.sales, s.cost))}`} />
+        <Stat icon="chart" tone="green" label="Profit on bills" value={lkr(s.profit)} sub={`Margin ${pct(margin(s.sales, s.cost))} · full picture in Profit & loss`} />
         <Stat icon="cash" tone="blue" label="Cash sales" value={lkr(s.cash)} sub={`Credit ${lkr(s.credit)}`} />
         <Stat icon="wallet" tone="violet" label="Collections from credit" value={lkr(s.collections)} sub={`Discounts given ${lkr(s.discount)}`} />
       </div>
@@ -58,6 +58,26 @@ function SalesReport({ from, to }) {
           {d.daily.length > 0 && <tfoot><tr><td>Total</td><td className="right">{s.bills}</td><td className="right">{money(s.cash)}</td><td className="right">{money(s.credit)}</td><td className="right">{money(s.sales)}</td><td className="right">{money(s.profit)}</td></tr></tfoot>}
         </table></div>
       </Card>
+      {withBills && (
+        <Card title={`All bills · ${d.bills.length}`} pad={false}>
+          {!d.bills.length ? <p className="muted small" style={{ padding: 16 }}>No bills in this period.</p> : (
+            <div className="table-wrap" style={{ maxHeight: 520 }}><table className="table">
+              <thead><tr><th>Bill</th><th>Date</th><th>Customer</th><th>Type</th><th className="right">Items</th><th className="right">Discount</th><th className="right">Total</th></tr></thead>
+              <tbody>{d.bills.map((b) => (
+                <tr key={b.id} className={`hover ${b.status === 'void' ? 'void' : ''}`}>
+                  <td className="nowrap"><Link to={`/sales/${b.id}`} className="strong">{b.invoice_no}</Link>{b.status === 'void' && <> <Badge>Cancelled</Badge></>}</td>
+                  <td className="nowrap">{niceDate(b.date)}{b.created_at && <div className="sub">{niceTime(b.created_at)}</div>}</td>
+                  <td>{b.customer_id ? <Link to={`/customers/${b.customer_id}`}>{b.customer_name}</Link> : b.customer_name}</td>
+                  <td><Badge tone={b.payment_type === 'cash' ? 'green' : 'amber'}>{b.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge>{b.total < 0 && <div className="sub">Return</div>}</td>
+                  <td className="right">{b.items}</td>
+                  <td className="right">{b.discount ? money(b.discount) : '—'}</td>
+                  <td className={`right strong ${b.total < 0 ? 'text-red' : ''}`}>{money(b.total)}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          )}
+        </Card>
+      )}
       <div className="grid grid-2">
         <Card title="Products sold" pad={false}>
           <div className="table-wrap" style={{ maxHeight: 420 }}><table className="table">

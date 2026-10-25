@@ -15,10 +15,19 @@ const BATCH_FIELDS = { id: 1, product_id: 1, kind: 1, ref: 1, date: 1, cost_per_
 async function withExtras(products) {
   const sIds = [...new Set(products.map((p) => p.supplier_id).filter((x) => x != null))];
   const ids = products.map((p) => p.id);
-  const [supplierList, batchList] = await inParallel(
+  const [supplierList, batchList, damagedList] = await inParallel(
     () => (sIds.length ? find('suppliers', { id: { $in: sIds } }, { project: { id: 1, name: 1 } }) : []),
     () => (ids.length ? find('batches', { product_id: { $in: ids }, left_pcs: { $gt: 0 } }, { project: BATCH_FIELDS }) : []),
+    () => (ids.length ? find('damaged', { product_id: { $in: ids }, left_pcs: { $gt: 0 } }, { project: { product_id: 1, left_pcs: 1, cost_per_pcs: 1, ref: 1, date: 1 } }) : []),
   );
+  // damaged returns kept apart: pieces and their (written-off) cost
+  const damagedOf = new Map();
+  for (const d of damagedList) {
+    const x = damagedOf.get(d.product_id) || { pcs: 0, value: 0, refs: [] };
+    x.pcs += d.left_pcs; x.value += d.left_pcs * d.cost_per_pcs;
+    if (d.ref && !x.refs.includes(d.ref)) x.refs.push(d.ref);
+    damagedOf.set(d.product_id, x);
+  }
   const names = Object.fromEntries(supplierList.map((s) => [s.id, s.name]));
   const batchesOf = new Map();
   for (const b of batchList.sort((a, b) => a.cost_per_pcs - b.cost_per_pcs || (a.date < b.date ? -1 : 1))) {
@@ -27,6 +36,7 @@ async function withExtras(products) {
   return products.map((p) => ({
     batches: batchesOf.get(p.id) || [],
     ...p,
+    damaged: damagedOf.has(p.id) ? { pcs: damagedOf.get(p.id).pcs, cost_per_pcs: round2(damagedOf.get(p.id).value / damagedOf.get(p.id).pcs), value: round2(damagedOf.get(p.id).value), refs: damagedOf.get(p.id).refs } : null,
     supplier_name: p.supplier_id != null ? names[p.supplier_id] ?? null : null,
     stock_sets: p.pcs_per_set > 0 ? Math.trunc(p.stock_pcs / p.pcs_per_set) : p.stock_pcs,
     stock_loose: p.pcs_per_set > 0 ? p.stock_pcs % p.pcs_per_set : 0,

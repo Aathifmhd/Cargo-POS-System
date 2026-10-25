@@ -3,7 +3,10 @@ import {
   find, updateMany, fail, round2, sum, todayStr, addDays, getSettings, setSetting, DB_LABEL, COLLECTIONS, inParallel, stamp,
 } from '../db.js';
 import { supplierLedgers, customerLedgers, revalueGrns, customerLabel, customerPerson } from '../services.js';
-import { guard, audit } from '../auth.js';
+import { guard, audit, rankOf, RANK } from '../auth.js';
+
+/** Sales & Profit is the Super Admin's only. */
+const superOnly = (req) => { if (rankOf(req.user) < RANK.superadmin) fail('Only the Super Admin can see Sales & Profit', 403); };
 
 const r = Router();
 
@@ -232,6 +235,7 @@ r.get('/dashboard', async (req, res) => {
 
 /* ---------------- reports ---------------- */
 r.get('/reports/sales', async (req, res) => {
+  superOnly(req);
   const from = req.query.from || todayStr();
   const to = req.query.to || todayStr();
   const [all, payments] = await inParallel(
@@ -251,6 +255,10 @@ r.get('/reports/sales', async (req, res) => {
     return { date, bills: d.bills, sales: d.sales, profit: d.profit, cash: d.cash, credit: d.credit };
   });
   const lines = sales.length ? await find('sale_items', { sale_id: { $in: sales.map((s) => s.id) } }) : [];
+  // damaged: the cost written off on damaged returns, and what damaged pieces were sold for (both already in the profit)
+  summary.damage_loss = round2(sum(lines.filter((l) => l.damaged && l.qty < 0), (l) => l.damaged_cost * -l.qty));
+  summary.damage_sold = round2(sum(lines.filter((l) => l.damaged && l.qty > 0), (l) => l.line_total));
+  summary.damage_sold_cost = round2(sum(lines.filter((l) => l.damaged && l.qty > 0), (l) => l.damaged_cost * l.qty));
   const prods = {};
   for (const l of lines) {
     const p = (prods[l.product_id] ??= { product_id: l.product_id, code: l.code, name: l.name, pcs: 0, amount: 0, profit: 0 });
@@ -266,7 +274,127 @@ r.get('/reports/sales', async (req, res) => {
     c.amount += s.total;
     c.profit += s.total - s.cost_total;
   }
-  res.json({ from, to, summary, daily, products: Object.values(prods).sort(desc('amount')), customers: Object.values(custs).sort(desc('amount')) });
+  // every bill of the period (cancelled ones too, marked)
+  const bills = all.slice().sort((a, b) => (a.date === b.date ? b.id - a.id : a.date < b.date ? 1 : -1)).map((s) => ({
+    id: s.id, invoice_no: s.invoice_no, date: s.date, created_at: s.created_at, customer_id: s.customer_id, customer_name: s.customer_name,
+    payment_type: s.payment_type, total: s.total, paid_at_sale: s.paid_at_sale, discount: s.discount, status: s.status,
+    items: lines.filter((l) => l.sale_id === s.id).length,
+  }));
+  res.json({ from, to, summary, daily, bills, products: Object.values(prods).sort(desc('amount')), customers: Object.values(custs).sort(desc('amount')) });
+});
+
+/**
+ * Sales & Profit → Profit & loss for a period.
+ *  Profit: each bill's profit (its sales less their cost), the extra pieces suppliers let us keep free, stock found on a count.
+ *  Loss, with its reason: damaged returns (their cost written off), selling under cost (cost − price), GRN short pieces
+ *  lost, stock taken off on a correction.
+ * The losses inside a bill (damaged returns, under cost) are taken out of that bill's profit and listed as losses,
+ * so: net profit = gross profit − losses = what the bills made, + free extras, ± stock corrections, − lost shorts.
+ */
+r.get('/reports/profit', async (req, res) => {
+  superOnly(req);
+  const from = req.query.from || todayStr();
+  const to = req.query.to || todayStr();
+  const sales = (await find('sales', { date: inRange(from, to), status: 'completed' })).sort((a, b) => (a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1));
+  const [lines, extraLines, shortLines, moves] = await inParallel(
+    () => (sales.length ? find('sale_items', { sale_id: { $in: sales.map((s) => s.id) } }) : []),
+    () => find('grn_items', { $or: [{ extra_status: 'free', extra_date: inRange(from, to) }, { extra_sets: { $gt: 0 } }] }),
+    () => find('grn_items', { short_status: 'lost', short_date: inRange(from, to) }),
+    () => find('stock_moves', { type: 'adjust', date: inRange(from, to), note: { $ne: 'Opening stock' } }),
+  );
+  const grnIds = [...new Set([...extraLines, ...shortLines].map((i) => i.grn_id))];
+  const [grns, batches, products] = await inParallel(
+    () => (grnIds.length ? find('grns', { id: { $in: grnIds } }, { project: { id: 1, grn_no: 1, date: 1 } }) : []),
+    () => (moves.length ? find('batches', { id: { $in: moves.map((m) => m.batch_id).filter((x) => x != null) } }, { project: { id: 1, cost_per_pcs: 1, ref: 1 } }) : []),
+    () => (moves.length ? find('products', { id: { $in: [...new Set(moves.map((m) => m.product_id))] } }, { project: { id: 1, code: 1, name: 1, cost_per_pcs: 1 } }) : []),
+  );
+  const grnOf = Object.fromEntries(grns.map((g) => [g.id, g]));
+  const batchOf = Object.fromEntries(batches.map((b) => [b.id, b]));
+  const prodOf = Object.fromEntries(products.map((p) => [p.id, p]));
+  const losses = [];
+  const gains = [];
+
+  // each bill: its profit, with the losses inside it taken out (listed below with their reason)
+  const invoices = sales.map((s) => {
+    const mine = lines.filter((l) => l.sale_id === s.id);
+    let lost = 0;
+    for (const l of mine) {
+      if (l.damaged && l.qty < 0) {
+        const amount = round2(l.damaged_cost * -l.qty);
+        lost += amount;
+        losses.push({ reason: 'damaged', date: s.date, ref: s.invoice_no, sale_id: s.id, code: l.code, name: l.name, pcs: -l.pcs, amount,
+          note: `Damaged return from ${s.customer_name} — cost written off` });
+      } else if (!l.damaged && l.qty > 0 && l.cost_per_unit * l.qty > l.line_total + 0.009) {
+        const amount = round2(l.cost_per_unit * l.qty - l.line_total);
+        lost += amount;
+        losses.push({ reason: 'undercost', date: s.date, ref: s.invoice_no, sale_id: s.id, code: l.code, name: l.name, pcs: l.pcs, amount,
+          note: `Sold at ${round2(l.line_total / l.qty)} — cost ${l.cost_per_unit} (${s.customer_name})` });
+      }
+    }
+    const made = round2(s.total - s.cost_total);
+    return {
+      id: s.id, invoice_no: s.invoice_no, date: s.date, created_at: s.created_at, customer_id: s.customer_id, customer_name: s.customer_name,
+      payment_type: s.payment_type, total: s.total, cost: s.cost_total, items: mine.length,
+      damaged_sold: round2(sum(mine.filter((l) => l.damaged && l.qty > 0), (l) => l.line_total)),
+      profit: round2(made + lost),      // before its losses
+      losses: round2(lost), net: made,
+    };
+  });
+
+  // extra pieces kept free: a profit (what they cost us per piece)
+  for (const it of extraLines) {
+    const g = grnOf[it.grn_id];
+    if (!g) continue;
+    const pc = it.landed_per_pcs_lkr || 0;
+    if (it.extra_status === 'free' && it.extra_pcs > 0 && it.extra_date >= from && it.extra_date <= to) {
+      gains.push({ reason: 'extra', date: it.extra_date, ref: g.grn_no, grn_id: g.id, name: it.name, pcs: it.extra_pcs, amount: round2(it.extra_pcs * pc), note: it.extra_note || 'Extra pieces kept free' });
+    }
+    // older GRNs: free extra sets, on the GRN's date
+    if (it.extra_sets > 0 && g.date >= from && g.date <= to) {
+      const pcs = it.extra_sets * (it.pcs_per_set || 1);
+      gains.push({ reason: 'extra', date: g.date, ref: g.grn_no, grn_id: g.id, name: it.name, pcs, amount: round2(pcs * pc), note: 'Free extra sets' });
+    }
+  }
+  // GRN short pieces lost: paid for, never received
+  for (const it of shortLines) {
+    const g = grnOf[it.grn_id];
+    if (!g) continue;
+    const pcs = (it.short_sets || 0) * (it.pcs_per_set || 1) + (it.short_pcs || 0);
+    losses.push({ reason: 'short', date: it.short_date, ref: g.grn_no, grn_id: g.id, name: it.name, pcs, amount: round2(pcs * (it.landed_per_pcs_lkr || 0)), note: it.short_note || 'Short pieces lost — paid for, not received' });
+  }
+  // stock corrections: taken off = a loss, found = a gain (at the batch's cost)
+  for (const m of moves) {
+    const p = prodOf[m.product_id];
+    const amount = round2(Math.abs(m.pcs) * (batchOf[m.batch_id]?.cost_per_pcs ?? p?.cost_per_pcs ?? 0));
+    const row = { date: m.date, ref: 'Stock correction', code: p?.code, name: p?.name || `#${m.product_id}`, pcs: Math.abs(m.pcs), amount, note: m.note || '' };
+    if (m.pcs < 0) losses.push({ reason: 'stock', ...row });
+    else gains.push({ reason: 'stockfound', ...row });
+  }
+
+  const invoiceProfit = round2(sum(invoices, (i) => i.profit));
+  const extraProfit = round2(sum(gains.filter((g) => g.reason === 'extra'), (g) => g.amount));
+  const stockGain = round2(sum(gains.filter((g) => g.reason === 'stockfound'), (g) => g.amount));
+  const lossTotal = round2(sum(losses, (l) => l.amount));
+  const gross = round2(invoiceProfit + extraProfit + stockGain);
+  const byReason = Object.entries(losses.reduce((m, l) => ({ ...m, [l.reason]: (m[l.reason] || 0) + l.amount }), {})).map(([reason, amount]) => ({ reason, amount: round2(amount), count: losses.filter((l) => l.reason === reason).length }));
+  res.json({
+    from, to,
+    summary: {
+      bills: invoices.length, sales: round2(sum(invoices, (i) => i.total)), cost: round2(sum(invoices, (i) => i.cost)),
+      invoice_profit: invoiceProfit, extra_profit: extraProfit, stock_gain: stockGain, gross_profit: gross, losses: lossTotal, net_profit: round2(gross - lossTotal),
+    },
+    invoices: invoices.slice().reverse(),
+    gains: gains.sort((a, b) => (a.date < b.date ? 1 : -1)),
+    losses: losses.sort((a, b) => (a.date < b.date ? 1 : -1)),
+    by_reason: byReason.sort((a, b) => b.amount - a.amount),
+  });
+});
+
+/** Damaged stock: damaged returns kept apart (their cost is written off as a loss). */
+r.get('/reports/damaged', async (req, res) => {
+  const list = await find('damaged', { left_pcs: { $gt: 0 } }, { sort: { date: -1, id: -1 } });
+  const prods = Object.fromEntries((list.length ? await find('products', { id: { $in: [...new Set(list.map((d) => d.product_id))] } }, { project: { id: 1, code: 1, name: 1 } }) : []).map((p) => [p.id, p]));
+  res.json(list.map((d) => ({ ...d, code: prods[d.product_id]?.code, name: prods[d.product_id]?.name })));
 });
 
 r.get('/reports/stock', async (req, res) => {

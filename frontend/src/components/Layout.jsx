@@ -24,6 +24,7 @@ const NAV = [
   { to: '/dues', icon: 'wallet', label: 'Payment Portal', hint: 'F7' },
   { to: '/cheques', icon: 'cheque', label: 'Cheque Desk', cheques: true },
   { to: '/reports', icon: 'chart', label: 'Reports' },
+  { to: '/sales-profit', icon: 'cash', label: 'Sales & Profit', super: true },
   { to: '/settings', icon: 'settings', label: 'Settings' },
   { to: '/users', icon: 'shield', label: 'Users & Security', admin: true },
 ];
@@ -140,8 +141,8 @@ export default function Layout() {
                 <Icon name={item.icon} size={19} />
                 <span>{item.label}</span>
                 {item.hint && <kbd>{item.hint}</kbd>}
-                {item.super && attn > 0 && <span className="nav-count" title="New Attention messages">{attn > 99 ? '99+' : attn}</span>}
-                {item.super && !attn && unseen > 0 && <span className="nav-count grey" title="New activities">{unseen > 99 ? '99+' : unseen}</span>}
+                {item.to === '/action-center' && attn > 0 && <span className="nav-count" title="New Attention messages">{attn > 99 ? '99+' : attn}</span>}
+                {item.to === '/action-center' && !attn && unseen > 0 && <span className="nav-count grey" title="New activities">{unseen > 99 ? '99+' : unseen}</span>}
                 {item.cheques && chequesToday > 0 && <span className="nav-count" title="Cheques due today or waiting from past dates">{chequesToday}</span>}
               </NavLink>
             )

@@ -19,6 +19,7 @@ import Customers from './pages/Customers.jsx';
 import CustomerView from './pages/CustomerView.jsx';
 import Dues from './pages/Dues.jsx';
 import Reports from './pages/Reports.jsx';
+import SalesProfit from './pages/SalesProfit.jsx';
 import Settings from './pages/Settings.jsx';
 import Users from './pages/Users.jsx';
 import ActionCenter from './pages/ActionCenter.jsx';
@@ -118,6 +119,7 @@ export default function App() {
                   <Route path="/settings" element={<Settings />} />
                   {isAdmin(user) && <Route path="/users" element={<Users />} />}
                   {isSuper(user) && <Route path="/action-center" element={<ActionCenter />} />}
+                  {isSuper(user) && <Route path="/sales-profit" element={<SalesProfit />} />}
                   <Route path="*" element={<Dashboard />} />
                 </Route>
               </Routes>

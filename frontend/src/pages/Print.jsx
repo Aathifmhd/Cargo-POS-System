@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { useApi, money, lkr, inr, supMoney, niceDate, int } from '../lib.js';
+import { useApi, money, lkr, inr, supMoney, niceDate, niceTime, int } from '../lib.js';
 import { Loading, Icon } from '../components/ui.jsx';
 import { useSettings } from '../App.jsx';
 
@@ -17,7 +17,7 @@ const useAutoPrint = (ready) => useEffect(() => {
   if (ready && !new URLSearchParams(window.location.search).has('preview')) setTimeout(() => window.print(), 300);
 }, [ready]);
 
-function ShopHead({ title, no, date }) {
+function ShopHead({ title, no, date, time }) {
   const { settings } = useSettings();
   return (
     <div className="print-head">
@@ -29,7 +29,7 @@ function ShopHead({ title, no, date }) {
       <div className="right">
         <h2>{title}</h2>
         <div><b>{no}</b></div>
-        <div>{niceDate(date)}</div>
+        <div>{niceDate(date)}{time ? ` · ${niceTime(time)}` : ''}</div>
       </div>
     </div>
   );
@@ -46,9 +46,9 @@ export function PrintSale() {
     <>
       <PrintBar />
       <div className="print-page">
-        <ShopHead title={s.status === 'void' ? 'CANCELLED BILL' : s.total < 0 ? (s.payment_type === 'credit' ? 'RETURN · CREDIT NOTE' : 'RETURN · CASH REFUND') : s.payment_type === 'credit' ? 'CREDIT INVOICE' : 'CASH BILL'} no={s.invoice_no} date={s.date} />
+        <ShopHead title={s.status === 'void' ? 'CANCELLED BILL' : s.total < 0 ? (s.payment_type === 'credit' ? 'RETURN · CREDIT NOTE' : 'RETURN · CASH REFUND') : s.payment_type === 'credit' ? 'CREDIT INVOICE' : 'CASH BILL'} no={s.invoice_no} date={s.date} time={s.created_at} />
         <div className="print-meta">
-          <div><div className="muted">Bill to</div><b>{s.customer_name}</b>{s.customer_shop && <div>{s.customer_shop}</div>}{s.customer_address && <div>{s.customer_address}</div>}{s.customer_phone && <div>{s.customer_phone}</div>}</div>
+          <div><div className="muted">Bill to</div><b>{s.customer_name}</b>{s.customer_person && <div>{s.customer_person}</div>}{s.customer_address && <div>{s.customer_address}</div>}{s.customer_phone && <div>{s.customer_phone}</div>}</div>
           {s.payment_type === 'credit' && s.total >= 0 && <div className="right"><div className="muted">Payment due</div><b>{niceDate(s.due_date)}</b></div>}
         </div>
         <table>

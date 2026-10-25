@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { find, findOne, insert, setById, updateOne, deleteMany, count, fail, num } from '../db.js';
 import {
   checkCredentials, checkSuperPassword, createSession, createApproval, requireAuth, adminOnly, audit, endSession,
-  hashPassword, verifyPassword, publicUser, userByName, guard, RANK, rankOf, ROLE_NAME,
+  hashPassword, verifyPassword, publicUser, userByName, nameTaken, guard, RANK, rankOf, ROLE_NAME,
 } from '../auth.js';
+import { wrongPassword } from '../attention.js';
 
 // Only a super admin may create, change or promote someone to super admin (`by` is who allowed the change).
 const roleFor = (by, wanted, current = 'cashier') => {
@@ -19,7 +20,11 @@ const r = Router();
 r.post('/auth/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) fail('Enter your username and password');
-  const user = await checkCredentials(username, password);
+  let user;
+  try { user = await checkCredentials(username, password); } catch (e) {
+    if (e.status === 401) await wrongPassword(username);   // 3 in a row → Action Center → Attention
+    throw e;
+  }
   const token = await createSession(user);
   await audit(user, 'Logged in');
   res.json({ token, user: publicUser(user) });
@@ -72,7 +77,7 @@ r.post('/users', requireAuth, adminOnly, async (req, res) => {
   const { username, name, password, role } = req.body || {};
   if (!String(username || '').trim() || !String(name || '').trim()) fail('Name and username are required');
   if (String(password || '').length < 6) fail('Password must be at least 6 characters');
-  if (await userByName(username, false)) fail('That username is already taken');
+  if (await nameTaken(username)) fail('That username is already taken');
   const by = await guard(req, `Add user ${String(username).trim()} (${ROLE_NAME[role] || 'Cashier'})`, 'superadmin', { always: true });
   const newRole = roleFor(by, role);
   const u = await insert('users', { username: username.trim(), name: name.trim(), password_hash: hashPassword(password), role: newRole });
@@ -87,7 +92,7 @@ r.put('/users/:id', requireAuth, adminOnly, async (req, res) => {
   const newName = String(req.body.username ?? u.username).trim();
   if (!newName) fail('Username is required');
   if (newName.toLowerCase() !== u.username.toLowerCase()) {
-    const taken = await userByName(newName, false);
+    const taken = await nameTaken(newName);
     if (taken && taken.id !== id) fail('That username is already taken');
   }
   const by = await guard(req, `Edit user ${u.username}`, 'superadmin', { always: true });
@@ -127,7 +132,7 @@ r.get('/action-center', requireAuth, async (req, res) => {
   if (rankOf(req.user) < RANK.superadmin) fail('Only the Super Admin can open the Action Center', 403);
   const after = num(req.query.after);
   const [rows, users] = await Promise.all([
-    find('audit_log', after ? { id: { $gt: after } } : {}, { sort: { id: -1 }, limit: after ? 200 : 1000 }),
+    find('audit_log', { ...(after ? { id: { $gt: after } } : {}), ...(req.query.level ? { level: String(req.query.level) } : {}) }, { sort: { id: -1 }, limit: after ? 200 : 1000 }),
     find('users', {}, { project: { username: 1, role: 1 } }),
   ]);
   const roleOf = Object.fromEntries(users.map((u) => [String(u.username).toLowerCase(), u.role]));

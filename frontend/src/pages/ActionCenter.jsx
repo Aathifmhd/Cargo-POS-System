@@ -68,7 +68,7 @@ export default function ActionCenter() {
   const days = useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const shown = (rows || []).filter((a) =>
-      (tab === 'all' || a.super) &&
+      (tab === 'all' || (tab === 'super' ? a.super : a.level === 'attention')) &&
       (logins || !isLogin(a)) &&
       (!words.length || words.every((w) => `${a.username || ''} ${a.action} ${a.approved_by || ''}`.toLowerCase().includes(w))));
     const out = [];
@@ -80,6 +80,15 @@ export default function ActionCenter() {
     return out;
   }, [rows, tab, q, logins]);
   const superCount = (rows || []).filter((a) => a.super).length;
+  const attentionCount = (rows || []).filter((a) => a.level === 'attention').length;
+  // the Attention tab open = its messages are read (the red count on the menu goes)
+  useEffect(() => {
+    if (tab !== 'attention' || !rows) return;
+    const top = Math.max(0, ...rows.filter((a) => a.level === 'attention').map((a) => a.id));
+    try { localStorage.setItem('cargo-attention-seen', String(top)); } catch { /* private mode */ }
+    window.dispatchEvent(new Event('cargo-attention-seen'));
+  }, [tab, rows]);
+  const unreadAttention = (() => { let seen = 0; try { seen = Number(localStorage.getItem('cargo-attention-seen')) || 0; } catch { /* private mode */ } return (rows || []).filter((a) => a.level === 'attention' && a.id > seen).length; })();
 
   return (
     <div>
@@ -87,14 +96,16 @@ export default function ActionCenter() {
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: 'all', label: 'All activities', count: rows?.length },
         { value: 'super', label: 'Super admin approvals', count: superCount },
+        { value: 'attention', label: <span className="row gap-s"><Icon name="alert" size={14} /> Attention{tab !== 'attention' && unreadAttention > 0 && <span className="nav-count">{unreadAttention}</span>}</span>, count: attentionCount },
       ]} />
+      {tab === 'attention' && <p className="muted small mb">Things to act on: returned cheques, cheques on hold too long, big bills overdue, supplier payments due soon, GRN shorts not settled, bills below cost, big discounts, large cash refunds, wrong passwords, products 10 pcs below zero, and a put-off backup.</p>}
       <div className="toolbar">
         <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="Search user, action or approver…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         {tab === 'all' && <label className="check"><input type="checkbox" checked={logins} onChange={(e) => setLogins(e.target.checked)} /> Show logins</label>}
       </div>
       {error && <ErrorBox error={error} onRetry={() => load(true)} />}
       {!rows ? <Card><Loading /></Card> : !days.length ? (
-        <Card><Empty icon={tab === 'super' ? 'crown' : 'clock'} title={q ? 'Nothing matches' : tab === 'super' ? 'No Super Admin approvals yet' : 'No activity yet'}
+        <Card><Empty icon={tab === 'super' ? 'crown' : tab === 'attention' ? 'alert' : 'clock'} title={q ? 'Nothing matches' : tab === 'super' ? 'No Super Admin approvals yet' : tab === 'attention' ? 'Nothing needs attention' : 'No activity yet'}
           text={q ? `Nothing for "${q}".` : 'New activity shows up here by itself.'} /></Card>
       ) : (
         <div className="stack">
@@ -107,10 +118,10 @@ export default function ActionCenter() {
                   <thead><tr><th>Time</th><th>Who</th><th>What happened</th><th>Approved by</th></tr></thead>
                   <tbody>
                     {d.items.map((a) => (
-                      <tr key={a.id} className={`hover ${fresh.has(a.id) ? 'ac-new' : ''} ${isLogin(a) ? 'ac-login' : ''}`}>
+                      <tr key={a.id} className={`hover ${fresh.has(a.id) ? 'ac-new' : ''} ${isLogin(a) ? 'ac-login' : ''} ${a.level === 'attention' ? 'ac-attention' : ''}`}>
                         <td className="nowrap mono small">{timeOf(a.at)}</td>
                         <td className="nowrap"><b>{a.username || '—'}</b>{a.role && <> <RoleBadge role={a.role} /></>}</td>
-                        <td>{a.action}</td>
+                        <td>{a.level === 'attention' && <Badge tone="red"><Icon name="alert" size={12} /> Attention</Badge>}{a.level === 'nostock' && <Badge tone="amber">No stock</Badge>} {a.action}</td>
                         <td className="nowrap">{a.approved_by
                           ? <Badge tone={a.super ? 'amber' : 'violet'}><Icon name={a.super ? 'crown' : 'lock'} size={12} /> {a.approved_by}</Badge>
                           : a.super ? <Badge tone="amber"><Icon name="crown" size={12} /> Super Admin</Badge> : <span className="muted">—</span>}</td>

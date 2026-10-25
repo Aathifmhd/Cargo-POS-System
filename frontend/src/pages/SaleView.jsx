@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import { useApi, lkr, money, niceDate, int, margin, pct } from '../lib.js';
+import { useApi, lkr, money, niceDate, int, margin, pct, niceTime } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Badge, StatusBadge, Modal } from '../components/ui.jsx';
 
 /** Loads one bill — shared by the page and the pop-up. */
@@ -10,7 +10,7 @@ function useSale(id) {
 }
 
 const subtitleOf = (s) => (
-  <>{niceDate(s.date)} · {s.customer_name} · <Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge> <StatusBadge status={s.pay_status} /></>
+  <>{niceDate(s.date)}{s.created_at ? ` · ${niceTime(s.created_at)}` : ''} · {s.customer_name} · <Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge> <StatusBadge status={s.pay_status} /></>
 );
 
 const ReprintButton = ({ onClick }) => <button className="btn btn-primary" onClick={onClick}><Icon name="print" /> Reprint</button>;
@@ -28,7 +28,7 @@ function SaleDetails({ s }) {
               <tbody>
                 {s.items.map((i) => (
                   <tr key={i.id}>
-                    <td><b>{i.name}</b><div className="sub">{i.code}</div></td>
+                    <td><b>{i.name}</b><div className="sub">{i.code}</div>{i.no_stock_pcs > 0 && <span className="chq-wait">{i.no_stock_pcs} pcs sold without stock</span>}</td>
                     <td className="right nowrap">{int(i.pcs)} pcs</td>
                     <td className="right">{money(i.price / (i.pcs / i.qty || 1))}</td>
                     <td className="right muted">{money(i.expected_per_unit / (i.pcs / i.qty || 1))}</td>
@@ -61,7 +61,7 @@ function SaleDetails({ s }) {
             <Card title="Customer">
               <div className="stack-s">
                 <Link to={`/customers/${s.customer_id}`} className="strong">{s.customer_name}</Link>
-                {s.customer_shop && <span className="muted">{s.customer_shop}</span>}
+                {s.customer_person && <span className="muted">{s.customer_person}</span>}
                 {s.customer_phone && <span className="row gap-s"><Icon name="phone" size={14} /> {s.customer_phone}</span>}
                 {s.customer_balance != null && <span>Total due now: <b className={s.customer_balance > 0 ? 'text-red' : ''}>{lkr(s.customer_balance)}</b></span>}
               </div>
@@ -69,7 +69,7 @@ function SaleDetails({ s }) {
           )}
           {s.payments.length > 0 && (
             <Card title="Payments for this bill">
-              {s.payments.map((p) => <div key={p.id} className="list-row"><div><div className="t">{p.method}</div><div className="s">{niceDate(p.date)} {p.reference}</div></div><b>{lkr(p.amount)}</b></div>)}
+              {s.payments.map((p) => <div key={p.id} className="list-row"><div><div className="t">{p.method}</div><div className="s">{niceDate(p.date)}{p.created_at ? ` · ${niceTime(p.created_at)}` : ''} {p.reference}</div></div><b>{lkr(p.amount)}</b></div>)}
             </Card>
           )}
         </div>

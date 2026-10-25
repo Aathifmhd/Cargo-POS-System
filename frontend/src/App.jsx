@@ -22,6 +22,7 @@ import Reports from './pages/Reports.jsx';
 import Settings from './pages/Settings.jsx';
 import Users from './pages/Users.jsx';
 import ActionCenter from './pages/ActionCenter.jsx';
+import Cheques from './pages/Cheques.jsx';
 import { PrintSale, PrintGrn } from './pages/Print.jsx';
 
 const SettingsCtx = createContext({ settings: {}, reload: () => {} });
@@ -112,6 +113,7 @@ export default function App() {
                   <Route path="/customers" element={<Customers />} />
                   <Route path="/customers/:id" element={<CustomerView />} />
                   <Route path="/dues" element={<Dues />} />
+                  <Route path="/cheques" element={<Cheques />} />
                   <Route path="/reports" element={<Reports />} />
                   <Route path="/settings" element={<Settings />} />
                   {isAdmin(user) && <Route path="/users" element={<Users />} />}

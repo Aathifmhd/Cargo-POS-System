@@ -9,12 +9,16 @@ import products from './routes/products.js';
 import grns from './routes/grns.js';
 import sales from './routes/sales.js';
 import reports from './routes/reports.js';
+import money from './routes/money.js';
+import exportsRoute from './routes/exports.js';
 import authRoutes from './routes/auth.js';
 import { requireAuth, initAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
 import { setOnRateChange, startFxTimer } from './fx.js';
-import { revalueGrns, upgradeCosting } from './services.js';
+import { revalueGrns, upgradeCosting, relabelCustomers } from './services.js';
 import { setupBatches } from './db.js';
+import { autoPassSoon } from './cheques.js';
+import { attentionSoon } from './attention.js';
 
 // Connect to MongoDB, create indexes / default settings / default logins (safe on every start).
 await setup();
@@ -27,6 +31,10 @@ app.use(express.json({ limit: '5mb' }));
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api', authRoutes);        // login is public; the rest of its routes check the session themselves
 app.use('/api', requireAuth);       // everything below needs a logged-in user
+// cheques whose date has reached 3:00 PM pass by themselves (checked at most once a minute)
+app.use('/api', (req, res, next) => { autoPassSoon().then(() => next(), next); });
+// Action Center → Attention: overdue bills, cheques on hold, supplier bills due, GRN shorts (checked every half hour)
+app.use('/api', (req, res, next) => { attentionSoon(); next(); });
 app.use('/api/fx', fxRoutes);
 app.use('/api/suppliers', suppliers);
 app.use('/api/customers', customers);
@@ -34,6 +42,8 @@ app.use('/api/products', products);
 app.use('/api/grns', grns);
 app.use('/api/sales', sales);
 app.use('/api', reports);
+app.use('/api', money);           // cargo payable, cheques
+app.use('/api', exportsRoute);     // Settings → Download reports (Excel)
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
@@ -59,4 +69,7 @@ app.listen(PORT, () => console.log(`Cargo POS API running on http://localhost:${
 setOnRateChange((rate) => console.log(`Live INR rate now ${rate}`));
 // stock batches first (once: existing stock is split by GRN), then the GRN costs
 setupBatches().then(() => upgradeCosting()).then(() => revalueGrns()).catch((e) => console.error('Stock batches / re-costing GRNs failed:', e.message));
+// customers go by their shop name: old bills and cheques written with the person's name are brought in line
+relabelCustomers().catch((e) => console.error('Customer names on bills failed:', e.message));
 if (!process.env.VERCEL) startFxTimer();   // on Vercel the rate is refreshed when the dashboard asks for it
+if (!process.env.VERCEL) { setInterval(autoPassSoon, 60_000); setInterval(attentionSoon, 5 * 60_000); }   // on Vercel it runs with the requests

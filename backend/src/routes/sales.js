@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { find, aggregate, num, contains, nextNo, getSettings, round2 } from '../db.js';
 import { createSale, getSale, voidSale, deleteSale, customerLedgers } from '../services.js';
-import { guard } from '../auth.js';
+import { guard, audit } from '../auth.js';
+import { billChecks } from '../attention.js';
+
+/** A product this far below zero (pieces sold without stock) is flagged in the Action Center → Attention. */
+export const ATTENTION_STOCK = -10;
 
 const r = Router();
 
@@ -9,7 +13,9 @@ r.get('/', async (req, res) => {
   const filter = {};
   if (req.query.q) {
     const q = contains(req.query.q);
-    filter.$or = [{ invoice_no: q }, { customer_name: q }];
+    // the bill shows the shop name; the person's name finds their bills too
+    const people = await find('customers', { $or: [{ name: q }, { shop_name: q }] }, { project: { id: 1 } });
+    filter.$or = [{ invoice_no: q }, { customer_name: q }, ...(people.length ? [{ customer_id: { $in: people.map((c) => c.id) } }] : [])];
   }
   if (req.query.from || req.query.to) filter.date = { ...(req.query.from && { $gte: req.query.from }), ...(req.query.to && { $lte: req.query.to }) };
   if (req.query.type) filter.payment_type = req.query.type;
@@ -38,7 +44,17 @@ r.get('/', async (req, res) => {
 
 r.get('/next-no', async (req, res) => res.json({ invoice_no: await nextNo('sales', 'invoice_no', (await getSettings()).invoice_prefix || 'INV-', 5) }));
 r.get('/:id', async (req, res) => res.json(await getSale(num(req.params.id))));
-r.post('/', async (req, res) => res.json(await createSale(req.body, (action) => guard(req, action))));
+r.post('/', async (req, res) => {
+  const sale = await createSale(req.body, (action) => guard(req, action));
+  for (const x of sale.sold_without_stock || []) {
+    await audit(req.user, `Sold without stock: ${x.pcs} pcs of ${x.name} (${x.code}) on ${sale.invoice_no} — stock now ${x.after} pcs`, null, 'nostock');
+    if (x.after <= ATTENTION_STOCK && x.before > ATTENTION_STOCK) {
+      await audit(req.user, `${x.name} (${x.code}) is at ${x.after} pcs — ${-x.after} pcs sold without stock (limit ${ATTENTION_STOCK}). Check the stock count, or receive it on a GRN.`, null, 'attention');
+    }
+  }
+  await billChecks(sale, req.user);   // below cost, a big discount, a large cash refund → Attention
+  res.json(sale);
+});
 r.post('/:id/void', async (req, res) => {
   const s = await getSale(num(req.params.id));
   if (s.status === 'void') return res.json(s);

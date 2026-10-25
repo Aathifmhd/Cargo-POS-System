@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { find, findOne, insert, setById, updateMany, deleteMany, fail, num, round2, sum, todayStr, inParallel } from '../db.js';
 import { supplierLedgers, supplierBills, summarizeSupplier, revalueGrns, costingRate, isLocal } from '../services.js';
 import { guard } from '../auth.js';
+import { cleanCheques, recordCheques } from '../cheques.js';
 
 const r = Router();
 
@@ -105,6 +106,13 @@ r.delete('/:id', async (req, res) => {
 r.post('/:id/payments', async (req, res) => {
   const s = await findOne('suppliers', { id: num(req.params.id) });
   if (!s) fail('Supplier not found', 404);
+  if (req.body.method === 'Cheque') {
+    const grnId = req.body.grn_id ? num(req.body.grn_id) : null;
+    if (grnId && !(await findOne('grns', { id: grnId, supplier_id: s.id }))) fail('That GRN does not belong to this supplier');
+    const cheques = await recordCheques({ direction: 'out', party: 'supplier', partyId: s.id, partyName: s.name, billId: grnId,
+      cheques: cleanCheques(req.body.cheques), givenOn: req.body.date, notes: req.body.notes || null, user: req.user });
+    return res.json({ cheques });
+  }
   const amount = round2(num(req.body.amount_inr));
   if (amount <= 0) fail('Enter the amount paid');
   // payments are recorded at the same rate as the costs: the fixed rate for an Indian supplier, 1 for a local one (Rs)
@@ -122,6 +130,7 @@ r.post('/:id/payments', async (req, res) => {
 r.delete('/:id/payments/:pid', async (req, res) => {
   const p = await findOne('supplier_payments', { id: num(req.params.pid), supplier_id: num(req.params.id) });
   if (!p) fail('Payment not found', 404);
+  if (p.cheque_id) fail('This was paid by cheque — mark the cheque as returned on the Cheque Desk instead.');
   await guard(req, `Delete supplier payment of ₹${p.amount_inr} (${p.date})`);
   await deleteMany('supplier_payments', { id: p.id, supplier_id: p.supplier_id });
   await revalueGrns();

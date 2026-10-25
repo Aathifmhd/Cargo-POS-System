@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, useApi, inr, lkr, supMoney, isLocalSup, niceDate, dueText } from '../lib.js';
+import { api, useApi, inr, lkr, supMoney, isLocalSup, niceDate, dueText, niceTime } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, Stat, Tabs, Modal, useToast } from '../components/ui.jsx';
 import { SupplierForm, SupplierPaymentModal } from '../components/forms.jsx';
 
@@ -87,7 +87,7 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
                   {s.payments.length === 0 && <tr><td colSpan={6} className="muted center">No payments yet.</td></tr>}
                   {s.payments.map((p) => (
                     <tr key={p.id}>
-                      <td>{niceDate(p.date)}</td>
+                      <td className="nowrap">{niceDate(p.date)}{p.created_at && <div className="sub">{niceTime(p.created_at)}</div>}</td>
                       <td>{p.method}<div className="sub">{p.reference}</div></td>
                       <td>{p.grn_no || 'Oldest bills'}</td>
                       <td className="right strong">{cur(p.amount_inr)}</td>

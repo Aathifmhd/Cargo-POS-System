@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useApi, lkr, inr, bothMoney, supMoney, money, niceDate, int, pct, margin, today, addDays, stockText } from '../lib.js';
 import { PageHeader, Card, Loading, ErrorBox, Stat, Tabs, Segmented, Icon, DateInput } from '../components/ui.jsx';
 
-const PRESETS = {
+export const PRESETS = {
   today: () => [today(), today()],
   week: () => [addDays(today(), -6), today()],
   month: () => [today().slice(0, 8) + '01', today()],
@@ -21,7 +21,7 @@ export default function Reports() {
     <div>
       <PageHeader title="Reports" subtitle="See how the business is doing."
         actions={<button className="btn" onClick={() => window.print()}><Icon name="print" /> Print</button>} />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'sales', label: 'Sales & profit' }, { value: 'shipments', label: 'Shipments & cargo' }, { value: 'stock', label: 'Stock value' }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'sales', label: 'Sales & profit' }, { value: 'stock', label: 'Stock value' }]} />
       {tab !== 'stock' && (
         <div className="toolbar">
           <Segmented value={preset} onChange={choose} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: '7 days' }, { value: 'month', label: 'This month' }, { value: 'last30', label: '30 days' }, { value: 'year', label: 'This year' }]} />
@@ -31,7 +31,6 @@ export default function Reports() {
         </div>
       )}
       {tab === 'sales' && <SalesReport from={from} to={to} />}
-      {tab === 'shipments' && <ShipmentReport from={from} to={to} />}
       {tab === 'stock' && <StockReport />}
     </div>
   );
@@ -81,7 +80,8 @@ function SalesReport({ from, to }) {
   );
 }
 
-function ShipmentReport({ from, to }) {
+/** Shipments & cargo (shown on Payment Portal → To pay cargo). */
+export function ShipmentReport({ from, to }) {
   const { data: d, error, reload } = useApi(`/reports/shipments?from=${from}&to=${to}`);
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!d) return <Loading />;

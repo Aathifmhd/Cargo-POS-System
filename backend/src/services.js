@@ -195,13 +195,45 @@ export async function revalueGrns() {
    Worked out for many suppliers / customers at once, with a few reads.
    ========================================================= */
 
+/**
+ * Cheques that came back RETURNED, put on the bills they were for (a cheque without a bill goes on the oldest bill
+ * still open), so the Payment Portal can show "Cheque … returned" on the row that is owed again.
+ */
+export function markReturned(bills, returned) {
+  for (const ch of returned) {
+    const b = bills.find((x) => ch.bill_id != null && x.id === ch.bill_id) || bills.find((x) => x.balance > 0.009);
+    if (!b) continue;
+    const last = (ch.history || []).filter((h) => h.status === 'returned').pop();
+    (b.cheques_returned ||= []).push({ id: ch.id, cheque_no: ch.cheque_no, amount: ch.amount, returned_on: last?.at ? String(last.at).slice(0, 10) : null });
+  }
+  return bills;
+}
+const RETURNED_PROJ = { project: { id: 1, party_id: 1, bill_id: 1, cheque_no: 1, amount: 1, history: 1 } };
+
+/* =========================================================
+   CUSTOMER NAMES — the shop / business name is the main name; the person's name comes second.
+   ========================================================= */
+export const customerLabel = (c) => String(c?.shop_name || '').trim() || c?.name || '';
+/** The person's name, shown under the shop name (null when the customer has no shop name). */
+export const customerPerson = (c) => (String(c?.shop_name || '').trim() ? c.name : null);
+/** Bills and cheques keep the customer's name as it was written; bring them in line with the customer's current names. */
+export async function relabelCustomers(ids = null) {
+  const list = await find('customers', ids ? { id: { $in: ids } } : {}, { project: { id: 1, name: 1, shop_name: 1 } });
+  for (const c of list) {
+    const label = customerLabel(c);
+    await updateMany('sales', { customer_id: c.id, customer_name: { $ne: label } }, { $set: { customer_name: label } });
+    await updateMany('cheques', { party: 'customer', party_id: c.id, party_name: { $ne: label } }, { $set: { party_name: label } });
+  }
+}
+
 /** Map of supplier id → its bills (GRNs and old balance) with paid / balance / status. */
 export async function supplierLedgers(ids = null) {
   const of = ids ? { supplier_id: { $in: ids } } : {};
-  const [suppliers, grnList, pays] = await inParallel(
+  const [suppliers, grnList, pays, returned] = await inParallel(
     () => find('suppliers', ids ? { id: { $in: ids } } : {}),
     () => find('grns', of, { project: { id: 1, grn_no: 1, date: 1, due_date: 1, payable_inr: 1, bale_no: 1, lr_no: 1, cargo_name: 1, exchange_rate: 1, supplier_id: 1 } }),
     () => find('supplier_payments', of, { project: { supplier_id: 1, grn_id: 1, amount_inr: 1 } }),
+    () => find('cheques', { party: 'supplier', status: 'returned', ...(ids ? { party_id: { $in: ids } } : {}) }, RETURNED_PROJ),
   );
   const grns = grnList.sort(byDateId);
   const today = todayStr();
@@ -222,7 +254,8 @@ export async function supplierLedgers(ids = null) {
       const { supplier_id, payable_inr, ...rest } = g;
       docs.push({ ...rest, amount: payable_inr, linkedPaid: linked[g.id] || 0 });
     }
-    out.set(s.id, allocate(docs, unlinked).map((d) => ({ ...d, supplier_id: s.id, supplier_name: s.name, currency: isLocal(s) ? 'LKR' : 'INR', status: dueStatus(d.balance, d.due_date, today) })));
+    out.set(s.id, markReturned(allocate(docs, unlinked).map((d) => ({ ...d, supplier_id: s.id, supplier_name: s.name, currency: isLocal(s) ? 'LKR' : 'INR', status: dueStatus(d.balance, d.due_date, today) })),
+      returned.filter((x) => x.party_id === s.id)));
   }
   return out;
 }
@@ -237,11 +270,15 @@ export const supplierSummary = async (supplierId) => summarizeSupplier(await sup
 /** Map of customer id → its unpaid-able bills (credit balances and old balance) with paid / balance / status. */
 export async function customerLedgers(ids = null) {
   const of = ids ? { customer_id: { $in: ids } } : { customer_id: { $ne: null } };
-  const [customers, saleList, pays] = await inParallel(
+  const [customers, saleList, pays, cheques, returned] = await inParallel(
     () => find('customers', ids ? { id: { $in: ids } } : {}),
     () => find('sales', { ...of, status: 'completed', $expr: { $gt: [{ $abs: { $subtract: ['$total', '$paid_at_sale'] } }, 0.009] } },
       { project: { id: 1, invoice_no: 1, date: 1, due_date: 1, total: 1, paid_at_sale: 1, payment_type: 1, customer_id: 1 } }),
     () => find('customer_payments', of, { project: { customer_id: 1, sale_id: 1, amount: 1 } }),
+    // cheques received but not passed yet: shown against the bills, but they don't pay them (or free credit limit) until passed
+    () => find('cheques', { direction: 'in', party: 'customer', status: { $in: ['pending', 'holding'] }, ...(ids ? { party_id: { $in: ids } } : {}) },
+      { project: { party_id: 1, bill_id: 1, amount: 1 } }),
+    () => find('cheques', { direction: 'in', party: 'customer', status: 'returned', ...(ids ? { party_id: { $in: ids } } : {}) }, RETURNED_PROJ),
   );
   const sales = saleList.sort(byDateId);
   const today = todayStr();
@@ -265,16 +302,32 @@ export async function customerLedgers(ids = null) {
         amount: round2(s.total - s.paid_at_sale), payment_type: s.payment_type, linkedPaid: linked[s.id] || 0,
       });
     }
-    out.set(c.id, allocate(docs, unlinked).map((d) => ({
-      ...d, customer_id: c.id, customer_name: c.name, customer_phone: c.phone, status: dueStatus(d.balance, d.due_date, today),
-    })));
+    // the same bills again with the waiting cheques counted as paid: what is left after the cheques
+    const chqLinked = {};
+    let chqUnlinked = 0;
+    for (const ch of cheques.filter((x) => x.party_id === c.id)) {
+      if (ch.bill_id != null && docs.some((d) => d.id === ch.bill_id)) chqLinked[ch.bill_id] = (chqLinked[ch.bill_id] || 0) + ch.amount;
+      else chqUnlinked += ch.amount;
+    }
+    const real = allocate(docs, unlinked);
+    const withCheques = allocate(docs.map((d) => ({ ...d, linkedPaid: (d.linkedPaid || 0) + (chqLinked[d.id] || 0) })), unlinked + chqUnlinked);
+    out.set(c.id, markReturned(real.map((d, i) => ({
+      ...d, customer_id: c.id, customer_name: customerLabel(c), customer_person: customerPerson(c), customer_phone: c.phone, status: dueStatus(d.balance, d.due_date, today),
+      cheque_pending: round2(d.balance - withCheques[i].balance), balance_after_cheques: withCheques[i].balance,
+    })), returned.filter((x) => x.party_id === c.id)));
   }
   return out;
 }
 export const customerBills = async (customerId) => (await customerLedgers([customerId])).get(customerId) || [];
+/**
+ * balance: what the customer really owes — the credit limit is checked against this (a cheque counts only once passed).
+ * cheques_pending / balance_after_cheques: what cheques waiting to be passed cover, and what is left after them (shown).
+ */
 export const summarizeCustomer = (bills) => ({
   balance: round2(sum(bills, (b) => b.balance)),
   overdue: round2(sum(bills.filter((b) => b.status === 'overdue'), (b) => b.balance)),
+  cheques_pending: round2(sum(bills, (b) => b.cheque_pending || 0)),
+  balance_after_cheques: round2(sum(bills, (b) => (b.balance_after_cheques ?? b.balance))),
 });
 export const customerSummary = async (customerId) => summarizeCustomer(await customerBills(customerId));
 
@@ -562,7 +615,7 @@ export async function createSale(body, approve) {
       const qty = num(i.qty);
       const pcs = Math.round(qty * per);
       const back = pcs < 0;   // a return from the customer
-      if (!back && pcs > p.stock_pcs) fail(`Not enough stock for "${p.name}". Available: ${p.stock_pcs} pcs`);
+      // selling more than is in stock is allowed (a stock or billing mistake): see moveStock / the short batch
       // moved now (the whole bill is undone if anything below fails), so the cost is the batch's own:
       // a sale takes from the batch picked (or the oldest first); a return goes back into the batch picked (or the newest)
       const ids = Array.isArray(i.batch_ids) ? i.batch_ids : null;
@@ -581,6 +634,8 @@ export async function createSale(body, approve) {
         expected: round2((batch?.expected_per_pcs || p.expected_per_set / p.pcs_per_set) * per),
         cost: round2(costPc * per),
         batches: taken.map((t) => ({ batch_id: t.batch_id, pcs: -t.pcs })),
+        no_stock_pcs: back ? 0 : sum(taken.filter((t) => t.short), (t) => -t.pcs),   // pieces sold without stock
+        stock_before: p.stock_pcs,
         line_total: round2(qty * price - disc),
       });
     }
@@ -600,24 +655,32 @@ export async function createSale(body, approve) {
       const after = round2((await customerSummary(customer.id)).balance + total - paid);
       // not approvable here: the Super Admin has to raise the limit first, then the bill goes through
       if (after > customer.credit_limit) {
-        fail(`${customer.name} would owe Rs ${after}, over the credit limit of Rs ${customer.credit_limit}. Raise the credit limit first.`, 409);
+        fail(`${customerLabel(customer)} would owe Rs ${after}, over the credit limit of Rs ${customer.credit_limit}. Raise the credit limit first.`, 409);
       }
     }
     if (reasons.length && approve) await approve(reasons.join(' · '));
 
     const sale = await insert('sales', {
-      invoice_no, date, customer_id: customer?.id ?? null, customer_name: customer?.name || (body.customer_name || '').trim() || 'Walk-in customer',
+      invoice_no, date, customer_id: customer?.id ?? null, customer_name: customerLabel(customer) || (body.customer_name || '').trim() || 'Walk-in customer',
       payment_type: paymentType, subtotal, discount, total, paid_at_sale: paid, cost_total, due_date, notes: body.notes || null,
     });
     for (const l of lines) {
       await insert('sale_items', {
         sale_id: sale.id, product_id: l.p.id, code: l.p.code, name: l.p.name, unit: l.unit, qty: l.qty, pcs: l.pcs, price: l.price,
         mrp_per_unit: l.mrp, expected_per_unit: l.expected, cost_per_unit: l.cost, line_total: l.line_total, disc: l.disc, disc_pct: l.disc_pct,
-        batch_id: l.batches.length === 1 ? l.batches[0].batch_id : null, batches: l.batches,
+        batch_id: l.batches.length === 1 ? l.batches[0].batch_id : null, batches: l.batches, no_stock_pcs: l.no_stock_pcs,
       });
     }
-    return sale.id;
-  }).then((saleId) => getSale(saleId));
+    return { id: sale.id, short: lines.filter((l) => l.no_stock_pcs > 0) };
+  }).then(async ({ id, short }) => {
+    const s = await getSale(id);
+    // what was sold without stock — the Action Center is told (see routes/sales.js)
+    s.sold_without_stock = await Promise.all(short.map(async (l) => ({
+      product_id: l.p.id, code: l.p.code, name: l.p.name, pcs: l.no_stock_pcs, before: l.stock_before,
+      after: (await findOne('products', { id: l.p.id }, { project: { stock_pcs: 1 } }))?.stock_pcs ?? l.stock_before - l.pcs,
+    })));
+    return s;
+  });
 }
 
 export async function getSale(id) {
@@ -630,7 +693,7 @@ export async function getSale(id) {
     () => find('customer_payments', { sale_id: id }, { sort: { date: 1, id: 1 } }),
     () => (withBills ? customerBills(s.customer_id) : null),
   );
-  Object.assign(s, { customer_phone: c?.phone ?? null, customer_address: c?.address ?? null, customer_shop: c?.shop_name ?? null });
+  Object.assign(s, { customer_phone: c?.phone ?? null, customer_address: c?.address ?? null, customer_person: c ? customerPerson(c) : null });
   s.items = items;
   s.payments = payments;
   if (withBills) {

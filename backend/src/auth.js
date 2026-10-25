@@ -26,9 +26,12 @@ export const RANK = { cashier: 0, admin: 1, superadmin: 2 };
 export const rankOf = (u) => RANK[u?.role] ?? 0;
 export const ROLE_NAME = { cashier: 'Cashier', admin: 'Admin', superadmin: 'Super Admin' };
 
-const NOCASE = { locale: 'en', strength: 2 };   // usernames are not case-sensitive
+const NOCASE = { locale: 'en', strength: 2 };
+/** The user with exactly this username — logging in is case-sensitive ("Superadmin" is not "superadmin"). */
 export const userByName = (username, onlyActive = true) =>
-  findOne('users', { username: String(username || '').trim(), ...(onlyActive ? { active: 1 } : {}) }, { collation: NOCASE });
+  findOne('users', { username: String(username || '').trim(), ...(onlyActive ? { active: 1 } : {}) });
+/** Is a username taken, ignoring capitals? Names stay unique that way, so there can't be an "admin" next to an "Admin". */
+export const nameTaken = (username) => findOne('users', { username: String(username || '').trim() }, { collation: NOCASE });
 
 /* ---------------- start-up: default logins + the token secret ---------------- */
 let SECRET = null;

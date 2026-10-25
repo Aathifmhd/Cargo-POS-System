@@ -42,7 +42,7 @@ export default function Stock() {
         </>} />
 
       <div className="stats mb">
-        <Stat icon="box" label="Products in stock" value={int(active.filter((p) => p.stock_pcs > 0).length)} sub={`${int(active.reduce((s, p) => s + p.stock_pcs, 0))} pieces`} />
+        <Stat icon="box" label="Products in stock" value={int(active.filter((p) => p.stock_pcs > 0).length)} sub={`${int(active.reduce((s, p) => s + Math.max(0, p.stock_pcs), 0))} pieces${active.some((p) => p.stock_pcs < 0) ? ` · ${active.filter((p) => p.stock_pcs < 0).length} sold without stock` : ''}`} />
         <Stat icon="cash" tone="blue" label="Stock value at cost" value={lkr(costValue)} />
         <Stat icon="tag" tone="green" label="Value at expected price" value={lkr(sellValue)} sub={`Potential profit ${lkr(sellValue - costValue)}`} />
         <Stat icon="alert" tone="amber" label="Low / out of stock" value={`${active.filter((p) => p.stock_pcs < p.reorder_sets * p.pcs_per_set).length} / ${active.filter((p) => p.stock_pcs <= 0).length}`} />
@@ -92,11 +92,12 @@ export default function Stock() {
                         <td>
                           <Badge tone={pcs <= 0 ? 'red' : !b && low ? 'amber' : 'green'}>{stockText(pcs, p.pcs_per_set)}</Badge>
                           {b && k === 0 && <div className="sub">{int(p.stock_pcs)} pcs in all</div>}
+                          {!b && p.stock_pcs < 0 && <div className="sub text-amber">{int(-p.stock_pcs)} pcs sold without stock</div>}
                         </td>
                         <td className="right">{money(cost)}</td>
                         <td className="right strong">{money(exp)}</td>
                         <td className={`right ${margin(exp, cost) < 0 ? 'text-red' : ''}`}>{pct(margin(exp, cost))}</td>
-                        <td className="right">{money(pcs * cost)}</td>
+                        <td className="right">{money(Math.max(0, pcs) * cost)}</td>
                       </tr>
                     );
                   });

@@ -1,10 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, useApi, lkr, niceDate, dueText } from '../lib.js';
+import { api, useApi, lkr, niceDate, dueText, custName, custPerson, niceTime } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, Stat, Tabs, Badge, Modal, useToast } from '../components/ui.jsx';
 import { CustomerForm, CustomerPaymentModal } from '../components/forms.jsx';
 import { SaleModal } from './SaleView.jsx';
 import { useSettings } from '../App.jsx';
+
+/** A small picture of one side of the NIC; click to see it large. */
+function NicThumb({ id, side, stamp, onOpen }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => { api.get(`/customers/${id}/nic/${side}`).then((p) => setSrc(p.data)).catch(() => setSrc(null)); }, [id, side, stamp]);
+  return (
+    <button type="button" className="nic-thumb" onClick={() => src && onOpen({ side, src })} title={`NIC ${side} — click to see it large`}>
+      {src ? <img src={src} alt={`NIC ${side}`} /> : <span className="muted small">Loading…</span>}
+      <span>NIC {side}</span>
+    </button>
+  );
+}
 
 export function whatsappReminder(c, amount, shop) {
   const phone = (c.whatsapp || c.phone || '').replace(/\D/g, '').replace(/^0/, '94');
@@ -20,6 +32,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
   const toast = useToast();
   const navigate = useNavigate();
   const [openSale, setOpenSale] = useState(null);
+  const [photo, setPhoto] = useState(null);   // { side, src } shown large
   const { settings } = useSettings();
   const { data: c, error, reload } = useApi(`/customers/${id}`);
   const [tab, setTab] = useState('open');
@@ -35,7 +48,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
     try { await api.del(`/customers/${c.id}/payments/${p.id}`); toast('Payment deleted'); changed(); } catch (e) { toast(e.message, 'error'); }
   };
   const delCustomer = async () => {
-    if (!confirm(`Delete ${c.name}?\n\nTheir bills and payments stay in the records; they just leave the customer list.`)) return;
+    if (!confirm(`Delete ${custName(c)}?\n\nTheir bills and payments stay in the records; they just leave the customer list.`)) return;
     try {
       await api.del(`/customers/${c.id}`);
       toast('Customer deleted');
@@ -44,7 +57,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
   };
   const openBills = c.bills.filter((b) => b.balance > 0);
   const limitUsed = c.credit_limit > 0 ? Math.min(100, (c.balance / c.credit_limit) * 100) : 0;
-  const subtitle = [c.shop_name, c.city, c.phone].filter(Boolean).join(' · ');
+  const subtitle = [custPerson(c), c.city, c.phone].filter(Boolean).join(' · ');
 
   const actions = <>
     {/* only a customer who owes nothing can be deleted (Super Admin) */}
@@ -57,7 +70,8 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
 
   const body = <>
     <div className="stats mb">
-      <Stat icon="wallet" tone={c.overdue > 0 ? 'red' : 'blue'} label="To collect" value={lkr(c.balance)} sub={c.overdue > 0 ? `${lkr(c.overdue)} overdue` : 'Nothing overdue'} />
+      <Stat icon="wallet" tone={c.overdue > 0 ? 'red' : 'blue'} label="To collect" value={lkr(c.balance_after_cheques ?? c.balance)}
+        sub={c.cheques_pending > 0 ? `after ${lkr(c.cheques_pending)} in cheques waiting · ${lkr(c.balance)} until passed` : c.overdue > 0 ? `${lkr(c.overdue)} overdue` : 'Nothing overdue'} />
       <Stat icon="receipt" label="Total bought" value={lkr(c.total_bought)} sub={`${c.bill_count} bills`} />
       <Stat icon="chart" tone="green" label="Profit from customer" value={lkr(c.profit)} />
       <Stat icon="clock" tone="violet" label="Credit limit" value={c.credit_limit > 0 ? lkr(c.credit_limit) : 'No limit'} sub={c.credit_limit > 0 ? `${limitUsed.toFixed(0)}% used · ${c.credit_days} days` : `${c.credit_days} days credit`} />
@@ -83,7 +97,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
                       <td>{niceDate(b.date)}</td>
                       <td className="right">{lkr(b.amount)}</td>
                       <td className="right text-green">{lkr(b.paid)}</td>
-                      <td className="right strong">{lkr(b.balance)}</td>
+                      <td className="right strong">{lkr(b.balance_after_cheques ?? b.balance)}{b.cheque_pending > 0 && <div className="sub"><span className="chq-wait">{lkr(b.cheque_pending)} by cheque · waiting</span></div>}</td>
                       <td><StatusBadge status={b.status} /><div className="sub">{dueText(b.due_date)}</div></td>
                       <td><button className="btn btn-sm btn-receive" onClick={() => setPaying(b.id || true)}><Icon name="cash" size={14} /> Receive</button></td>
                     </tr>
@@ -98,7 +112,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
                   {c.sales.length === 0 && <tr><td colSpan={5} className="center muted">No bills yet.</td></tr>}
                   {c.sales.map((s) => (
                     <tr key={s.id} className={`click ${s.status === 'void' ? 'void' : ''}`} onClick={() => setOpenSale(s.id)}>
-                      <td className="strong">{s.invoice_no}</td><td>{niceDate(s.date)}</td>
+                      <td className="strong">{s.invoice_no}</td><td className="nowrap">{niceDate(s.date)}{s.created_at && <div className="sub">{niceTime(s.created_at)}</div>}</td>
                       <td><Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type}</Badge></td>
                       <td className="right strong">{lkr(s.total)}</td><td>{s.status === 'void' && <Badge>Cancelled</Badge>}</td>
                     </tr>
@@ -113,7 +127,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
                   {c.payments.length === 0 && <tr><td colSpan={5} className="center muted">No payments yet.</td></tr>}
                   {c.payments.map((p) => (
                     <tr key={p.id}>
-                      <td>{niceDate(p.date)}</td><td>{p.method}<div className="sub">{p.reference}</div></td><td>{p.invoice_no || 'Oldest bills'}</td>
+                      <td className="nowrap">{niceDate(p.date)}{p.created_at && <div className="sub">{niceTime(p.created_at)}</div>}</td><td>{p.method}<div className="sub">{p.reference}</div></td><td>{p.invoice_no || 'Oldest bills'}</td>
                       <td className="right strong">{lkr(p.amount)}</td>
                       <td><button className="btn btn-icon btn-sm btn-ghost" onClick={() => delPayment(p)}><Icon name="trash" size={15} /></button></td>
                     </tr>
@@ -128,11 +142,18 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
         <Card title="Customer details">
           <dl className="info-list">
             <dt>Shop</dt><dd>{c.shop_name || '—'}</dd>
+            <dt>Customer</dt><dd>{c.name}</dd>
+            <dt>NIC</dt><dd>{c.nic_no || '—'}</dd>
             <dt>Phone</dt><dd>{c.phone || '—'}</dd>
             <dt>WhatsApp</dt><dd>{c.whatsapp || '—'}</dd>
             <dt>Address</dt><dd>{[c.address, c.city].filter(Boolean).join(', ') || '—'}</dd>
             <dt>Notes</dt><dd>{c.notes || '—'}</dd>
           </dl>
+          {(c.nic_front || c.nic_back) ? (
+            <div className="nic-view">
+              {['front', 'back'].map((side) => c[`nic_${side}`] && <NicThumb key={side} id={c.id} side={side} stamp={c[`nic_${side}`]} onOpen={setPhoto} />)}
+            </div>
+          ) : <p className="muted small mt-s">No NIC photo yet — add it with Edit.</p>}
         </Card>
         <Link to="/pos" className="btn btn-block"><Icon name="cart" /> New sale</Link>
       </div>
@@ -141,11 +162,16 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
     {editing && <CustomerForm customer={c} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); changed(); }} />}
     {paying && <CustomerPaymentModal customer={c} bills={c.bills} defaultSaleId={paying === true ? null : paying} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); changed(); }} />}
     {openSale && <SaleModal id={openSale} onClose={() => setOpenSale(null)} />}
+    {photo && (
+      <Modal size="lg" title={`NIC ${photo.side} — ${custName(c)}`} subtitle={c.nic_no || ''} onClose={() => setPhoto(null)}>
+        <img src={photo.src} alt={`NIC ${photo.side}`} className="nic-large" />
+      </Modal>
+    )}
   </>;
 
   if (modal) {
     return (
-      <Modal size="xl" title={c.name} subtitle={subtitle} onClose={onClose}
+      <Modal size="xl" title={custName(c)} subtitle={subtitle} onClose={onClose}
         footer={<><button className="btn" onClick={onClose}>Close</button><span className="spacer" />{actions}</>}>
         {body}
       </Modal>
@@ -153,7 +179,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
   }
   return (
     <div>
-      <PageHeader back="/customers" title={c.name} subtitle={subtitle} actions={actions} />
+      <PageHeader back="/customers" title={custName(c)} subtitle={subtitle} actions={actions} />
       {body}
     </div>
   );

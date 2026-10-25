@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useApi, lkr, inr, supMoney, int, niceDate, dueText, stockText, pct } from '../lib.js';
+import { useApi, lkr, inr, supMoney, int, niceDate, dueText, stockText, pct, niceTime } from '../lib.js';
 import { Card, Icon, Loading, ErrorBox, Stat, StatusBadge, Badge } from '../components/ui.jsx';
 import { useSettings } from '../App.jsx';
 import FxBar from '../components/FxBar.jsx';
@@ -78,7 +78,7 @@ export default function Dashboard() {
         <Card title="Recent bills" actions={<Link to="/sales" className="small">All sales</Link>}>
           {d.recentSales.length === 0 ? <p className="muted">No bills yet.</p> : d.recentSales.map((s) => (
             <button type="button" key={s.id} className="list-row list-row-btn" onClick={() => setOpenSale(s.id)}>
-              <div><div className="t">{s.customer_name}</div><div className="s">{s.invoice_no} · {niceDate(s.date)}</div></div>
+              <div><div className="t">{s.customer_name}</div><div className="s">{s.invoice_no} · {niceDate(s.date)}{s.created_at ? ` · ${niceTime(s.created_at)}` : ''}</div></div>
               <div className="row gap-s">
                 {s.status === 'void' ? <Badge>Cancelled</Badge> : <Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge>}
                 <b className="mono">{lkr(s.total)}</b>

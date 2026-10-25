@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useApi, lkr, niceDate } from '../lib.js';
+import { useApi, lkr, niceDate, custName, custPerson } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, Stat } from '../components/ui.jsx';
 import { CustomerForm } from '../components/forms.jsx';
 import { CustomerModal } from './CustomerView.jsx';
@@ -38,13 +38,13 @@ export default function Customers() {
               <thead><tr><th>Customer</th><th>Phone</th><th className="right">Bills</th><th className="right">Total bought</th><th>Last bill</th><th className="right">Credit limit</th><th className="right">Due</th></tr></thead>
               <tbody>{rows.map((c) => (
                 <tr key={c.id} className="click" onClick={() => setOpenId(c.id)}>
-                  <td><b>{c.name}</b> {!c.active && <Badge>Inactive</Badge>}<div className="sub">{[c.shop_name, c.city].filter(Boolean).join(' · ') || '—'}</div></td>
+                  <td><b>{custName(c)}</b> {!c.active && <Badge>Inactive</Badge>}<div className="sub">{[custPerson(c), c.city].filter(Boolean).join(' · ') || '—'}</div></td>
                   <td>{c.phone || '—'}</td>
                   <td className="right">{c.bill_count}</td>
                   <td className="right">{lkr(c.total_bought)}</td>
                   <td>{niceDate(c.last_sale_date)}</td>
                   <td className="right">{c.credit_limit > 0 ? lkr(c.credit_limit) : <span className="muted">No limit</span>}</td>
-                  <td className="right">{c.balance > 0 ? <><b className={c.overdue > 0 ? 'text-red' : ''}>{lkr(c.balance)}</b>{c.overdue > 0 && <div className="sub text-red">{lkr(c.overdue)} overdue</div>}{c.credit_limit > 0 && c.balance > c.credit_limit && <div><Badge tone="red">Over limit</Badge></div>}</> : <span className="muted">—</span>}</td>
+                  <td className="right">{c.balance > 0 ? <><b className={c.overdue > 0 ? 'text-red' : ''}>{lkr(c.balance_after_cheques ?? c.balance)}</b>{c.cheques_pending > 0 && <div className="sub"><span className="chq-wait">{lkr(c.cheques_pending)} cheque waiting</span></div>}{c.overdue > 0 && <div className="sub text-red">{lkr(c.overdue)} overdue</div>}{c.credit_limit > 0 && c.balance > c.credit_limit && <div><Badge tone="red">Over limit</Badge></div>}</> : <span className="muted">—</span>}</td>
                 </tr>
               ))}</tbody>
             </table>

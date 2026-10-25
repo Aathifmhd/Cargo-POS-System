@@ -277,6 +277,32 @@ table.table { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .toolbar .search .input { padding-left: 34px; }
 .es-toolbar .es-supplier { width: auto; min-width: 170px; }
 .es-stats { margin-bottom: 18px; }
+/* Cheque Desk */
+.chq-dir { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 750; }
+.chq-dir.in { background: var(--green-soft); color: var(--green); }
+.chq-dir.out { background: var(--amber-soft); color: var(--amber); }
+.more-menu { position: relative; display: inline-block; margin-left: 4px; }
+.more-menu > .btn { font-size: 18px; line-height: 1; font-weight: 800; }
+.more-menu-list { position: fixed; z-index: 1000; min-width: 190px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 10px 28px rgba(15, 23, 42, .16); display: flex; flex-direction: column; }
+.more-menu-list button { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: 13.5px; color: var(--text); text-align: left; cursor: pointer; }
+.more-menu-list button:hover { background: var(--row-hover); }
+.more-menu-list button.danger { color: var(--red); }
+.btn-danger-solid { background: var(--red); border-color: var(--red); color: #fff; }
+.btn-danger-solid:hover { filter: brightness(.94); color: #fff; }
+.chq-ask { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.chq-ask > div { padding: 8px 10px; border-radius: 9px; background: var(--surface-2); display: flex; flex-direction: column; gap: 2px; }
+.chq-ask span { font-size: 11px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.chq-wait { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--amber-soft); color: var(--amber); font-size: 11px; font-weight: 750; white-space: nowrap; }
+.chq-returned { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--red-soft); color: var(--red); font-size: 11px; font-weight: 750; white-space: nowrap; }
+.chq-history { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 12.5px; }
+.table tr.cargo-detail > td { background: var(--surface-2); padding: 14px; }
+.table.mini th, .table.mini td { padding: 6px 8px; font-size: 13px; }
+/* cheque details in the pay / receive pop-ups */
+.cheque-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.cheque-row { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 12px; padding-top: 22px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.cheque-no-label { position: absolute; top: 5px; left: 12px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.cheque-remove { position: absolute; top: 4px; right: 4px; }
+@media (max-width: 720px) { .cheque-row { grid-template-columns: 1fr 1fr; } }
 /* New sale: return lines (negative quantity) and refunds */
 .till-tbl .tag.return { display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 800; letter-spacing: .03em; background: #E6F0FF; color: #1F57B8; }
 .till-tbl tr.return td { background: #F3F7FF; }
@@ -1191,3 +1217,62 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 
 /* Settings: click a product chip to manage its product names */
 .modal .table td:first-child, .modal .table th:first-child { min-width: 170px; }
+
+/* Cheque Desk: Received / Given */
+.chq-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+.chq-side { font: inherit; display: flex; align-items: center; gap: 12px; padding: 14px 16px; text-align: left; border: 2px solid var(--border); border-radius: 14px; background: var(--surface); color: inherit; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s; }
+.chq-side:hover { border-color: var(--text-3, #94a3b8); }
+.chq-side-icon { flex: none; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--text-3, #64748b); }
+.chq-side-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.chq-side-text b { font-size: 16px; font-weight: 800; }
+.chq-side-text small { font-size: 12.5px; color: var(--text-3, #64748b); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chq-side .nav-count { margin-left: 0; }
+.chq-side.in.on { border-color: var(--green); background: var(--green-soft); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 15%, transparent); }
+.chq-side.in.on .chq-side-icon { background: var(--green); border-color: var(--green); color: #fff; }
+.chq-side.in.on b { color: var(--green); }
+.chq-side.out.on { border-color: var(--amber); background: var(--amber-soft); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 15%, transparent); }
+.chq-side.out.on .chq-side-icon { background: var(--amber); border-color: var(--amber); color: #fff; }
+.chq-side.out.on b { color: var(--amber); }
+@media (max-width: 720px) { .chq-sides { grid-template-columns: 1fr; } }
+/* the cheques in the "complete this payment?" pop-up: one tidy line each, never wider than the pop-up */
+.confirm-cheques { display: flex; flex-direction: column; gap: 8px; }
+.confirm-cheque { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.confirm-cheque-main, .confirm-cheque-amt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.confirm-cheque-main .sub { overflow-wrap: anywhere; }
+.confirm-cheque-amt { align-items: flex-end; text-align: right; flex: none; }
+.confirm-cheque-amt b { white-space: nowrap; }
+
+/* Settings → Download reports */
+.dl-period { padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); margin-bottom: 14px; }
+.dl-list { display: flex; flex-direction: column; gap: 8px; }
+.dl-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1.5px solid var(--border); border-radius: 12px; background: var(--surface); cursor: pointer; }
+.dl-item:hover { border-color: var(--text-3, #94a3b8); }
+.dl-item.on { border-color: var(--primary, #1e293b); }
+.dl-item input { width: 18px; height: 18px; flex: none; }
+.dl-icon { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); }
+.dl-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dl-text small { color: var(--text-3, #64748b); font-size: 12.5px; }
+.dl-item .btn { flex: none; }
+
+/* New Sale: a line billed beyond the stock */
+.till-tbl .tag.nostock { display: inline-block; margin-top: 3px; margin-left: 4px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 800; letter-spacing: .03em; background: var(--amber-soft); color: var(--amber); }
+.table tr.ac-attention > td { background: var(--red-soft); }
+.nav-count.grey { background: var(--text-3, #94a3b8); }
+
+/* Customer: NIC number and photos */
+.nic-block { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.nic-photos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.nic-photo-label { font-size: 13px; font-weight: 650; margin-bottom: 6px; }
+.nic-photo-box { display: grid; place-items: center; aspect-ratio: 1.58; border: 2px dashed var(--border-strong, var(--border)); border-radius: 10px; background: var(--surface); cursor: pointer; overflow: hidden; }
+.nic-photo-box:hover { border-color: var(--primary, #1e293b); }
+.nic-photo-box.has { border-style: solid; }
+.nic-photo-box img { width: 100%; height: 100%; object-fit: cover; }
+.nic-photo-empty { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--text-3, #64748b); text-align: center; padding: 8px; }
+.nic-photo-empty b { color: inherit; font-size: 13px; }
+.nic-photo-empty small { font-size: 11.5px; }
+.nic-view { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.nic-thumb { font: inherit; display: flex; flex-direction: column; gap: 4px; padding: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; cursor: zoom-in; color: inherit; }
+.nic-thumb img { width: 100%; aspect-ratio: 1.58; object-fit: cover; display: block; }
+.nic-thumb span { font-size: 12px; font-weight: 650; padding: 0 8px 6px; text-align: left; }
+.nic-large { display: block; max-width: 100%; max-height: 75vh; margin: 0 auto; border-radius: 8px; }
+@media (max-width: 520px) { .nic-photos { grid-template-columns: 1fr; } }

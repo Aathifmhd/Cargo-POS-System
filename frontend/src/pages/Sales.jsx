@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, useApi, lkr, niceDate, today, addDays } from '../lib.js';
+import { api, useApi, lkr, niceDate, today, addDays, niceTime } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, StatusBadge, Segmented, Stat, useToast } from '../components/ui.jsx';
 import { SaleModal } from './SaleView.jsx';
 
@@ -70,7 +70,7 @@ The stock goes back. This cannot be undone. The Super Admin's password is needed
                 {rows.map((s) => (
                   <tr key={s.id} className={`click ${s.status === 'void' ? 'void' : ''}`} onClick={() => setOpenId(s.id)}>
                     <td className="strong">{s.invoice_no}</td>
-                    <td>{niceDate(s.date)}</td>
+                    <td className="nowrap">{niceDate(s.date)}{s.created_at && <div className="sub">{niceTime(s.created_at)}</div>}</td>
                     <td>{s.customer_name}<div className="sub">{s.item_count} item{s.item_count === 1 ? '' : 's'}</div></td>
                     <td><Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge></td>
                     <td className="right strong">{lkr(s.total)}</td>

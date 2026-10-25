@@ -75,7 +75,7 @@ export const stamp = () => new Date().toISOString().slice(0, 19).replace('T', ' 
 const DEFAULTS = {
   suppliers: { origin: 'india', contact_person: null, phone: null, whatsapp: null, email: null, city: null, state: null, address: null, gst_no: null,
     bank_details: null, credit_days: 60, opening_balance_inr: 0, notes: null, active: 1 },
-  customers: { shop_name: null, phone: null, whatsapp: null, city: null, address: null, credit_limit: 0, credit_days: 30,
+  customers: { shop_name: null, nic_no: null, phone: null, whatsapp: null, city: null, address: null, credit_limit: 0, credit_days: 30,
     opening_balance: 0, notes: null, active: 1 },
   products: { category: null, subtype: null, pname: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, supplier_id: null,
     cost_per_pcs: 0, last_cost_per_pcs: 0, mrp_per_set: 0, expected_per_set: 0, stock_pcs: 0, reorder_sets: 0, active: 1,
@@ -86,14 +86,16 @@ const DEFAULTS = {
   grn_expenses: { category: null, amount_lkr: 0 },
   grn_items: { category: null, cargo_lkr: 0, other_lkr: 0, cargo_per_pcs: null, other_per_pcs: null, short_status: null, short_date: null, short_note: null, extra_status: null, extra_date: null, extra_note: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, mrp_per_set: 0, expected_per_set: 0,
     extra_sets: 0, extra_pcs: 0, short_sets: 0, short_pcs: 0 },
-  supplier_payments: { grn_id: null, exchange_rate: 0, amount_lkr: 0, method: null, reference: null, notes: null },
+  supplier_payments: { grn_id: null, exchange_rate: 0, amount_lkr: 0, method: null, reference: null, notes: null, cheque_id: null },
+  cargo_payments: { method: null, reference: null, notes: null, cheque_id: null },
+  cheques: { party_id: null, bill_id: null, owner: null, bank: null, no_auto: 0, notes: null, payment_id: null, passed_on: null, history: [] },
   sales: { customer_id: null, customer_name: null, discount: 0, paid_at_sale: 0, cost_total: 0, due_date: null, notes: null, status: 'completed' },
-  sale_items: { batch_id: null, batches: [], code: null, mrp_per_unit: 0, expected_per_unit: 0, cost_per_unit: 0, disc: 0, disc_pct: 0 },
-  customer_payments: { sale_id: null, method: null, reference: null, notes: null },
+  sale_items: { batch_id: null, batches: [], no_stock_pcs: 0, code: null, mrp_per_unit: 0, expected_per_unit: 0, cost_per_unit: 0, disc: 0, disc_pct: 0 },
+  customer_payments: { sale_id: null, method: null, reference: null, notes: null, cheque_id: null },
   stock_moves: { ref: null, note: null, batch_id: null },
   batches: { grn_id: null, kind: 'grn', ref: null, cost_per_pcs: 0, expected_per_pcs: 0, mrp_per_pcs: 0, in_pcs: 0, left_pcs: 0 },
   users: { role: 'cashier', active: 1, last_login: null, token_version: 0 },
-  audit_log: { user_id: null, username: null, role: null, approved_by: null, level: null },
+  audit_log: { user_id: null, username: null, role: null, approved_by: null, level: null, key: null },
   fx_rates: { source: null },
 };
 
@@ -132,7 +134,8 @@ export async function insert(name, doc) {
 export const bumpCounter = (name, n) => col('counters').updateOne({ _id: name }, { $max: { seq: n } }, { upsert: true });
 
 export const COLLECTIONS = ['settings', 'suppliers', 'customers', 'products', 'grns', 'grn_expenses', 'grn_items', 'supplier_payments',
-  'sales', 'sale_items', 'customer_payments', 'stock_moves', 'users', 'audit_log', 'fx_rates', 'batches'];
+  'sales', 'sale_items', 'customer_payments', 'stock_moves', 'users', 'audit_log', 'fx_rates', 'batches',
+  'cargo_payments', 'cheques', 'customer_ids'];
 
 /* ---------------- errors & small helpers ---------------- */
 export class HttpError extends Error {
@@ -229,6 +232,8 @@ export async function setup() {
     ix('customer_payments', { customer_id: 1 }),
     ix('stock_moves', { product_id: 1 }),
     ix('batches', { product_id: 1 }),
+    ix('cheques', { cheque_date: 1 }),
+    ix('cargo_payments', { cargo_name: 1 }),
     ix('batches', { grn_id: 1, product_id: 1 }),
     ix('users', { username: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } }),
     ix('revoked_tokens', { exp: 1 }, { expireAfterSeconds: 0 }),
@@ -294,13 +299,17 @@ export const unbilledExtraInr = (it) => (['free', 'next'].includes(it.extra_stat
  * stock, or a stock correction. Selling takes from the batch the cashier picks (or the oldest first), so the same
  * product bought at different costs keeps them apart. products.stock_pcs is the sum of its batches, and
  * products.cost_per_pcs their average (used for the stock value).
+ *
+ * Selling more than is in stock (a stock or billing mistake) is allowed: the pieces short go on the product's one
+ * "short" batch (kind 'short', left_pcs below zero) at the cost of its last GRN, and that is the cost the bill's
+ * profit keeps. Stock that comes in later (the next GRN, a return, a correction) fills the short batch first.
  */
 export const batchOrder = (a, b) => (a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1);   // oldest first
 const perPc = (v, pps) => round2((Number(v) || 0) / (pps || 1));
 
 /** A product's cost: the average of the pieces left in its batches (or the newest batch's cost when none are left). */
 export async function recomputeProductCost(productId) {
-  const batches = (await find('batches', { product_id: productId })).sort(batchOrder);
+  const batches = (await find('batches', { product_id: productId, kind: { $ne: 'short' } })).sort(batchOrder);
   if (!batches.length) return;
   const left = batches.filter((b) => b.left_pcs > 0);
   const qty = sum(left, (b) => b.left_pcs);
@@ -316,6 +325,40 @@ async function logMove(productId, pcs, type, ref, note, date, batchId) {
   if (!p) fail('Product not found', 404);
   await insert('stock_moves', { product_id: productId, date, type, ref: ref ?? null, pcs, balance: p.stock_pcs, note: note ?? null, batch_id: batchId ?? null });
   return p;
+}
+
+/** The cost per piece of a product's last GRN (else its newest batch, else the product's own cost): what pieces sold without stock cost. */
+async function lastGrnCost(p) {
+  const list = (await find('batches', { product_id: p.id, kind: { $ne: 'short' } })).sort(batchOrder);
+  const grn = list.filter((b) => b.kind === 'grn').pop() || list.pop();
+  return round2(grn ? grn.cost_per_pcs : p.last_cost_per_pcs || p.cost_per_pcs || 0);
+}
+/** The product's "short" batch (pieces sold without stock), made when first needed. */
+async function shortBatch(p, date) {
+  return (await findOne('batches', { product_id: p.id, kind: 'short' })) || insert('batches', {
+    product_id: p.id, kind: 'short', ref: 'Sold without stock', grn_id: null, date, cost_per_pcs: await lastGrnCost(p),
+    expected_per_pcs: perPc(p.expected_per_set, p.pcs_per_set), mrp_per_pcs: perPc(p.mrp_per_set, p.pcs_per_set), in_pcs: 0, left_pcs: 0,
+  });
+}
+/**
+ * Pieces sold without stock are made good by stock that comes in: they are taken from the other batches (newest
+ * first) onto the short batch, which is removed once it is back to 0. The product's stock count doesn't change.
+ */
+export async function settleShort(productId) {
+  const short = await findOne('batches', { product_id: productId, kind: 'short' });
+  if (!short) return;
+  let owed = -short.left_pcs;
+  if (owed > 0) {
+    const others = (await find('batches', { product_id: productId, kind: { $ne: 'short' }, left_pcs: { $gt: 0 } })).sort(batchOrder).reverse();
+    for (const b of others) {
+      if (owed <= 0) break;
+      const take = Math.min(b.left_pcs, owed);
+      await col('batches').updateOne({ id: b.id }, { $inc: { left_pcs: -take } }, opt());
+      owed -= take;
+    }
+    await col('batches').updateOne({ id: short.id }, { $set: { left_pcs: -owed } }, opt());
+  }
+  if (owed <= 0) await deleteMany('batches', { id: short.id, left_pcs: { $gte: 0 } });
 }
 
 /**
@@ -340,26 +383,25 @@ export async function moveStock(productId, pcs, type, ref, note, date = todayStr
   if (pcs < 0) {
     let need = -pcs;
     if (pool) {
-      const have = pool.reduce((t, b) => t + Math.max(0, b.left_pcs), 0);
-      if (have < need) fail(`Only ${have} pcs of "${p.name}" are left at this cost.`);
       for (const b of pool) {
         if (need <= 0) break;
         const take = Math.min(Math.max(0, b.left_pcs), need);
         if (take > 0) { moves.push({ b, pcs: -take }); need -= take; }
       }
     } else if (chosen) {
-      if (chosen.left_pcs < need) fail(`Only ${chosen.left_pcs} pcs of "${p.name}" are left in the ${chosen.ref} batch.`);
-      moves.push({ b: chosen, pcs: -need });
-    } else {
-      for (const b of batches) {
-        if (need <= 0) break;
-        const take = Math.min(Math.max(0, b.left_pcs), need);
-        if (take > 0) { moves.push({ b, pcs: -take }); need -= take; }
-      }
-      if (need > 0) fail(`Not enough stock for "${p.name}". Available: ${p.stock_pcs} pcs`);
+      const take = Math.min(Math.max(0, chosen.left_pcs), need);
+      if (take > 0) { moves.push({ b: chosen, pcs: -take }); need -= take; }
     }
+    // then the oldest batches; what still isn't there is sold without stock (the short batch, at the last GRN's cost)
+    for (const b of batches) {
+      if (need <= 0) break;
+      if (b.kind === 'short' || moves.some((m) => m.b.id === b.id)) continue;
+      const take = Math.min(Math.max(0, b.left_pcs), need);
+      if (take > 0) { moves.push({ b, pcs: -take }); need -= take; }
+    }
+    if (need > 0) moves.push({ b: await shortBatch(p, date), pcs: -need });
   } else {
-    let b = newBatch ? null : chosen || batches[batches.length - 1];
+    let b = newBatch ? null : chosen || batches.filter((x) => x.kind !== 'short').pop() || null;
     if (!b) {
       b = await insert('batches', {
         product_id: productId, kind: 'adjust', ref: 'Stock correction', date, cost_per_pcs: round2(p.cost_per_pcs),
@@ -373,8 +415,9 @@ export async function moveStock(productId, pcs, type, ref, note, date = todayStr
     await col('batches').updateOne({ id: m.b.id }, { $inc: { left_pcs: m.pcs, ...(m.b.kind !== 'grn' && m.pcs > 0 && !chosen ? { in_pcs: m.pcs } : {}) } }, opt());
     await logMove(productId, m.pcs, type, ref, note, date, m.b.id);
   }
+  if (pcs > 0) await settleShort(productId);   // stock coming in makes good what was sold without stock
   await recomputeProductCost(productId);
-  return moves.map((m) => ({ batch_id: m.b.id, pcs: m.pcs, cost_per_pcs: m.b.cost_per_pcs }));
+  return moves.map((m) => ({ batch_id: m.b.id, pcs: m.pcs, cost_per_pcs: m.b.cost_per_pcs, short: m.b.kind === 'short' }));
 }
 
 /**
@@ -407,6 +450,7 @@ export async function syncGrnBatch(grnId, productId, { ref, date, type = 'grn', 
   const id = b ? (await setById('batches', b.id, fields), b.id) : (await insert('batches', fields)).id;
   const diff = left - (b ? b.left_pcs : 0);
   if (diff) await logMove(productId, diff, type, fields.ref, note, fields.date, id);
+  if (diff > 0) await settleShort(productId);
   await recomputeProductCost(productId);
 }
 
@@ -458,11 +502,11 @@ async function reconcileBatches() {
   let fixed = 0;
   for (const p of products) {
     const mine = batches.filter((b) => b.product_id === p.id).sort(batchOrder);
-    let diff = Math.max(0, p.stock_pcs) - sum(mine, (b) => b.left_pcs);
+    let diff = p.stock_pcs - sum(mine, (b) => b.left_pcs);
     if (!diff) continue;
     fixed++;
     if (diff > 0) {
-      const b = mine[mine.length - 1];
+      const b = mine.find((x) => x.kind === 'short') || mine[mine.length - 1];
       if (b) await col('batches').updateOne({ id: b.id }, { $inc: { left_pcs: diff } });
       else {
         await insert('batches', { product_id: p.id, kind: 'adjust', ref: 'Stock correction', date: todayStr(), cost_per_pcs: round2(p.cost_per_pcs),
@@ -474,6 +518,8 @@ async function reconcileBatches() {
         const take = Math.min(Math.max(0, b.left_pcs), -diff);
         if (take) { await col('batches').updateOne({ id: b.id }, { $inc: { left_pcs: -take } }); diff += take; }
       }
+      // still more out than in: those pieces were sold without stock
+      if (diff < 0) await col('batches').updateOne({ id: (await shortBatch(p, todayStr())).id }, { $inc: { left_pcs: diff } });
     }
     await recomputeProductCost(p.id);
   }

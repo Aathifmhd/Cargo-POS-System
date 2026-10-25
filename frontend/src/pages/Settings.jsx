@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { api, downloadFile, today, lkr, priceRules, autoPrices } from '../lib.js';
+import { api, downloadFile, today, lkr, priceRules, autoPrices, niceDateTime } from '../lib.js';
 import { POS_KEYS } from './POS.jsx';
 import { PageHeader, Field, NumInput, Icon, useToast, ThemeSwitch } from '../components/ui.jsx';
 import { useSettings } from '../App.jsx';
 import CatalogEditor from '../components/CatalogEditor.jsx';
+import DownloadReports from '../components/DownloadReports.jsx';
 
 // The settings menu, grouped under headings
 const GROUPS = [
@@ -26,6 +27,7 @@ const GROUPS = [
     heading: 'System',
     items: [
       { id: 'appearance', icon: 'sun', label: 'Appearance', desc: 'Light or dark look for this computer.' },
+      { id: 'reports', icon: 'chart', label: 'Download reports', desc: 'Excel sheets of GRNs, stock, invoices, customers, suppliers, payments and dues — for a time period.' },
       { id: 'backup', icon: 'download', label: 'Backup', desc: 'Download a full copy of all your data.' },
       { id: 'shortcuts', icon: 'keyboard', label: 'Keyboard shortcuts', desc: 'Keys that speed up billing and moving around.' },
     ],
@@ -155,10 +157,13 @@ export default function Settings() {
               </div>
             )}
 
+            {section === 'reports' && <DownloadReports />}
+
             {section === 'backup' && (
               <div className="set-form">
-                <p className="muted mb">Keep a copy on a pen drive or Google Drive every week.</p>
-                <button className="btn" onClick={() => downloadFile('/backup', `cargo-pos-backup-${today()}.json`).catch((e) => toast(e.message, 'error'))}>
+                <p className="muted mb">Keep a copy on a pen drive or Google Drive every week. A reminder pops up at the start of every month until that month's backup is downloaded.</p>
+                <p className="small mb">{settings.last_backup_at ? <>Last backup: <b>{niceDateTime(settings.last_backup_at)}</b>{settings.last_backup_by ? ` by ${settings.last_backup_by}` : ''}</> : <span className="text-amber">No backup downloaded yet.</span>}</p>
+                <button className="btn" onClick={() => downloadFile('/backup', `cargo-pos-backup-${today()}.json`).then(reload).catch((e) => toast(e.message, 'error'))}>
                   <Icon name="download" /> Download backup (.json)
                 </button>
               </div>

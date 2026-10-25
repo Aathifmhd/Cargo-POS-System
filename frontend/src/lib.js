@@ -299,3 +299,49 @@ export function autoPrices(costPerPcs, pcsPerSet, rules) {
   const mrpPcs = roundUp(costPerPcs * (1 + rules.mrp / 100), rules.round);
   return { expected_per_pcs: expectedPcs, mrp_per_pcs: mrpPcs, expected_per_set: expectedPcs * pps, mrp_per_set: mrpPcs * pps };
 }
+
+/** Customers go by their shop / business name; the person's name comes second (custPerson, null without a shop name). */
+export const custName = (c) => String(c?.shop_name || '').trim() || c?.name || '';
+export const custPerson = (c) => (String(c?.shop_name || '').trim() ? c.name : null);
+
+/**
+ * Times. Every record is stamped when it is saved (created_at, "YYYY-MM-DD HH:MM:SS" in UTC);
+ * these show it on this computer's clock: "03:45 PM" and "25/10/2026 · 03:45 PM".
+ */
+export const fromStamp = (s) => (s ? new Date(String(s).replace(' ', 'T') + (/Z|[+-]\d\d:?\d\d$/.test(String(s)) ? '' : 'Z')) : null);
+export function niceTime(s) {
+  const d = fromStamp(s);
+  return !d || Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+}
+export function niceDateTime(s) {
+  const d = fromStamp(s);
+  if (!d || Number.isNaN(d.getTime())) return '—';
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${niceDate(day)} · ${niceTime(s)}`;
+}
+
+/**
+ * A photo picked or taken on the phone, made small enough to save: at most 1600 px on its longest side, as a JPEG.
+ * Resolves to a data URL ("data:image/jpeg;base64,…").
+ */
+export function shrinkPhoto(file, max = 1600, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    if (!file || !/^image\//.test(file.type || 'image/')) return reject(new Error('Choose a photo (JPG or PNG)'));
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.naturalWidth * k);
+      canvas.height = Math.round(img.naturalHeight * k);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That photo could not be opened — try another one')); };
+    img.src = url;
+  });
+}

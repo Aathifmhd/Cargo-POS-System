@@ -4,7 +4,7 @@ import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, cos
 import { Icon, Modal, Field, NumInput, DateInput, CostBadge, useToast, Loading } from '../components/ui.jsx';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
-import { isAdmin, isSuper } from '../lib.js';
+import { isAdmin, isSuper, custName, custPerson, niceTime } from '../lib.js';
 
 const DRAFT_KEY = 'cargo-pos-draft';
 const HELD_KEY = 'cargo-pos-held';
@@ -160,7 +160,7 @@ export default function POS() {
     const u = unitInfo(p, unit, b);
     setEntry({ q: p.code, pid: p.id, bid: b?.id ?? null, unit, qty: '1', price: u.expected ? u.expected.toFixed(2) : '', disc_pct: '' });
     setHi(0);
-    if (freePcs(p, b) <= 0) toast(`"${p.name}"${b ? ` (${b.ref})` : ''} has no stock left`, 'error');
+    if (p.stock_pcs - inBillPcs(p.id) <= 0) toast(`"${p.name}" shows no stock — it can still be billed (sold without stock)`);
     focus('tQty');
   };
   const commit = () => {
@@ -169,8 +169,9 @@ export default function POS() {
     const qty = n(entry.qty);
     if (!qty) { toast('Enter a quantity (put - in front for a return, e.g. -2)', 'error'); return focus('tQty'); }
     const per = unitInfo(p, entry.unit).per;
-    const free = freePcs(p, curB);
-    if (qty > 0 && qty * per > free) { toast(`Only ${pcsText(Math.max(0, free))} of ${p.name}${curB ? ` (${curB.ref})` : ''} left`, 'error'); return focus('tQty'); }
+    // more than is in stock is allowed (a stock or billing mistake): the line is marked "sold without stock"
+    const free = p.stock_pcs - inBillPcs(p.id);
+    if (qty > 0 && qty * per > free) toast(`${pcsText(qty * per - Math.max(0, free))} of ${p.name} sold without stock — the Super Admin is told`);
     const line = { product_id: p.id, batch_id: curB?.id ?? null, unit: entry.unit, qty, price: n(entry.price), disc_pct: n(entry.disc_pct) };
     setLines((ls) => {
       const i = ls.findIndex((l) => l.product_id === line.product_id && Math.sign(n(l.qty)) === Math.sign(line.qty) && (l.batch_id ?? null) === line.batch_id && l.unit === line.unit && n(l.price) === line.price && n(l.disc_pct) === line.disc_pct);
@@ -230,7 +231,6 @@ export default function POS() {
     const p = byId[l.product_id];
     const qty = n(edit.qty);
     if (!qty) return toast('Quantity can\'t be 0 (put - in front for a return)', 'error');
-    if (p && qty > 0 && qty * unitInfo(p, edit.unit).per > freePcs(p, batchOf(p.id, l.batch_id), edit.i)) return toast(`Not enough stock of ${p.name}`, 'error');
     update(edit.i, { unit: edit.unit, qty, price: n(edit.price) });
     setEdit(null);
   };
@@ -259,14 +259,26 @@ export default function POS() {
   /* ---------- totals ---------- */
   const T = useMemo(() => {
     let sub = 0, lineDisc = 0, cost = 0, pcs = 0;
-    const rows = lines.map((l) => {
+    const avail = {};
+    const noStock = new Map();
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const l = lines[i];
+      const p = byId[l.product_id];
+      if (!p || n(l.qty) <= 0) continue;
+      const want = n(l.qty) * unitInfo(p, l.unit).per;
+      const have = avail[p.id] ?? Math.max(0, p.stock_pcs);
+      const take = Math.min(have, want);
+      avail[p.id] = have - take;
+      if (want > take) noStock.set(i, want - take);
+    }
+    const rows = lines.map((l, i) => {
       const p = byId[l.product_id];
       if (!p) return null;
       const b = batchOf(p.id, l.batch_id);
       const u = unitInfo(p, l.unit, b);
       const c = lineCalc(l);
       sub += c.gross; lineDisc += c.disc; cost += u.cost * n(l.qty); pcs += n(l.qty) * u.per;
-      return { ...l, p, b, u, ...c, back: n(l.qty) < 0, under: n(l.qty) > 0 && u.cost > 0 && c.net < u.cost };
+      return { ...l, p, b, u, ...c, back: n(l.qty) < 0, under: n(l.qty) > 0 && u.cost > 0 && c.net < u.cost, noStock: noStock.get(i) || 0 };
     });
     const afterLines = sub - lineDisc;
     const bd = String(billDisc).trim().endsWith('%') ? (afterLines * n(String(billDisc).replace('%', ''))) / 100 : n(billDisc);
@@ -334,7 +346,7 @@ export default function POS() {
     try {
       const c = await api.put(`/customers/${customer.id}/credit-limit`, { credit_limit: newLimit, reason: `to bill Rs ${money(T.net)} on credit` });
       setCustomers((cs) => cs.map((x) => (x.id === c.id ? { ...x, ...c } : x)));
-      toast(`Credit limit for ${customer.name} raised to ${lkr(newLimit)}`);
+      toast(`Credit limit for ${custName(customer)} raised to ${lkr(newLimit)}`);
       await complete('credit', { paid, due });
     } catch (e) { toast(e.message, 'error'); }
   };
@@ -390,9 +402,9 @@ export default function POS() {
       <div className="till-head">
 
         <div className={`till-who ${customer ? 'named' : ''}`} role="button" onClick={() => { setAfter(null); setModal('customer'); }} title="Change customer (F4)">
-          <b>{customer ? customer.name.toUpperCase() : 'WALK-IN CUSTOMER'}</b>
+          <b>{customer ? custName(customer).toUpperCase() : 'WALK-IN CUSTOMER'}</b>
           <em>{customer
-            ? <>{customer.shop_name ? `${customer.shop_name} · ` : ''}{customer.phone || 'no phone'} · due {money(owed)}{customer.credit_limit > 0 ? ` of ${money(customer.credit_limit)}` : ''}{overLimit ? ' · OVER LIMIT' : ''}</>
+            ? <>{custPerson(customer) ? `${custPerson(customer)} · ` : ''}{customer.phone || 'no phone'} · due {money(owed)}{customer.credit_limit > 0 ? ` of ${money(customer.credit_limit)}` : ''}{overLimit ? ' · OVER LIMIT' : ''}</>
             : 'no account · press F4 to choose'}</em>
           <span>cashier <b>{user.name}</b></span>
           <span className="till-whobtn">{customer ? 'Change' : 'Choose'} customer <i>F4</i></span>
@@ -421,7 +433,7 @@ export default function POS() {
           <div className={`till-item ${cur ? 'has' : ''}`}>
             {cur ? <>
               <b>{cur.name.toUpperCase()}</b>
-              <em>{cur.code}{cur.sizes ? ` · ${cur.sizes}` : ''}{curB && groupsOf(cur).length > 1 ? ` · ${batchText(curB)}` : ''} · stock {pcsText(freePcs(cur, curB))}</em>
+              <em>{cur.code}{cur.sizes ? ` · ${cur.sizes}` : ''}{curB && groupsOf(cur).length > 1 ? ` · ${batchText(curB)}` : ''} · stock {freePcs(cur, curB) > 0 ? pcsText(freePcs(cur, curB)) : 'none — sells without stock'}</em>
             </> : <i>scan or key a code — F1</i>}
           </div>
         </div>
@@ -461,7 +473,7 @@ export default function POS() {
                       <td className="d">{p.name}{tier && <> <CostBadge tier={tier} /></>}</td>
                       <td className="s">{many ? batchText(b) : p.category || '—'}</td>
                       <td className="s">{p.sizes || '—'}</td>
-                      <td className={`n ${stock <= 0 ? 'neg' : !many && stock < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{stock <= 0 ? 'none' : pcsText(stock)}</td>
+                      <td className={`n ${stock <= 0 ? 'neg' : !many && stock < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{stock < 0 ? `−${pcsText(-stock)}` : stock === 0 ? 'none' : pcsText(stock)}</td>
                       <td className="n cost">{money(u.costPc)}</td>
                       <td className="p">{money(u.expectedPc)}</td>
                     </tr>
@@ -488,6 +500,7 @@ export default function POS() {
                     <b>{r.p.name.toUpperCase()}</b>
                     <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{r.b && groupsOf(r.p).length > 1 ? `${batchText(r.b)} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}expected {money(r.u.expectedPc)}</em>
                     {r.back && <span className="tag return">RETURN · back to stock</span>}
+                    {r.noStock > 0 && <span className="tag nostock" title="More than the stock shows — kept at the last GRN cost; the Super Admin is told">SOLD WITHOUT STOCK · {pcsText(r.noStock)}</span>}
                     {showCost && r.under && <span className="tag bad">under cost</span>}
                   </td>
                   <td className="n q">{edit?.i === i
@@ -525,7 +538,7 @@ export default function POS() {
           </div>
           <div className="sum-net"><span>NET TOTAL</span><b>{money(T.net)}</b></div>
           {showCost && lines.length > 0 && <div className={`sum-gp ${T.gp < 0 ? 'neg' : ''}`}><span>GP</span><b>{money(T.gp)}</b><i>{pct(margin(T.net, T.cost))}</i></div>}
-          {overLimit && <div className="sum-over">Over their limit — due {money(owed)} of {money(customer.credit_limit)}. To bill on credit, the Super Admin must raise the limit.</div>}
+          {overLimit && <div className="sum-over">Over their limit — due {money(owed)} of {money(customer.credit_limit)}. To bill on credit, the Super Admin must raise the limit.{customer.cheques_pending > 0 ? ` Their cheques of ${money(customer.cheques_pending)} count only once passed (Cheque Desk).` : ''}</div>}
           <div className="sum-acts">
             <button className="sum-pay" onClick={openPay} disabled={!lines.length}><b>TAKE PAYMENT</b><span>{lkr(T.net)} · Enter Enter · cash or credit</span></button>
             <div className="sum-more">
@@ -607,7 +620,7 @@ function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose
     if (e.key === 'Enter') { e.preventDefault(); const c = list[Math.min(hi, list.length - 1)]; if (c) onPick(c.id); }
   };
   return (
-    <Modal title={creditOnly ? 'Who is this credit bill for?' : 'Choose customer'} subtitle="Type a name, shop, phone or town · ↑ ↓ · Enter" onClose={onClose}
+    <Modal title={creditOnly ? 'Who is this credit bill for?' : 'Choose customer'} subtitle="Type a shop, name, phone or town · ↑ ↓ · Enter" onClose={onClose}
       footer={<>
         <button className="btn btn-primary" onClick={() => onNew(q.trim())} style={{ marginRight: 'auto' }}>
           <Icon name="plus" size={16} /> {q.trim() ? `Add customer “${q.trim()}”` : 'Add customer'}
@@ -620,7 +633,7 @@ function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose
         {list.length === 0 && <p className="muted center mt">No customer found — add them with the button below.</p>}
         {list.map((c, i) => (
           <button key={c.id ?? 'walk'} className={`pick-row ${i === hi ? 'on' : ''} ${c.id === current ? 'cur' : ''}`} onMouseEnter={() => setHi(i)} onClick={() => onPick(c.id)}>
-            <span><b>{c.name}</b>{!c.walk && <small>{[c.shop_name, c.city, c.phone].filter(Boolean).join(' · ')}</small>}</span>
+            <span><b>{c.walk ? c.name : custName(c)}</b>{!c.walk && <small>{[custPerson(c), c.city, c.phone].filter(Boolean).join(' · ')}</small>}</span>
             {!c.walk && <span className="right">{c.balance > 0 ? <b className="text-red">due {money(c.balance)}</b> : <small>no dues</small>}{c.credit_limit > 0 && <small>limit {money(c.credit_limit)}</small>}</span>}
           </button>
         ))}
@@ -705,7 +718,7 @@ function PayTypeModal({ total, customer, onChoose, onClose }) {
         </button>
         <button tabIndex={-1} className={`pt-card credit ${type === 'credit' ? 'on' : ''}`} onClick={() => setType('credit')} onDoubleClick={() => onChoose('credit')}>
           <span className="pt-icon"><Icon name="clock" size={24} /></span>
-          <b>{total < 0 ? 'To account' : 'Credit'}</b><small>{total < 0 ? (customer ? `Off what ${customer.name} owes` : 'Registered customers only') : customer ? `On ${customer.name}'s account` : 'Registered customers only'}</small><kbd>2</kbd>
+          <b>{total < 0 ? 'To account' : 'Credit'}</b><small>{total < 0 ? (customer ? `Off what ${custName(customer)} owes` : 'Registered customers only') : customer ? `On ${custName(customer)}'s account` : 'Registered customers only'}</small><kbd>2</kbd>
         </button>
       </div>
     </Modal>
@@ -736,7 +749,7 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
     onRaise(n(newLimit), paid, due);
   };
   return (
-    <Modal size="sm" title={refund ? `Return to account — ${customer.name}` : `On account — ${customer.name}`} subtitle={customer.shop_name || ''} onClose={onClose}
+    <Modal size="sm" title={refund ? `Return to account — ${custName(customer)}` : `On account — ${custName(customer)}`} subtitle={custPerson(customer) || ''} onClose={onClose}
       footer={<>
         <button className="btn" onClick={raising ? () => setRaising(false) : onClose}>Back</button>
         <button className="btn btn-primary" form="credit-form" disabled={busy || (raising && n(newLimit) < after)}>
@@ -748,7 +761,7 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
           ? <div className="pay-total refund"><span>Comes off what they owe</span><b>{lkr(-total)}</b></div>
           : <div className="pay-total amber"><span>This bill</span><b>{lkr(total)}</b></div>}
         <div className="row gap-s small">
-          <span className="muted">Customer:</span> <b>{customer.name}</b>
+          <span className="muted">Customer:</span> <b>{custName(customer)}</b>
           <button type="button" className="link-btn" style={{ marginLeft: 'auto' }} onClick={onChangeCustomer}>Change customer</button>
         </div>
         {!raising && !refund && (
@@ -758,13 +771,13 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
           </div>
         )}
         <dl className="kv">
-          <dt>Due now</dt><dd>{lkr(customer.balance)}</dd>
+          <dt>Due now</dt><dd>{lkr(customer.balance)}{customer.cheques_pending > 0 && <div className="sub muted">incl. {lkr(customer.cheques_pending)} in cheques not passed yet</div>}</dd>
           <dt>{refund ? 'Due after this return' : 'Due after this bill'}</dt><dd className={over ? 'text-red' : ''}>{lkr(after)}</dd>
           <dt>Credit limit</dt><dd>{customer.credit_limit > 0 ? lkr(customer.credit_limit) : 'No limit set'}</dd>
         </dl>
         {over && !raising && (
           <div className="alert alert-red small"><Icon name="alert" size={16} />
-            <span>This bill takes {customer.name} <b>{lkr(after - customer.credit_limit)}</b> over the credit limit. To bill it on credit, the credit limit must be increased{canRaise ? '' : ' with the Super Admin password'}.</span>
+            <span>This bill takes {custName(customer)} <b>{lkr(after - customer.credit_limit)}</b> over the credit limit. To bill it on credit, the credit limit must be increased{canRaise ? '' : ' with the Super Admin password'}.</span>
           </div>
         )}
         {raising && (
@@ -807,7 +820,7 @@ function DoneModal({ sale, change, onClose, onView }) {
         <div className="receipt-clip">
           <div className="receipt">
             <div className="rc-head">{sale.invoice_no}</div>
-            <div className="rc-sub">{niceDate(sale.date)} · {sale.customer_name}</div>
+            <div className="rc-sub">{niceDate(sale.date)}{sale.created_at ? ` · ${niceTime(sale.created_at)}` : ''} · {sale.customer_name}</div>
             <div className="rc-lines">{sale.items.slice(0, 4).map((i) => (
               <div key={i.id} className="rc-line"><span>{i.qty} × {i.name}</span><span>{money(i.line_total)}</span></div>
             ))}{sale.items.length > 4 && <div className="rc-line muted"><span>+ {sale.items.length - 4} more</span><span /></div>}</div>

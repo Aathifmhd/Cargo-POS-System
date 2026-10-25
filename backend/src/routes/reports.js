@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import {
-  find, updateMany, fail, round2, sum, todayStr, addDays, getSettings, setSetting, DB_LABEL, COLLECTIONS, inParallel,
+  find, updateMany, fail, round2, sum, todayStr, addDays, getSettings, setSetting, DB_LABEL, COLLECTIONS, inParallel, stamp,
 } from '../db.js';
-import { supplierLedgers, customerLedgers, revalueGrns } from '../services.js';
+import { supplierLedgers, customerLedgers, revalueGrns, customerLabel, customerPerson } from '../services.js';
 import { guard, audit } from '../auth.js';
 
 const r = Router();
@@ -109,25 +109,31 @@ r.get('/dues/receivables', async (req, res) => res.json((await allReceivables())
 
 /** Payments Due → History: payments made to suppliers, or received from customers, newest first. */
 r.get('/dues/history', async (req, res) => {
+  if (req.query.kind === 'cargo') {
+    const pays = await find('cargo_payments', {}, { sort: { date: -1, id: -1 }, limit: 1000 });
+    return res.json(pays.map((p) => ({ id: p.id, date: p.date, at: p.created_at || null, who: p.cargo_name, who_id: null, bill_id: null, bill_no: null, amount: p.amount, amount_lkr: p.amount,
+      method: p.method, reference: p.reference, notes: p.notes, currency: 'LKR', cargo: true, cheque_id: p.cheque_id ?? null })));
+  }
   const supplier = req.query.kind === 'payables';
   const pays = await find(supplier ? 'supplier_payments' : 'customer_payments', {}, { sort: { date: -1, id: -1 }, limit: 1000 });
   const whoIds = [...new Set(pays.map((p) => (supplier ? p.supplier_id : p.customer_id)))];
   const billIds = [...new Set(pays.map((p) => (supplier ? p.grn_id : p.sale_id)).filter((x) => x != null))];
   const [who, bills] = await inParallel(
-    () => (whoIds.length ? find(supplier ? 'suppliers' : 'customers', { id: { $in: whoIds } }, { project: { id: 1, name: 1, origin: 1 } }) : []),
+    () => (whoIds.length ? find(supplier ? 'suppliers' : 'customers', { id: { $in: whoIds } }, { project: { id: 1, name: 1, origin: 1, shop_name: 1 } }) : []),
     () => (billIds.length ? find(supplier ? 'grns' : 'sales', { id: { $in: billIds } }, { project: { id: 1, grn_no: 1, invoice_no: 1 } }) : []),
   );
-  const nameOf = Object.fromEntries(who.map((w) => [w.id, w.name]));
+  const nameOf = Object.fromEntries(who.map((w) => [w.id, supplier ? w.name : customerLabel(w)]));
+  const personOf = Object.fromEntries(who.map((w) => [w.id, supplier ? null : customerPerson(w)]));
   const localOf = Object.fromEntries(who.map((w) => [w.id, supplier && w.origin === 'local']));
   const billOf = Object.fromEntries(bills.map((b) => [b.id, b.grn_no || b.invoice_no]));
   res.json(pays.map((p) => {
     const whoId = supplier ? p.supplier_id : p.customer_id;
     const billId = supplier ? p.grn_id : p.sale_id;
     return {
-      id: p.id, date: p.date, who_id: whoId, who: nameOf[whoId] || '—', bill_id: billId ?? null, bill_no: billId != null ? billOf[billId] || null : null,
+      id: p.id, date: p.date, at: p.created_at || null, who_id: whoId, who: nameOf[whoId] || '—', who_sub: personOf[whoId] || null, bill_id: billId ?? null, bill_no: billId != null ? billOf[billId] || null : null,
       amount: supplier ? p.amount_inr : p.amount, amount_lkr: supplier ? p.amount_lkr : p.amount,
       currency: !supplier || localOf[whoId] ? 'LKR' : 'INR',
-      method: p.method || null, reference: p.reference || null, notes: p.notes || null,
+      method: p.method || null, reference: p.reference || null, notes: p.notes || null, cheque_id: p.cheque_id ?? null,
     };
   }));
 });
@@ -157,7 +163,7 @@ r.get('/dashboard', async (req, res) => {
     () => allPayables(),
     () => allReceivables(),
     () => find('products', { active: 1 }),
-    () => find('sales', {}, { sort: { id: -1 }, limit: 6, project: { id: 1, invoice_no: 1, date: 1, customer_name: 1, payment_type: 1, total: 1, status: 1 } }),
+    () => find('sales', {}, { sort: { id: -1 }, limit: 6, project: { id: 1, invoice_no: 1, date: 1, created_at: 1, customer_name: 1, payment_type: 1, total: 1, status: 1 } }),
     () => find('grns', {}, { sort: { id: -1 }, limit: 4, project: { id: 1, grn_no: 1, date: 1, bale_no: 1, cargo_name: 1, total_lkr: 1, supplier_id: 1 } }),
   );
   const between = (from, to) => sales.filter((s) => s.date >= from && s.date <= to);
@@ -327,12 +333,21 @@ r.get('/reports/shipments', async (req, res) => {
 });
 
 /* ---------------- backup ---------------- */
+/** The monthly backup reminder was put off ("Remind me tomorrow"): the Super Admin sees it under Action Center → Attention. */
+r.post('/backup/remind-later', async (req, res) => {
+  const { last_backup_at: last } = await getSettings();
+  await audit(req.user, `Monthly backup not downloaded yet — "Remind me tomorrow" was pressed${last ? ` (last backup ${String(last).slice(0, 10)})` : ' (no backup downloaded so far)'}`, null, 'attention');
+  res.json({ ok: true });
+});
+
 r.get('/backup', async (req, res) => {
   await guard(req, 'Download full backup');
   const dump = { app: 'cargo-pos', exported_at: new Date().toISOString(), database: DB_LABEL };
   for (const name of COLLECTIONS.filter((c) => !['users', 'audit_log', 'fx_rates'].includes(c))) {
     dump[name] = await find(name, name === 'settings' ? { key: { $ne: 'session_secret' } } : {}, name === 'settings' ? {} : { sort: { id: 1 } });
   }
+  await setSetting('last_backup_at', stamp());
+  await setSetting('last_backup_by', req.user?.username || '');
   res.setHeader('Content-Disposition', `attachment; filename="cargo-pos-backup-${todayStr()}.json"`);
   res.json(dump);
 });

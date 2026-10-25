@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Icon, ThemeSwitch } from './ui.jsx';
+import { Icon, ThemeSwitch, Modal, useToast } from './ui.jsx';
 import { ChangePasswordModal } from './auth.jsx';
-import { api, isAdmin, isSuper, ROLE_NAME } from '../lib.js';
+import { api, isAdmin, isSuper, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime } from '../lib.js';
 import { useAuth, useFx, useSettings } from '../App.jsx';
+
+const BACKUP_SNOOZE = 'cargo-backup-snooze';   // the day "Remind me tomorrow" was pressed
 
 const NAV = [
   { to: '/action-center', icon: 'bell', label: 'Action Center', super: true },
@@ -20,13 +22,14 @@ const NAV = [
   { to: '/suppliers', icon: 'factory', label: 'Suppliers' },
   { group: 'Money' },
   { to: '/dues', icon: 'wallet', label: 'Payment Portal', hint: 'F7' },
+  { to: '/cheques', icon: 'cheque', label: 'Cheque Desk', cheques: true },
   { to: '/reports', icon: 'chart', label: 'Reports' },
   { to: '/settings', icon: 'settings', label: 'Settings' },
   { to: '/users', icon: 'shield', label: 'Users & Security', admin: true },
 ];
 
 export default function Layout() {
-  const { settings } = useSettings();
+  const { settings, reload: reloadSettings } = useSettings();
   const { user, logout } = useAuth();
   const { fx } = useFx();
   const [open, setOpen] = useState(false);
@@ -37,14 +40,50 @@ export default function Layout() {
   const navigate = useNavigate();
 
   useEffect(() => setOpen(false), [location.pathname]);
+
+  /*
+   * Monthly backup reminder (admins): from the 1st of each month until a full backup is downloaded that month.
+   * "Remind me tomorrow" hides it for the rest of the day on this computer.
+   */
+  const toast = useToast();
+  const [snoozed, setSnoozed] = useState(() => { try { return localStorage.getItem(BACKUP_SNOOZE) === today(); } catch { return false; } });
+  const [backingUp, setBackingUp] = useState(false);
+  const last = fromStamp(settings.last_backup_at);
+  const lastMonth = last && !Number.isNaN(last.getTime()) ? `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}` : '';
+  const needBackup = isAdmin(user) && settings.shop_name !== undefined && lastMonth !== today().slice(0, 7) && !snoozed;
+  const snooze = () => {
+    try { localStorage.setItem(BACKUP_SNOOZE, today()); } catch { /* storage unavailable */ }
+    setSnoozed(true);
+    api.post('/backup/remind-later', {}).catch(() => {});   // the Super Admin sees it under Action Center → Attention
+  };
+  const backupNow = async () => {
+    setBackingUp(true);
+    try {
+      await downloadFile('/backup', `cargo-pos-backup-${today()}.json`);
+      toast('Backup downloaded — keep it on a pen drive or Google Drive');
+      reloadSettings();
+    } catch (e) { toast(e.message, 'error'); } finally { setBackingUp(false); }
+  };
   useEffect(() => {
     const close = (e) => menuRef.current && !menuRef.current.contains(e.target) && setMenu(false);
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
-  // Action Center (Super Admin): how many activities came in since it was last opened
+  // Action Center (Super Admin): how many activities came in since it was last opened, and the Attention
+  // messages not read yet (red — they go once the Attention tab is opened)
   const [unseen, setUnseen] = useState(0);
+  const [attn, setAttn] = useState(0);
+  useEffect(() => {
+    if (!isSuper(user)) return undefined;
+    const read = () => { try { return Number(localStorage.getItem('cargo-attention-seen')) || 0; } catch { return 0; } };
+    const check = () => api.get(`/action-center?after=${read()}&level=attention`).then((l) => setAttn(l.length)).catch(() => {});
+    check();
+    const t = setInterval(check, 15000);
+    const reset = () => setAttn(0);
+    window.addEventListener('cargo-attention-seen', reset);
+    return () => { clearInterval(t); window.removeEventListener('cargo-attention-seen', reset); };
+  }, [user]);
   useEffect(() => {
     if (!isSuper(user)) return undefined;
     const seen = () => { try { return Number(localStorage.getItem('cargo-action-center-seen')) || 0; } catch { return 0; } };
@@ -58,6 +97,14 @@ export default function Layout() {
     window.addEventListener('cargo-action-center-seen', reset);
     return () => { clearInterval(t); window.removeEventListener('cargo-action-center-seen', reset); };
   }, [user, location.pathname]);
+
+  // Cheque Desk: how many cheques are due today (or from past dates and still waiting)
+  const [chequesToday, setChequesToday] = useState(0);
+  useEffect(() => {
+    const t = new Date();
+    const day = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    api.get('/cheques').then((l) => setChequesToday(l.filter((c) => (c.status === 'pending' && c.cheque_date <= day) || (c.status === 'holding' && c.cheque_date === day)).length)).catch(() => {});
+  }, [location.pathname]);
 
   // Function keys anywhere: F2 dashboard · F3 billing · F9 bills · F7 take a payment
   useEffect(() => {
@@ -93,7 +140,9 @@ export default function Layout() {
                 <Icon name={item.icon} size={19} />
                 <span>{item.label}</span>
                 {item.hint && <kbd>{item.hint}</kbd>}
-                {item.super && unseen > 0 && <span className="nav-count">{unseen > 99 ? '99+' : unseen}</span>}
+                {item.super && attn > 0 && <span className="nav-count" title="New Attention messages">{attn > 99 ? '99+' : attn}</span>}
+                {item.super && !attn && unseen > 0 && <span className="nav-count grey" title="New activities">{unseen > 99 ? '99+' : unseen}</span>}
+                {item.cheques && chequesToday > 0 && <span className="nav-count" title="Cheques due today or waiting from past dates">{chequesToday}</span>}
               </NavLink>
             )
           )}
@@ -131,6 +180,16 @@ export default function Layout() {
         <Outlet />
       </main>
       {pw && <ChangePasswordModal onClose={() => setPw(false)} />}
+      {needBackup && (
+        <Modal size="sm" title="Time for the monthly backup" subtitle={new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })} onClose={snooze}
+          footer={<><button className="btn" onClick={snooze} disabled={backingUp}>Remind me tomorrow</button>
+            <button className="btn btn-primary" autoFocus onClick={backupNow} disabled={backingUp}><Icon name="download" size={16} /> {backingUp ? 'Downloading…' : 'Download backup now'}</button></>}>
+          <div className="stack">
+            <div className="alert alert-amber small"><Icon name="download" size={16} /><span><b>Download a full copy of all your data.</b> Keep it on a pen drive or Google Drive, so nothing is lost if this computer or the internet fails.</span></div>
+            <p className="muted small">{settings.last_backup_at ? `Last backup: ${niceDateTime(settings.last_backup_at)}${settings.last_backup_by ? ` by ${settings.last_backup_by}` : ''}.` : 'No backup has been downloaded yet.'} This reminder comes back at the start of every month until the backup is downloaded.</p>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

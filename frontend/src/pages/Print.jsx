@@ -4,6 +4,7 @@ import { useApi, money, lkr, inr, supMoney, niceDate, niceTime, int } from '../l
 import { Loading, Icon } from '../components/ui.jsx';
 import { useSettings } from '../App.jsx';
 import { BillDoc, billDesign, billPageCss } from '../components/Bill.jsx';
+import { printFrame, withPrinting } from '../components/printing.jsx';
 import { StickerSheet, stickerDesign, stickerPageCss, stickerCC, sizesText, STICKER_PRINT_KEY } from '../components/Stickers.jsx';
 
 function PrintBar() {
@@ -19,8 +20,7 @@ const useAutoPrint = (ready) => useEffect(() => {
   if (ready && !new URLSearchParams(window.location.search).has('preview')) setTimeout(() => window.print(), 300);
 }, [ready]);
 
-function ShopHead({ title, no, date, time }) {
-  const { settings } = useSettings();
+function ShopHead({ title, no, date, time, settings }) {
   return (
     <div className="print-head">
       <div>
@@ -57,15 +57,35 @@ export function PrintSale() {
 
 export function PrintGrn() {
   const { id } = useParams();
+  const { settings } = useSettings();
   const { data: g } = useApi(`/grns/${id}`);
   useAutoPrint(!!g);
   if (!g) return <Loading />;
-  const cur = supMoney(g);
   return (
     <>
       <PrintBar />
+      <GrnDoc g={g} settings={settings} />
+    </>
+  );
+}
+
+/** Print a GRN on this page (no print page), with the printing animation. */
+export function printGrn(g, settings) {
+  return withPrinting({ kind: 'bill', title: g.grn_no, sub: 'Goods received note · A4' }, async () => {
+    const { win, cleanup } = await printFrame({
+      title: g.grn_no, width: '210mm', height: '297mm', css: '@page { size: A4; margin: 12mm; }',
+      element: <GrnDoc g={g} settings={settings} />,
+    });
+    try { win.focus(); win.print(); } finally { cleanup(); }
+  });
+}
+
+/** The GRN as printed. */
+function GrnDoc({ g, settings }) {
+  const cur = supMoney(g);
+  return (
       <div className="print-page">
-        <ShopHead title="GOODS RECEIVED NOTE" no={g.grn_no} date={g.date} />
+        <ShopHead title="GOODS RECEIVED NOTE" no={g.grn_no} date={g.date} settings={settings} />
         <div className="print-meta">
           <div><div className="muted">Supplier</div><b>{g.supplier_name}</b><div>{g.supplier_city}</div><div>Invoice: {g.supplier_invoice_no || '—'}</div>{g.supplier_bill_date && <div>Billed: {niceDate(g.supplier_bill_date)}</div>}</div>
           <div className="right"><div>Cargo: <b>{g.cargo_name || '—'}</b></div><div>{g.currency === 'LKR' ? <b>Local purchase · Rs</b> : <>Rate: <b>1 INR = Rs {g.exchange_rate}</b></>}</div></div>
@@ -88,7 +108,6 @@ export function PrintGrn() {
         </div>
         <div className="print-foot"><div className="sign">Checked by</div><div className="sign">Approved by</div></div>
       </div>
-    </>
   );
 }
 

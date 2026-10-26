@@ -4,6 +4,8 @@ import { api, useApi, lkr, inr, supMoney, isLocalSup, money, niceDate, int, dueT
 import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, Modal, useToast } from '../components/ui.jsx';
 import { SupplierPaymentModal } from '../components/forms.jsx';
 import { StickerModal } from '../components/Stickers.jsx';
+import { printGrn } from './Print.jsx';
+import { useSettings } from '../App.jsx';
 
 /**
  * One GRN: items, costs, cargo charge and the supplier account.
@@ -11,6 +13,7 @@ import { StickerModal } from '../components/Stickers.jsx';
  */
 function GrnScreen({ id, modal, onClose, onChanged }) {
   const toast = useToast();
+  const { settings } = useSettings();   // the shop's name and address on a printed GRN
   const navigate = useNavigate();
   const { data: g, error, reload } = useApi(`/grns/${id}`);
   const [paying, setPaying] = useState(null);
@@ -41,7 +44,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
   const actions = <>
     <button className="btn btn-danger" onClick={del}><Icon name="trash" /> Delete</button>
     <button className="btn" onClick={() => navigate(`/grn/${g.id}/edit`)} title="Fix a GRN entered wrongly (Super Admin)"><Icon name="edit" /> Edit GRN</button>
-    <button className="btn" onClick={() => window.open(`/print/grn/${g.id}`, '_blank')}><Icon name="print" /> Print GRN</button>
+    <button className="btn" onClick={() => printGrn(g, settings).catch((e) => toast(e.message, 'error'))}><Icon name="print" /> Print GRN</button>
     <button className="btn" onClick={() => setStickers('manual')} title="One sticker for each set"><Icon name="tag" /> Print stickers</button>
     {g.balance_inr > 0 && <button className="btn btn-primary" onClick={pay}><Icon name="wallet" /> Pay supplier</button>}
   </>;

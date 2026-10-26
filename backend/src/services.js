@@ -1,7 +1,7 @@
 import {
   find, findOne, insert, setById, updateOne, updateMany, deleteMany, tx, fail, round2, num, sum, todayStr, addDays, getSettings,
   nextNo, nextProductCode, allocate, dueStatus, moveStock, recomputeProductCost, grnItemPcs, byDateId, stamp, inParallel,
-  itemShortPcs, unbilledExtraInr, setSetting, syncGrnBatch,
+  itemShortPcs, unbilledExtraInr, setSetting, syncGrnBatch, insertAll,
 } from './db.js';
 
 /* =========================================================
@@ -685,9 +685,14 @@ export async function createSale(body, approve) {
 
   return tx(async () => {
     const invoice_no = await nextNo('sales', 'invoice_no', settings.invoice_prefix || 'INV-', 5);
+    // every product of the bill in one read (a product on the bill twice is read again: its stock has moved)
+    const prods = new Map((await find('products', { id: { $in: [...new Set(items.map((i) => num(i.product_id)))] } })).map((x) => [x.id, x]));
+    const used = new Set();
     const lines = [];
     for (const i of items) {
-      const p = await findOne('products', { id: num(i.product_id) });
+      const pid = num(i.product_id);
+      const p = used.has(pid) ? await findOne('products', { id: pid }) : prods.get(pid);
+      used.add(pid);
       if (!p) fail('Product not found');
       const unit = i.unit === 'pcs' ? 'pcs' : 'set';
       const per = unit === 'set' ? p.pcs_per_set : 1;
@@ -717,10 +722,10 @@ export async function createSale(body, approve) {
         continue;
       }
       const taken = back
-        ? await moveStock(p.id, -pcs, 'return', invoice_no, `Returned ${-qty} ${unit}`, date, { batchId: i.batch_id ?? ids?.[0] ?? null })
-        : await moveStock(p.id, -pcs, 'sale', invoice_no, `${qty} ${unit}`, date, { batchId: ids && ids.length > 1 ? null : i.batch_id ?? null, batchIds: ids });
+        ? await moveStock(p.id, -pcs, 'return', invoice_no, `Returned ${-qty} ${unit}`, date, { batchId: i.batch_id ?? ids?.[0] ?? null, product: p })
+        : await moveStock(p.id, -pcs, 'sale', invoice_no, `${qty} ${unit}`, date, { batchId: ids && ids.length > 1 ? null : i.batch_id ?? null, batchIds: ids, product: p });
       const costPc = pcs ? sum(taken, (t) => Math.abs(t.pcs) * t.cost_per_pcs) / Math.abs(pcs) : p.cost_per_pcs;
-      const batch = taken.length === 1 ? await findOne('batches', { id: taken[0].batch_id }) : null;
+      const batch = taken.length === 1 ? taken[0] : null;   // its MRP and expected price came back with it
       const price = num(i.price);
       const disc_pct = Math.min(100, Math.max(0, num(i.disc_pct)));
       const disc = round2((qty * price * disc_pct) / 100);
@@ -761,14 +766,13 @@ export async function createSale(body, approve) {
       invoice_no, date, customer_id: customer?.id ?? null, customer_name: customerLabel(customer) || (body.customer_name || '').trim() || 'Walk-in customer',
       payment_type: paymentType, subtotal, discount, total, paid_at_sale: paid, cost_total, due_date, notes: body.notes || null,
     });
-    for (const l of lines) {
-      await insert('sale_items', {
-        sale_id: sale.id, product_id: l.p.id, code: l.p.code, name: l.p.name, unit: l.unit, qty: l.qty, pcs: l.pcs, price: l.price,
-        mrp_per_unit: l.mrp, expected_per_unit: l.expected, cost_per_unit: l.cost, line_total: l.line_total, disc: l.disc, disc_pct: l.disc_pct,
-        batch_id: l.batches.length === 1 ? l.batches[0].batch_id : null, batches: l.batches, no_stock_pcs: l.no_stock_pcs,
-        damaged: Boolean(l.damaged), damaged_cost: l.damaged_cost || 0, damaged_takes: l.damaged_takes || [],
-      });
-    }
+    // the bill's lines, all in one go
+    await insertAll('sale_items', lines.map((l) => ({
+      sale_id: sale.id, product_id: l.p.id, code: l.p.code, name: l.p.name, unit: l.unit, qty: l.qty, pcs: l.pcs, price: l.price,
+      mrp_per_unit: l.mrp, expected_per_unit: l.expected, cost_per_unit: l.cost, line_total: l.line_total, disc: l.disc, disc_pct: l.disc_pct,
+      batch_id: l.batches.length === 1 ? l.batches[0].batch_id : null, batches: l.batches, no_stock_pcs: l.no_stock_pcs,
+      damaged: Boolean(l.damaged), damaged_cost: l.damaged_cost || 0, damaged_takes: l.damaged_takes || [],
+    })));
     // the damaged returns belong to this bill (so cancelling it takes them off again)
     await updateMany('damaged', { ref: invoice_no, sale_id: null }, { $set: { sale_id: sale.id } });
     return { id: sale.id, short: lines.filter((l) => l.no_stock_pcs > 0) };

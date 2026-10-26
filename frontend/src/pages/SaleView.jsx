@@ -1,20 +1,28 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApi, lkr, money, niceDate, int, margin, pct, niceTime, seesCost } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Badge, StatusBadge, Modal } from '../components/ui.jsx';
 import { useAuth } from '../App.jsx';
+import { PrintChoiceModal } from '../components/Bill.jsx';
 
 /** Loads one bill — shared by the page and the pop-up. */
 function useSale(id) {
   const { data: s, error, reload } = useApi(`/sales/${id}`);
-  const reprint = () => window.open(`/print/sale/${s.id}`, '_blank');
-  return { s, error, reload, reprint };
+  return { s, error, reload };
 }
 
 const subtitleOf = (s) => (
   <>{niceDate(s.date)}{s.created_at ? ` · ${niceTime(s.created_at)}` : ''} · {s.customer_name} · <Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge> <StatusBadge status={s.pay_status} /></>
 );
 
-const ReprintButton = ({ onClick }) => <button className="btn btn-primary" onClick={onClick}><Icon name="print" /> Reprint</button>;
+/** Reprint: choose A5 or 80 mm — it prints on this page. */
+function ReprintButton({ s }) {
+  const [open, setOpen] = useState(false);
+  return <>
+    <button className="btn btn-primary" onClick={() => setOpen(true)}><Icon name="print" /> Reprint</button>
+    {open && <PrintChoiceModal sale={s} onClose={() => setOpen(false)} />}
+  </>;
+}
 
 /** The bill: items (per piece) and the summary. */
 function SaleDetails({ s }) {
@@ -83,10 +91,10 @@ function SaleDetails({ s }) {
 
 /** Pop-up view of a bill (Sales & Bills, customer page, dashboard): just the bill, Reprint and Close. */
 export function SaleModal({ id, onClose }) {
-  const { s, error, reload, reprint } = useSale(id);
+  const { s, error, reload } = useSale(id);
   return (
     <Modal size="xl" title={s ? `Bill ${s.invoice_no}` : 'Bill'} subtitle={s ? subtitleOf(s) : null} onClose={onClose}
-      footer={<><span className="spacer" /><button className="btn" onClick={onClose}>Close</button>{s && <ReprintButton onClick={reprint} />}</>}>
+      footer={<><span className="spacer" /><button className="btn" onClick={onClose}>Close</button>{s && <ReprintButton s={s} />}</>}>
       {error ? <ErrorBox error={error} onRetry={reload} /> : !s ? <Loading /> : <SaleDetails s={s} />}
     </Modal>
   );
@@ -95,12 +103,12 @@ export function SaleModal({ id, onClose }) {
 /** Full page (/sales/:id), still used by links from other screens. */
 export default function SaleView() {
   const { id } = useParams();
-  const { s, error, reload, reprint } = useSale(id);
+  const { s, error, reload } = useSale(id);
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!s) return <Loading />;
   return (
     <div>
-      <PageHeader back="/sales" title={`Bill ${s.invoice_no}`} subtitle={subtitleOf(s)} actions={<ReprintButton onClick={reprint} />} />
+      <PageHeader back="/sales" title={`Bill ${s.invoice_no}`} subtitle={subtitleOf(s)} actions={<ReprintButton s={s} />} />
       <SaleDetails s={s} />
     </div>
   );

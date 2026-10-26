@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useApi, money, lkr, inr, supMoney, niceDate, niceTime, int } from '../lib.js';
 import { Loading, Icon } from '../components/ui.jsx';
 import { useSettings } from '../App.jsx';
+import { BillDoc, billDesign, billPageCss } from '../components/Bill.jsx';
 import { StickerSheet, stickerDesign, stickerPageCss, stickerCC, sizesText, STICKER_PRINT_KEY } from '../components/Stickers.jsx';
 
 function PrintBar() {
@@ -39,43 +40,17 @@ function ShopHead({ title, no, date, time }) {
 export function PrintSale() {
   const { id } = useParams();
   const { settings } = useSettings();
+  const d = billDesign(settings);
+  const want = new URLSearchParams(window.location.search).get('size');
+  const size = want === '80' || want === 'a5' ? want : d.default_size;
   const { data: s } = useApi(`/sales/${id}`);
   useAutoPrint(!!s);
   if (!s) return <Loading />;
-  const hasDisc = s.items.some((i) => i.disc > 0);
   return (
     <>
+      <style>{billPageCss(size)}</style>
       <PrintBar />
-      <div className="print-page">
-        <ShopHead title={s.status === 'void' ? 'CANCELLED BILL' : s.total < 0 ? (s.payment_type === 'credit' ? 'RETURN · CREDIT NOTE' : 'RETURN · CASH REFUND') : s.payment_type === 'credit' ? 'CREDIT INVOICE' : 'CASH BILL'} no={s.invoice_no} date={s.date} time={s.created_at} />
-        <div className="print-meta">
-          <div><div className="muted">Bill to</div><b>{s.customer_name}</b>{s.customer_person && <div>{s.customer_person}</div>}{s.customer_address && <div>{s.customer_address}</div>}{s.customer_phone && <div>{s.customer_phone}</div>}</div>
-          {s.payment_type === 'credit' && s.total >= 0 && <div className="right"><div className="muted">Payment due</div><b>{niceDate(s.due_date)}</b></div>}
-        </div>
-        <table>
-          <thead><tr><th>#</th><th>Item</th><th className="right">Qty</th><th className="right">Rate</th>{hasDisc && <th className="right">Dis</th>}<th className="right">Amount</th></tr></thead>
-          <tbody>{s.items.map((i, idx) => (
-            <tr key={i.id}><td>{idx + 1}</td><td>{i.name}<div className="muted small">{i.code}</div></td><td className="right">{int(i.pcs)} pcs</td>
-              <td className="right">{money(i.price)}</td>
-              {hasDisc && <td className="right">{i.disc ? `${i.disc_pct}%` : '—'}</td>}<td className="right">{money(i.line_total)}</td></tr>
-          ))}</tbody>
-        </table>
-        <div className="print-totals">
-          <div><span>Subtotal</span><span>{money(s.subtotal)}</span></div>
-          {s.discount > 0 && <div><span>Discount</span><span>- {money(s.discount)}</span></div>}
-          <div className="grand"><span>Total</span><span>{lkr(s.total)}</span></div>
-          {s.payment_type === 'credit' && s.total >= 0 && <>
-            <div><span>Paid</span><span>{money(s.paid_at_sale)}</span></div>
-            <div><b>Balance on this bill</b><b>{money(s.total - s.paid_at_sale)}</b></div>
-            {s.customer_balance != null && <div><span>Total outstanding</span><span>{lkr(s.customer_balance)}</span></div>}
-          </>}
-        </div>
-        <div className="print-foot">
-          <div className="sign">Customer signature</div>
-          <div className="sign">For {settings.shop_name}</div>
-        </div>
-        <p className="center muted mt">{settings.invoice_footer}</p>
-      </div>
+      <div className={`bill-paper paper-${size} bill-open`}><BillDoc s={s} size={size} d={d} settings={settings} /></div>
     </>
   );
 }

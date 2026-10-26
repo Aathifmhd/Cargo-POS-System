@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers, costGroups, seesCost, codeOf } from '../lib.js';
 import { Icon, Modal, Field, NumInput, DateInput, CostBadge, useToast, Loading, useListKeys } from '../components/ui.jsx';
+import { printBill, billDesign, SizeChoice, PrintChoiceModal } from '../components/Bill.jsx';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 import { isAdmin, isSuper, custName, custPerson, niceTime, costCode } from '../lib.js';
@@ -394,10 +395,11 @@ export default function POS() {
       await complete('credit', { paid, due });
     } catch (e) { toast(e.message, 'error'); }
   };
+  const [reprinting, setReprinting] = useState(null);   // the last bill, to print again
   const reprint = () => {
     const id = readLS(LAST_KEY, null);
     if (!id) return toast('No bill made on this computer yet', 'error');
-    window.open(`/print/sale/${id}`, '_blank');
+    api.get(`/sales/${id}`).then(setReprinting).catch((e) => toast(e.message, 'error'));
   };
 
   /* ---------- keyboard ---------- */
@@ -647,6 +649,7 @@ export default function POS() {
           <p className="muted small mt">Anywhere in the app: <kbd>F2</kbd> Dashboard · <kbd>F3</kbd> New sale · <kbd>F9</kbd> Bills · <kbd>F7</kbd> Take a payment</p>
         </Modal>
       )}
+      {reprinting && <PrintChoiceModal sale={reprinting} onClose={() => { setReprinting(null); toCode(); }} />}
       {done && (
         <DoneModal sale={done.sale} change={done.change} onClose={() => { setDone(null); toCode(); }}
           onView={() => navigate(`/sales/${done.sale.id}`)} footer={settings.invoice_footer} />
@@ -899,48 +902,38 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
   );
 }
 
-/* ---------------- bill saved: a little printer prints the receipt ---------------- */
-function DoneModal({ sale, change, onClose, onView }) {
-  const [printed, setPrinted] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setPrinted(true), 1900); return () => clearTimeout(t); }, []);
-  useEffect(() => {
-    const k = (e) => { if (e.key.toLowerCase() === 'p' && !typingIn(document.activeElement)) { e.preventDefault(); window.open(`/print/sale/${sale.id}`, '_blank'); } };
-    window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
-  }, [sale.id]);
+/* ---------------- bill saved: print it — A5 (usual) or 80 mm, ← → to choose, Enter to print ---------------- */
+export function DoneModal({ sale, change, onClose, onView }) {
+  const { settings } = useSettings();
+  const toast = useToast();
+  const [size, setSize] = useState(() => billDesign(settings).default_size);
+  const [busy, setBusy] = useState(false);
   const credit = sale.payment_type === 'credit';
   const refund = sale.total < 0;
+  const print = async (sz) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const how = await printBill(sale, sz, settings);
+      if (how === 'sent') toast(`${sale.invoice_no} sent to the ${sz === '80' ? '80 mm' : 'A5'} printer`);
+    } catch (e) { toast(e.message, 'error'); }
+    onClose();   // on to the next sale
+  };
   return (
-    <Modal size="sm" title={printed ? 'Bill saved ✔' : 'Printing bill…'} subtitle={`${sale.invoice_no} · ${sale.customer_name}`} onClose={onClose}
+    <Modal size="md" title="Bill saved ✔ — print it?" subtitle={`${sale.invoice_no} · ${sale.customer_name}`} onClose={onClose}
       footer={<>
         <button className="btn" onClick={onView}>View bill</button>
-        <button className="btn" onClick={() => window.open(`/print/sale/${sale.id}`, '_blank')}><Icon name="print" /> Print (P)</button>
-        <button className="btn btn-primary" autoFocus onClick={onClose}>Next sale (Enter)</button>
+        <button className="btn" onClick={onClose}>Don't print (Esc)</button>
+        <span className="spacer" />
+        <button className="btn btn-primary" disabled={busy} onClick={() => print(size)}><Icon name="print" /> Print {size === '80' ? '80 mm' : 'A5'} (Enter)</button>
       </>}>
-      <div className={`printer-scene ${printed ? 'done' : ''}`} aria-hidden="true">
-        <div className="printer">
-          <div className="printer-top"><span className="printer-light" /></div>
-          <div className="printer-slot" />
-        </div>
-        <div className="receipt-clip">
-          <div className="receipt">
-            <div className="rc-head">{sale.invoice_no}</div>
-            <div className="rc-sub">{niceDate(sale.date)}{sale.created_at ? ` · ${niceTime(sale.created_at)}` : ''} · {sale.customer_name}</div>
-            <div className="rc-lines">{sale.items.slice(0, 4).map((i) => (
-              <div key={i.id} className="rc-line"><span>{i.qty} × {i.name}</span><span>{money(i.line_total)}</span></div>
-            ))}{sale.items.length > 4 && <div className="rc-line muted"><span>+ {sale.items.length - 4} more</span><span /></div>}</div>
-            <div className="rc-total"><span>TOTAL</span><span>{money(sale.total)}</span></div>
-            <div className="rc-foot">{refund ? (credit ? 'RETURN · TO ACCOUNT' : 'REFUND · CASH') : credit ? 'ON ACCOUNT' : 'PAID · CASH'}</div>
-            <div className="rc-zigzag" />
-          </div>
-        </div>
+      <SizeChoice value={size} onChange={setSize} onPick={print} />
+      <div className="done-sum">
+        <div><span>{refund ? 'Refund' : 'Bill total'}</span><b>{lkr(refund ? -sale.total : sale.total)}</b></div>
+        <div><span>Type</span><b>{refund ? (credit ? 'Off their account' : 'Cash given back') : credit ? 'On account' : 'Cash'}</b></div>
+        {credit && !refund && <><div><span>Paid now</span><b>{lkr(sale.paid_at_sale)}</b></div><div><span>Due on</span><b>{niceDate(sale.due_date)}</b></div></>}
+        {change != null && <div className="total"><span>Balance to give</span><b>{lkr(change)}</b></div>}
       </div>
-      <dl className={`kv done-kv ${printed ? 'show' : ''}`}>
-        <dt>{refund ? 'Refund' : 'Bill total'}</dt><dd>{lkr(refund ? -sale.total : sale.total)}</dd>
-        <dt>Type</dt><dd>{refund ? (credit ? 'Off their account' : 'Cash given back') : credit ? 'On account' : 'Cash'}</dd>
-        {credit && !refund && <><dt>Paid now</dt><dd>{lkr(sale.paid_at_sale)}</dd><dt>Due on</dt><dd>{niceDate(sale.due_date)}</dd></>}
-        {change != null && <><dt className="total">Balance to give</dt><dd className="total">{lkr(change)}</dd></>}
-      </dl>
     </Modal>
   );
 }

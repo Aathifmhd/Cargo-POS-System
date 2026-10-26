@@ -1389,3 +1389,64 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 /* manual stickers: the rows of inputs */
 .sticker-rows td { padding-left: 4px; padding-right: 4px; vertical-align: top; }
 .sticker-rows .input { width: 100%; min-width: 0; }
+
+/* =========================================================
+   Printed bills: A5 landscape and 80 mm (components/Bill.jsx)
+   ========================================================= */
+.bill { color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; line-height: 1.3; box-sizing: border-box; }
+.bill .right { text-align: right; }
+.bill .center { text-align: center; }
+.bill .b-muted { color: #555; }
+.bill .b-shop { font-size: 1.6em; font-weight: 800; }
+.bill .b-tag { font-weight: 600; }
+.bill .b-title { font-weight: 800; letter-spacing: .04em; }
+.bill-a5 { width: 100%; min-height: 134mm; display: flex; flex-direction: column; }
+.bill-a5 .b-fill { flex: 1; min-height: 3mm; }
+.bill-a5 .b-head { display: flex; justify-content: space-between; gap: 6mm; border-bottom: 0.5mm solid #000; padding-bottom: 2mm; }
+.bill-a5 .b-title { font-size: 1.25em; }
+.bill-a5 .b-meta { display: flex; justify-content: space-between; gap: 6mm; margin: 2mm 0; }
+.bill-a5 .b-items { width: 100%; border-collapse: collapse; }
+.bill-a5 .b-items th { background: #eee; font-size: .85em; text-transform: uppercase; text-align: left; padding: 1.2mm 1.5mm; }
+.bill-a5 .b-items td { border-bottom: 0.2mm solid #ccc; padding: 1.2mm 1.5mm; }
+.bill-a5 .b-items th.right, .bill-a5 .b-items td.right { text-align: right; white-space: nowrap; }
+.bill-a5 .b-bottom { display: grid; gap: 3mm; margin-top: 2.5mm; break-inside: avoid; }
+.bill-a5 .b-signs { display: flex; justify-content: space-between; margin-top: 9mm; }
+.bill-a5 .b-signs div { border-top: 0.2mm solid #000; padding-top: 1mm; width: 45mm; text-align: center; font-size: .85em; }
+.bill-a5 .b-totals { width: 72mm; margin-left: auto; }
+.bill-a5 .b-totals div { display: flex; justify-content: space-between; padding: .6mm 0; }
+.bill-a5 .b-thanks { text-align: center; border-top: 0.2mm solid #999; padding-top: 1.5mm; color: #333; }
+.bill-a5 .b-grand { font-size: 1.3em; font-weight: 800; border-top: 0.4mm solid #000; padding-top: 1.2mm !important; }
+.bill-80 { width: 80mm; padding: 3mm 4mm; }
+.bill-80 .b-shop { font-size: 1.4em; }
+.bill-80 .b-title { margin: 1.5mm 0; }
+.bill-80 .b-row { display: flex; justify-content: space-between; gap: 2mm; }
+.bill-80 .b-rule { border-top: 0.3mm dashed #000; margin: 1.5mm 0; }
+.bill-80 .b-line { margin-bottom: 1mm; }
+.bill-80 .b-grand { font-size: 1.3em; font-weight: 800; margin-top: 1mm; }
+/* on screen: the bill on its paper (Settings preview, /print/sale) */
+.bill-paper { flex: none; background: #fff; box-shadow: 0 4px 18px rgba(0,0,0,.12); border-radius: 4px; margin: 0 auto; overflow: hidden; }
+.bill-paper.paper-a5 { width: 210mm; min-height: 148mm; padding: 7mm; box-sizing: border-box; }
+.bill-paper.paper-80 { width: 80mm; }
+.bill-preview { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: grid; gap: 10px; overflow-x: auto; }
+.bill-preview .bill-paper.paper-a5 { zoom: .62; }
+@media print { .bill-paper { box-shadow: none; border-radius: 0; padding: 0 !important; min-height: 0; width: auto; } }
+/* choosing A5 or 80 mm */
+.size-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.size-card { display: grid; justify-items: center; gap: 4px; padding: 16px 10px; border: 2px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); cursor: pointer; font: inherit; transition: border-color .12s, background .12s; }
+.size-card b { font-size: 18px; }
+.size-card.on { border-color: var(--primary); background: var(--primary-soft, var(--surface-2)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent); }
+.size-shape { display: block; border: 2px solid currentColor; border-radius: 3px; opacity: .7; margin-bottom: 6px; }
+.size-shape.size-a5 { width: 52px; height: 37px; }
+.size-shape.size-80 { width: 22px; height: 44px; }
+
+/* New Sale: bill saved — the summary under the A5 / 80 mm choice */
+.done-sum { display: grid; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.done-sum > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.done-sum span { color: var(--muted); font-size: 13px; }
+.done-sum b { font-variant-numeric: tabular-nums; }
+.done-sum .total { margin-top: 4px; padding-top: 10px; border-top: 1px dashed var(--border-strong); }
+.done-sum .total span { color: var(--text); font-weight: 700; font-size: 16px; }
+.done-sum .total b { font-size: 18px; font-weight: 800; }
+
+.size-card { grid-template-rows: 50px auto auto; align-items: center; }
+.size-shape { margin-bottom: 0; align-self: center; }

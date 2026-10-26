@@ -8,6 +8,7 @@ import DownloadReports from '../components/DownloadReports.jsx';
 import StockTake from '../components/StockTake.jsx';
 import { Rules as ApprovalRules } from './Users.jsx';
 import { StickerDesign } from '../components/Stickers.jsx';
+import { BillDesign, PrinterSettings } from '../components/Bill.jsx';
 
 // The settings menu, grouped under headings
 const GROUPS = [
@@ -16,6 +17,8 @@ const GROUPS = [
     items: [
       { id: 'shop', icon: 'factory', label: 'Shop details', desc: 'Name, address and phone printed on bills.' },
       { id: 'bills', icon: 'receipt', label: 'Bills & numbering', desc: 'Bill and GRN number prefixes, and the message at the bottom of bills.' },
+      { id: 'billdesign', icon: 'receipt', label: 'Bill design', desc: 'The printed bill — A5 landscape (usual) and the 80 mm receipt: what is printed and how big.' },
+      { id: 'printers', icon: 'print', label: 'Printers', desc: 'How this computer prints bills — A5 and 80 mm printers.' },
     ],
   },
   {
@@ -123,6 +126,8 @@ export default function Settings() {
               </div>
             )}
 
+            {section === 'billdesign' && <BillDesign f={f} set={set} SaveBar={SaveBar} />}
+            {section === 'printers' && <PrinterSettings />}
             {section === 'stickers' && <StickerDesign f={f} set={set} SaveBar={SaveBar} settings={settings} />}
             {section === 'catalog' && <CatalogEditor />}
 

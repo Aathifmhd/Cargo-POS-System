@@ -134,6 +134,16 @@ export async function insert(name, doc) {
   await col(name).insertOne({ ...full }, opt());
   return full;
 }
+/** Insert several documents of one collection: one call for their ids, one for the documents. Returns them (without _id). */
+export async function insertAll(name, docs) {
+  if (!docs.length) return [];
+  const r = await col('counters').findOneAndUpdate({ _id: name }, { $inc: { seq: docs.length } }, { ...opt(), upsert: true, returnDocument: 'after' });
+  const first = r.seq - docs.length + 1;
+  const now = stamp();
+  const full = docs.map((doc, i) => ({ ...DEFAULTS[name], created_at: now, ...doc, id: first + i }));
+  await col(name).insertMany(full.map((d) => ({ ...d })), opt());
+  return full;
+}
 /** Make sure the id counter is at least `n` (used after copying data in). */
 export const bumpCounter = (name, n) => col('counters').updateOne({ _id: name }, { $max: { seq: n } }, { upsert: true });
 
@@ -315,8 +325,8 @@ export const batchOrder = (a, b) => (a.date === b.date ? a.id - b.id : a.date < 
 const perPc = (v, pps) => round2((Number(v) || 0) / (pps || 1));
 
 /** A product's cost: the average of the pieces left in its batches (or the newest batch's cost when none are left). */
-export async function recomputeProductCost(productId) {
-  const batches = (await find('batches', { product_id: productId, kind: { $ne: 'short' } })).sort(batchOrder);
+export async function recomputeProductCost(productId, known = null) {
+  const batches = (known ? known.filter((b) => b.kind !== 'short') : await find('batches', { product_id: productId, kind: { $ne: 'short' } })).sort(batchOrder);
   if (!batches.length) return;
   const left = batches.filter((b) => b.left_pcs > 0);
   const qty = sum(left, (b) => b.left_pcs);
@@ -374,10 +384,11 @@ export async function settleShort(productId) {
  * `newBatch` (e.g. opening stock) — or a product with no batch yet — starts a new one.
  * Returns where the pieces went: [{ batch_id, pcs, cost_per_pcs }] (pcs negative when taken out).
  */
-export async function moveStock(productId, pcs, type, ref, note, date = todayStr(), { batchId = null, batchIds = null, newBatch = null, reasonCode = null } = {}) {
+export async function moveStock(productId, pcs, type, ref, note, date = todayStr(), { batchId = null, batchIds = null, newBatch = null, reasonCode = null, product = null } = {}) {
   pcs = Math.round(pcs);
   if (!pcs) return [];
-  const p = await findOne('products', { id: productId });
+  // the product can be handed in (already read for the bill) — saves a trip to the database
+  const p = product && product.id === productId ? product : await findOne('products', { id: productId });
   if (!p) fail('Product not found', 404);
   const batches = (await find('batches', { product_id: productId })).sort(batchOrder);
   // several batches at the same cost (one row on the screens): taken from the oldest of them first
@@ -422,9 +433,15 @@ export async function moveStock(productId, pcs, type, ref, note, date = todayStr
     await col('batches').updateOne({ id: m.b.id }, { $inc: { left_pcs: m.pcs, ...(m.b.kind !== 'grn' && m.pcs > 0 && !chosen ? { in_pcs: m.pcs } : {}) } }, opt());
     await logMove(productId, m.pcs, type, ref, note, date, m.b.id, reasonCode);
   }
-  if (pcs > 0) await settleShort(productId);   // stock coming in makes good what was sold without stock
-  await recomputeProductCost(productId);
-  return moves.map((m) => ({ batch_id: m.b.id, pcs: m.pcs, cost_per_pcs: m.b.cost_per_pcs, short: m.b.kind === 'short' }));
+  if (pcs > 0) {
+    await settleShort(productId);   // stock coming in makes good what was sold without stock
+    await recomputeProductCost(productId);
+  } else {
+    // pieces going out: the batches read above, with what was just taken from them
+    const after = batches.map((b) => ({ ...b, left_pcs: b.left_pcs + sum(moves.filter((m) => m.b.id === b.id), (m) => m.pcs) }));
+    await recomputeProductCost(productId, after);
+  }
+  return moves.map((m) => ({ batch_id: m.b.id, pcs: m.pcs, cost_per_pcs: m.b.cost_per_pcs, short: m.b.kind === 'short', mrp_per_pcs: m.b.mrp_per_pcs, expected_per_pcs: m.b.expected_per_pcs }));
 }
 
 /**

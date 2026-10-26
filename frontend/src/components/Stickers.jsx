@@ -185,6 +185,7 @@ export function ManualStickerModal({ onClose }) {
   const narrow = useNarrow();   // a phone: one card a sticker instead of the table
   const blank = () => ({ key: Date.now() + Math.random(), code: '', name: '', cc: '', pcs: '', sizes: '', count: 1, found: null });
   const [rows, setRows] = useState(() => [blank()]);
+  const [openKey, setOpenKey] = useState(null);   // phone: the sticker card that is open (the others are folded); null = the last one
   const upd = (key, patch) => setRows((l) => l.map((x) => (x.key === key ? { ...x, ...patch } : x)));
   // a product code typed in: fill in the rest from the product
   const lookUp = (r, code) => {
@@ -196,7 +197,12 @@ export function ManualStickerModal({ onClose }) {
     const cc = p.cost_code && d.cc_of !== 'set' ? p.cost_code : stickerCC({ landed_per_pcs_lkr: p.cost_per_pcs || 0, pcs_per_set: p.pcs_per_set }, d, settings);
     upd(r.key, { code: p.code, name: p.name, cc, pcs: p.pcs_per_set || 1, sizes: sizesText(p.sizes), found: true });
   };
-  const addRow = () => setRows((l) => [...l, blank()]);
+  const addRow = () => {
+    const row = blank();
+    setRows((l) => [...l, row]);
+    setOpenKey(row.key);   // phone: the stickers before it fold up
+    if (narrow) setTimeout(() => document.querySelector('.msk-card.open')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+  };
   const filled = rows.filter((r) => String(r.code).trim() && n(r.count) > 0);
   const total = filled.reduce((t, r) => t + Math.round(n(r.count)), 0);
   const print = () => {
@@ -221,11 +227,23 @@ export function ManualStickerModal({ onClose }) {
         footer={<><button className="btn" onClick={onClose}>Close</button>
           <button className="btn btn-primary" disabled={!total} onClick={print}><Icon name="print" /> Print {int(total)} sticker{total === 1 ? '' : 's'}</button></>}>
         <div className="msk-list">
-          {rows.map((r, idx) => (
-            <div key={r.key} className="msk-card">
+          {rows.map((r, idx) => (openKey ?? rows[rows.length - 1].key) !== r.key ? (
+            /* folded: one line — tap it to open (and fold the open one) */
+            <div key={r.key} className="msk-card folded" role="button" onClick={() => setOpenKey(r.key)}>
+              <span className="msk-no">{idx + 1}</span>
+              <span className="msk-sum">
+                <b>{String(r.code).trim() || 'No product yet'}</b>
+                {r.name && <small>{r.name}</small>}
+              </span>
+              <span className="msk-x">× {int(Math.round(n(r.count)))}</span>
+              {rows.length > 1 && <button type="button" className="btn btn-sm btn-icon btn-ghost" title="Remove"
+                onClick={(e) => { e.stopPropagation(); setRows((x) => x.filter((y) => y.key !== r.key)); }}><Icon name="trash" size={16} /></button>}
+            </div>
+          ) : (
+            <div key={r.key} className="msk-card open">
               <div className="msk-head">
                 <b>Sticker {idx + 1}</b>
-                {rows.length > 1 && <button type="button" className="btn btn-sm btn-icon btn-ghost" title="Remove" onClick={() => setRows((x) => x.filter((y) => y.key !== r.key))}><Icon name="trash" size={16} /></button>}
+                {rows.length > 1 && <button type="button" className="btn btn-sm btn-icon btn-ghost" title="Remove" onClick={() => { setRows((x) => x.filter((y) => y.key !== r.key)); setOpenKey(null); }}><Icon name="trash" size={16} /></button>}
               </div>
               <Field label="Product code">
                 <input className="input msk-code" value={r.code} placeholder="e.g. P0016" autoCapitalize="characters" autoComplete="off" enterKeyHint="done"

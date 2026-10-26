@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers, costGroups, seesCost, codeOf } from '../lib.js';
 import { Icon, Modal, Field, NumInput, DateInput, CostBadge, useToast, Loading, useListKeys } from '../components/ui.jsx';
 import { printBill, billDesign, SizeChoice, PrintChoiceModal } from '../components/Bill.jsx';
+import { useNarrow } from '../components/mobile.js';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 import { isAdmin, isSuper, custName, custPerson, niceTime, costCode } from '../lib.js';
@@ -71,19 +72,6 @@ const selectAll = {
   onBlur: (e) => { delete e.target.dataset.fresh; },
 };
 const typingIn = (el) => el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
-
-/** True on a phone-sized screen (follows the window as it is resized or turned). */
-function useNarrow(width = 900) {
-  const q = `(max-width: ${width}px)`;
-  const [on, setOn] = useState(() => typeof window !== 'undefined' && window.matchMedia(q).matches);
-  useEffect(() => {
-    const m = window.matchMedia(q);
-    const f = () => setOn(m.matches);
-    m.addEventListener('change', f);
-    return () => m.removeEventListener('change', f);
-  }, [q]);
-  return on;
-}
 
 export default function POS() {
   const toast = useToast();
@@ -509,7 +497,7 @@ export default function POS() {
   );
 
   return (
-    <div className="till">
+    <div className={`till ${lines.length ? 'has-lines' : ''}`}>
       {/* ================= HEADER BAND ================= */}
       <div className="till-head">
 
@@ -680,6 +668,10 @@ export default function POS() {
       {priceHist && <PriceHistoryModal product={priceHist.product} customer={customer}
         onUse={cur && cur.id === priceHist.product.id ? (price) => { setEntry((x) => ({ ...x, price: Number(price).toFixed(2) })); setPriceHist(null); focus('tPrice'); } : null}
         onClose={() => setPriceHist(null)} />}
+      {/* phones: Take Payment always one tap away */}
+      {narrow && lines.length > 0 && !modal && (
+        <button className="pay-bar" onClick={openPay}><b>TAKE PAYMENT</b><span>{lkr(T.net)}</span></button>
+      )}
       {reprinting && <PrintChoiceModal sale={reprinting} onClose={() => { setReprinting(null); toCode(); }} />}
       {done && (
         <DoneModal sale={done.sale} change={done.change} onClose={() => { setDone(null); toCode(); }}

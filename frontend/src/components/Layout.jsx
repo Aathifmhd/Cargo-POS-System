@@ -4,8 +4,17 @@ import { Icon, ThemeSwitch, Modal, useToast } from './ui.jsx';
 import { ChangePasswordModal } from './auth.jsx';
 import { api, isAdmin, isSuper, can, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime } from '../lib.js';
 import { useAuth, useFx, useSettings } from '../App.jsx';
+import { useTableLabels } from './mobile.js';
 
 const BACKUP_SNOOZE = 'cargo-backup-snooze';   // the day "Remind me tomorrow" was pressed
+
+/** Phones: the tab bar at the bottom of the screen. */
+const BOTTOM = [
+  { to: '/', icon: 'dashboard', label: 'Home', end: true },
+  { to: '/sales', icon: 'receipt', label: 'Bills' },
+  { to: '/pos', icon: 'cart', label: 'New Sale', primary: true },
+  { to: '/stock', icon: 'box', label: 'Stock' },
+];
 
 const NAV = [
   { to: '/action-center', icon: 'bell', label: 'Action Center', perm: 'action_center' },
@@ -42,6 +51,8 @@ export default function Layout() {
   const navigate = useNavigate();
 
   useEffect(() => setOpen(false), [location.pathname]);
+  const atPos = location.pathname === '/pos';   // New Sale has its own buttons (no tab bar)
+  useTableLabels();   // phones: tables shown as cards, each value with its column's name
 
   /*
    * Monthly backup reminder (admins): from the 1st of each month until a full backup is downloaded that month.
@@ -173,13 +184,27 @@ export default function Layout() {
         </div>
       </aside>
       <div className="scrim" onClick={() => setOpen(false)} />
-      <main className="main">
+      <main className={`main ${atPos ? 'on-pos' : ''}`}>
         <div className="mobile-bar">
-          <button className="btn btn-icon btn-ghost" onClick={() => setOpen(true)}><Icon name="menu" /></button>
+          <button className="btn btn-icon btn-ghost" onClick={() => setOpen(true)} aria-label="Menu"><Icon name="menu" /></button>
           <b>{settings.shop_name}</b>
         </div>
         <Outlet />
       </main>
+      {/* phones: the daily jobs at the thumb; everything else is under Menu (not on New Sale — it has its own buttons) */}
+      {!atPos && (
+        <nav className="bottom-nav" aria-label="Main">
+          {BOTTOM.filter((i) => !i.perm || can(user, i.perm)).map((i) => (
+            <NavLink key={i.to} to={i.to} end={i.end} className={({ isActive }) => `bn-item ${isActive ? 'active' : ''} ${i.primary ? 'primary' : ''}`}>
+              <Icon name={i.icon} size={i.primary ? 22 : 20} /><span>{i.label}</span>
+            </NavLink>
+          ))}
+          <button type="button" className="bn-item" onClick={() => setOpen(true)}>
+            <Icon name="menu" size={20} /><span>Menu</span>
+            {attn > 0 && <i className="bn-dot" />}
+          </button>
+        </nav>
+      )}
       {pw && <ChangePasswordModal onClose={() => setPw(false)} />}
       {needBackup && (
         <Modal size="sm" title="Time for the monthly backup" subtitle={new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })} onClose={snooze}

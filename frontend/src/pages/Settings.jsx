@@ -61,7 +61,11 @@ export default function Settings() {
   const section = ALL.some((i) => i.id === sectionPicked && visible(i)) ? sectionPicked : ALL.find(visible).id;
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v && v.target ? v.target.value : v }));
 
+  // phones: the list of settings, or one section on its own screen
+  const [panel, setPanel] = useState(false);
   const open = (id) => {
+    setPanel(true);
+    window.scrollTo(0, 0);
     setSection(id);
     try { localStorage.setItem(SECTION_KEY, id); } catch { /* storage unavailable */ }
   };
@@ -83,7 +87,7 @@ export default function Settings() {
   return (
     <div>
       <PageHeader title="Settings" subtitle="Shop details, products, appearance and backups — arranged by section." />
-      <div className="set-layout">
+      <div className={`set-layout ${panel ? 'show-panel' : ''}`}>
         <nav className="set-nav">
           {GROUPS.filter((g) => g.items.some(visible)).map((g) => (
             <div key={g.heading} className="set-group">
@@ -99,6 +103,7 @@ export default function Settings() {
 
         <section className="card set-panel">
           <div className="set-head">
+            <button type="button" className="set-back" onClick={() => { setPanel(false); window.scrollTo(0, 0); }}><Icon name="back" size={16} /> All settings</button>
             <div className="set-crumb">{cur.group}</div>
             <h2>{cur.label}</h2>
             <p className="muted">{cur.desc}</p>

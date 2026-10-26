@@ -1477,3 +1477,164 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
   .modal-foot .btn { flex: 1 1 auto; justify-content: center; }
 }
 .till-hitwrap.mobile td.d { min-width: 130px; }
+
+/* =========================================================
+   Mobile (phones) — one set of patterns for the whole system
+   · a top bar and a bottom tab bar (Home, Bills, New Sale, Stock, Menu)
+   · tables become cards: each row a card, each value with its column's name (components/mobile.js)
+   · pop-ups become bottom sheets: full width, the content scrolls, the buttons stay at the bottom
+   · number cards two to a row; filters scroll sideways; boxes at 16px so the phone does not zoom in
+   ========================================================= */
+.bottom-nav { display: none; }
+@media (max-width: 860px) {
+  .main { padding: 0 12px calc(84px + env(safe-area-inset-bottom)); }
+  .main.on-pos { padding-bottom: 16px; }
+  .mobile-bar { position: sticky; top: 0; z-index: 40; margin: 0 -12px 12px; padding: 8px 12px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  .mobile-bar b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* bottom tab bar */
+  .bottom-nav { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -6px 20px rgba(15, 23, 42, .08); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
+  .bn-item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 52px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px; font-weight: 650; text-decoration: none; border-radius: 12px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .bn-item.active { color: var(--primary-text, var(--primary)); }
+  .bn-item.active svg { color: var(--primary); }
+  .bn-item.primary { color: #fff; }
+  .bn-item.primary svg { color: #fff; }
+  .bn-item.primary::before { content: ''; position: absolute; inset: -14px 8px 14px; z-index: -1; border-radius: 18px; background: var(--primary); box-shadow: 0 6px 16px color-mix(in srgb, var(--primary) 40%, transparent); }
+  .bn-item.primary span { position: relative; top: 14px; color: var(--primary-text, var(--primary)); }
+  .bn-item.primary svg { position: relative; top: -6px; }
+  .bn-dot { position: absolute; top: 8px; right: calc(50% - 16px); width: 9px; height: 9px; border-radius: 50%; background: var(--red); border: 2px solid var(--surface); }
+
+  /* page header: title, then its buttons in a full-width row */
+  .page-header { gap: 10px; margin-bottom: 14px; }
+  .page-header h1 { font-size: 22px; }
+  .page-header p { font-size: 13px; }
+  .page-header > :last-child:not(:first-child) { width: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
+  .page-header > :last-child:not(:first-child) > .btn, .page-header > :last-child:not(:first-child) > a.btn { flex: 1 1 auto; justify-content: center; }
+
+  /* number cards: two to a row, compact */
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat { padding: 12px; gap: 10px; }
+  .stat .stat-icon { width: 32px; height: 32px; border-radius: 9px; }
+  .stat .stat-icon svg { width: 17px; height: 17px; }
+  .stat .stat-value { font-size: 17px; word-break: break-word; }
+  .stat .stat-label { font-size: 12px; }
+  .stat .stat-sub { font-size: 11.5px; }
+
+  /* filters and tabs scroll sideways; search is full width */
+  .segmented { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .segmented::-webkit-scrollbar, .tabs::-webkit-scrollbar { display: none; }
+  .segmented button { flex: none; white-space: nowrap; }
+  .toolbar { gap: 8px; }
+  .toolbar .search { min-width: 0; max-width: none; flex: 1 1 100%; }
+  .toolbar > .input, .toolbar > input[type="date"] { flex: 1 1 140px; width: auto !important; }
+
+  /* touch: 16px in boxes (no zoom on iPhone), bigger tap targets */
+  .input, select.input, textarea.input { font-size: 16px; }
+  .btn { min-height: 40px; }
+  .btn-sm { min-height: 34px; }
+  .card-head { flex-wrap: wrap; padding: 12px 14px; }
+  .card-body { padding: 14px; }
+
+  /* tables → cards */
+  .table thead { display: none; }
+  .table, .table tbody, .table tfoot { display: block; width: 100%; }
+  .table tr { display: block; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .table tbody tr:last-child { border-bottom: 0; }
+  /* label on the left; whatever the cell holds (one value, or a value and a line under it) stacked on the right */
+  .table td { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; align-items: baseline; justify-items: end; padding: 2px 0; border: 0; text-align: right; min-width: 0 !important; white-space: normal; }
+  .table td::before { content: attr(data-label); grid-column: 1; grid-row: 1 / span 8; align-self: start; max-width: 42vw; text-align: left; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding-top: 2px; }
+  .table td > * { grid-column: 2; min-width: 0; max-width: 100%; }
+  .table td[data-label=""]::before { content: none; }
+  .table td[data-label=""] { grid-template-columns: minmax(0, 1fr); }
+  .table td[data-label=""] > * { grid-column: 1; }
+  .table td .row, .table td .es-status { justify-content: flex-end; flex-wrap: wrap; }
+  .table td:first-child { display: block; text-align: left; font-size: 15px; padding-bottom: 6px; }
+  .table td:first-child::before { content: none; }
+  .table td:empty { display: none; }
+  .table td.right, .table th.right { text-align: right; }
+  .table tfoot tr { background: var(--surface-2); }
+  .table tbody tr.click:active { background: var(--row-hover); }
+  .table-wrap { overflow-x: visible; }
+
+  /* pop-ups → bottom sheets */
+  .modal-backdrop { padding: 0; align-items: flex-end; }
+  .modal, .modal-sm, .modal-md, .modal-lg, .modal-xl { max-width: none; border-radius: 18px 18px 0 0; max-height: calc(100dvh - 20px); display: flex; flex-direction: column; animation: sheet .2s ease-out; }
+  .modal-head { padding: 16px 16px 10px; position: relative; }
+  .modal-head::before { content: ''; position: absolute; top: 6px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 4px; background: var(--border-strong); }
+  .modal-head h2 { font-size: 18px; }
+  .modal-body { padding: 4px 16px 16px; overflow-y: auto; flex: 1 1 auto; -webkit-overflow-scrolling: touch; }
+  .modal-foot { border-radius: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
+  .modal-foot .spacer { display: none; }
+  .modal-foot .btn { flex: 1 1 auto; justify-content: center; }
+}
+@keyframes sheet { from { transform: translateY(30px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (max-width: 460px) {
+  .stats .stat .stat-icon { display: none; }
+  .stat { min-width: 0; }
+  .stat > div { min-width: 0; }
+  .stat .stat-value { font-size: clamp(14px, 4.3vw, 17px); overflow-wrap: anywhere; }
+}
+/* New Sale on a phone: each bill line a compact card — code and amount, the item, then qty · expected · price · discount and the buttons */
+@media (max-width: 860px) {
+  .till-tbl { display: block; min-width: 0 !important; width: 100%; }
+  .till-tbl thead { display: none; }
+  .till-tbl tbody { display: block; }
+  .till-tbl tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; grid-template-areas: "c c c c am" "d d d d d" "q mrp pr ds x"; gap: 2px 8px; padding: 10px 12px; border-bottom: 1px solid var(--t-line); }
+  .till-tbl td { display: block; padding: 0 !important; border: 0 !important; min-width: 0; text-align: left !important; white-space: normal; }
+  .till-tbl td:first-child { display: none; }
+  .till-tbl td.till-empty { display: block; grid-column: 1 / -1; text-align: center !important; padding: 18px 8px !important; }
+  .till-tbl td:nth-child(2) { grid-area: c; font-size: 12px; }
+  .till-tbl td.d { grid-area: d; }
+  .till-tbl td.d b { font-size: 14.5px; }
+  .till-tbl td.q { grid-area: q; }
+  .till-tbl td.mrp { grid-area: mrp; }
+  .till-tbl td.pr { grid-area: pr; }
+  .till-tbl td.ds { grid-area: ds; }
+  .till-tbl td.am { grid-area: am; text-align: right !important; font-size: 17px; }
+  .till-tbl td.x { grid-area: x; align-self: end; white-space: nowrap; }
+  .till-tbl td.q::before, .till-tbl td.mrp::before, .till-tbl td.pr::before, .till-tbl td.ds::before { content: attr(data-label); display: block; font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--t-steel); margin-top: 6px; }
+  .till-tbl td.x button { min-width: 38px; min-height: 36px; }
+  .till-tbl .ln-in { width: 100%; font-size: 16px; }
+}
+/* New Sale on a phone: a Take Payment bar fixed at the bottom of the screen while the bill has items */
+.pay-bar { display: none; }
+@media (max-width: 860px) {
+  .till.has-lines { margin-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .pay-bar { display: flex; position: fixed; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 45; align-items: center; justify-content: space-between; gap: 12px; min-height: 58px; padding: 10px 18px; border: 0; border-radius: 16px; background: var(--primary); color: #fff; font: inherit; box-shadow: 0 10px 28px rgba(16, 30, 60, .35); cursor: pointer; }
+  .pay-bar b { font-size: 15px; letter-spacing: .04em; }
+  .pay-bar span { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+}
+
+/* Settings on a phone: the list first; a section opens on its own screen with "‹ All settings" */
+.set-back { display: none; }
+@media (max-width: 860px) {
+  .set-layout .set-panel { display: none; }
+  .set-layout.show-panel .set-panel { display: block; }
+  .set-layout.show-panel .set-nav { display: none; }
+  .set-nav { flex-direction: column; gap: 14px; padding: 6px 4px; }
+  .set-group { flex: none; }
+  .set-link { padding: 12px 10px; font-size: 15px; }
+  .set-link::after { content: '›'; margin-left: auto; color: var(--muted); font-size: 20px; line-height: 1; }
+  .set-back { display: inline-flex; align-items: center; gap: 6px; margin: -4px 0 10px; padding: 6px 2px; border: 0; background: none; color: var(--primary-text, var(--primary)); font: inherit; font-weight: 700; cursor: pointer; }
+  .set-head { padding: 14px 16px 12px; }
+  .set-body { padding: 16px; }
+  .set-panel { min-height: 0; }
+  .set-form { max-width: none; }
+  .set-save { position: sticky; bottom: calc(76px + env(safe-area-inset-bottom)); background: var(--surface); z-index: 5; }
+}
+/* phones: the side menu scrolls to its last item; no keyboard hints on a touch screen */
+@media (max-width: 860px) {
+  .sidebar { height: 100dvh; overflow-y: auto; overscroll-behavior: contain; width: min(300px, 84vw); }
+  .sidebar .nav-link kbd { display: none; }
+  .nav-link { min-height: 44px; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .till kbd, .till .till-btn i, .sum-more i, .till-add i, .page-header kbd { display: none; }
+}
+/* list rows (Dashboard, pop-ups): the amount never breaks in two; the text beside it wraps instead */
+.list-row > :first-child { min-width: 0; }
+.list-row > b, .list-row > .mono, .list-row b.mono { white-space: nowrap; flex: none; }
+@media (max-width: 860px) {
+  .list-row { gap: 8px; }
+  .list-row .badge { flex: none; }
+}

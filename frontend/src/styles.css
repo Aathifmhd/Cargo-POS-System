@@ -1825,3 +1825,5 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .key-list .held-grn:active, .key-list .held-row:active { background: var(--row-hover); }
 }
 .key-list .held-row { cursor: pointer; }
+.key-list .held-grn { justify-content: flex-start; gap: 12px; }
+.key-list .held-grn .held-no { flex: none; }

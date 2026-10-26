@@ -57,7 +57,8 @@ function HeldGrns({ held, hasWork, onResume, onDelete }) {
     <div className="stack-s key-list">
       {held.map((h, idx) => (
         <div key={h.id} className={`list-row held-grn ${idx === hi ? 'on' : ''}`} onMouseEnter={() => setHi(idx)} onClick={() => onResume(h)} role="button" title="Carry on with this GRN">
-          <div><div className="t">{h.supplier}{h.invoice ? ` · invoice ${h.invoice}` : ''}</div>
+          <span className="held-no">{idx + 1}</span>
+          <div className="spacer"><div className="t">{h.supplier}{h.invoice ? ` · invoice ${h.invoice}` : ''}</div>
             <div className="s">{h.items} item{h.items === 1 ? '' : 's'} · held {new Date(h.at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{h.by ? ` by ${h.by}` : ''}</div></div>
           <button className="btn btn-sm btn-icon btn-ghost" tabIndex={-1} title="Delete" onClick={(e) => { e.stopPropagation(); onDelete(h); }}><Icon name="trash" size={15} /></button>
         </div>

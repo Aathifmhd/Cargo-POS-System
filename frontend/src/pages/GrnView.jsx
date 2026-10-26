@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, useApi, lkr, inr, supMoney, isLocalSup, money, niceDate, int, dueText, margin, pct } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, Modal, useToast } from '../components/ui.jsx';
 import { SupplierPaymentModal } from '../components/forms.jsx';
+import { StickerModal } from '../components/Stickers.jsx';
 
 /**
  * One GRN: items, costs, cargo charge and the supplier account.
@@ -13,6 +14,10 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
   const navigate = useNavigate();
   const { data: g, error, reload } = useApi(`/grns/${id}`);
   const [paying, setPaying] = useState(null);
+  // just saved on Receive Goods: ask about the stickers once
+  const location = useLocation();
+  const [stickers, setStickers] = useState(() => (location.state?.askStickers ? 'asked' : null));
+  const closeStickers = () => { setStickers(null); if (location.state?.askStickers) navigate(location.pathname, { replace: true, state: {} }); };
   const changed = () => { reload(); onChanged?.(); };
 
   if (error) return modal ? <Modal title="GRN" onClose={onClose}><ErrorBox error={error} onRetry={reload} /></Modal> : <ErrorBox error={error} onRetry={reload} />;
@@ -29,7 +34,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
     } catch (e) { toast(e.message, 'error'); }
   };
   const pay = async () => setPaying(await api.get(`/suppliers/${g.supplier_id}`));
-  const expectedValue = g.items.reduce((s, i) => s + (i.expected_per_set / (i.pcs_per_set || 1)) * Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + i.extra_pcs - i.short_pcs), 0);
+  const expectedValue = g.items.reduce((s, i) => s + (i.expected_per_set / (i.pcs_per_set || 1)) * Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + (i.odd_pcs || 0) + i.extra_pcs - i.short_pcs), 0);
 
   const title = `${g.grn_no} — ${g.supplier_name}`;
   const subtitle = <>Received {niceDate(g.date)} · <StatusBadge status={g.pay_status} /> {g.balance_inr > 0 && dueText(g.due_date)}</>;
@@ -37,6 +42,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
     <button className="btn btn-danger" onClick={del}><Icon name="trash" /> Delete</button>
     <button className="btn" onClick={() => navigate(`/grn/${g.id}/edit`)} title="Fix a GRN entered wrongly (Super Admin)"><Icon name="edit" /> Edit GRN</button>
     <button className="btn" onClick={() => window.open(`/print/grn/${g.id}`, '_blank')}><Icon name="print" /> Print GRN</button>
+    <button className="btn" onClick={() => setStickers('manual')} title="One sticker for each set"><Icon name="tag" /> Print stickers</button>
     {g.balance_inr > 0 && <button className="btn btn-primary" onClick={pay}><Icon name="wallet" /> Pay supplier</button>}
   </>;
 
@@ -135,6 +141,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
         </div>
       </div>
 
+      {stickers && <StickerModal grn={g} asked={stickers === 'asked'} onClose={closeStickers} />}
       {paying && <SupplierPaymentModal supplier={paying} bills={paying.bills} defaultGrnId={g.id} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); changed(); }} />}
   </>;
 

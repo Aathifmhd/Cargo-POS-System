@@ -24,7 +24,7 @@ import Settings from './pages/Settings.jsx';
 import Users from './pages/Users.jsx';
 import ActionCenter from './pages/ActionCenter.jsx';
 import Cheques from './pages/Cheques.jsx';
-import { PrintSale, PrintGrn } from './pages/Print.jsx';
+import { PrintSale, PrintGrn, PrintStickers } from './pages/Print.jsx';
 
 const SettingsCtx = createContext({ settings: {}, reload: () => {} });
 export const useSettings = () => useContext(SettingsCtx);
@@ -98,6 +98,7 @@ export default function App() {
               <Routes>
                 <Route path="/print/sale/:id" element={<PrintSale />} />
                 <Route path="/print/grn/:id" element={<PrintGrn />} />
+                <Route path="/print/stickers/:id" element={<PrintStickers />} />
                 <Route element={<Layout />}>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/pos" element={<POS />} />

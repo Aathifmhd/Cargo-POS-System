@@ -7,6 +7,7 @@ import CatalogEditor from '../components/CatalogEditor.jsx';
 import DownloadReports from '../components/DownloadReports.jsx';
 import StockTake from '../components/StockTake.jsx';
 import { Rules as ApprovalRules } from './Users.jsx';
+import { StickerDesign } from '../components/Stickers.jsx';
 
 // The settings menu, grouped under headings
 const GROUPS = [
@@ -22,6 +23,7 @@ const GROUPS = [
     items: [
       { id: 'catalog', icon: 'layers', label: 'Categories & products', desc: 'Everything here feeds the Category, Products and Sizes choices on Receive Goods.' },
       { id: 'price', icon: 'tag', label: 'Price & billing', desc: 'How Receive Goods works out the expected selling price from the cost.' },
+      { id: 'stickers', icon: 'tag', label: 'Sticker design', desc: 'The sticker for each set: product code, name, pieces and cost code — size and how they sit on the roll.' },
       { id: 'costcode', icon: 'lock', label: 'Cost code', desc: 'The letters that hide the cost on the Stock list and New Sale — the code is of the cost + Rs 300.' },
       { id: 'pricing', icon: 'chart', label: 'Exchange rate', desc: 'The fixed rate all costs use, and the live INR rate for reference.' },
       { id: 'stocktake', icon: 'box', super: true, label: 'Stock Take', desc: 'Count all the stock (once a year) and put the system right — short and extra pieces, with their value.' },
@@ -121,6 +123,7 @@ export default function Settings() {
               </div>
             )}
 
+            {section === 'stickers' && <StickerDesign f={f} set={set} SaveBar={SaveBar} settings={settings} />}
             {section === 'catalog' && <CatalogEditor />}
 
             {section === 'price' && (() => {

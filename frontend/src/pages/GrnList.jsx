@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { GrnModal } from './GrnView.jsx';
+import { ManualStickerModal } from '../components/Stickers.jsx';
 import { useApi, lkr, inr, supMoney, niceDate, int, dueText } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, StatusBadge } from '../components/ui.jsx';
 
@@ -11,12 +12,17 @@ export default function GrnList() {
   const [openId, setOpenId] = useState(() => location.state?.openGrn || null);   // the GRN shown in the pop-up
   useEffect(() => { if (location.state?.openGrn) navigate('.', { replace: true, state: null }); }, []); // eslint-disable-line
   const [q, setQ] = useState('');
+  const [stickers, setStickers] = useState(false);   // manual sticker printing
   const { data, error, loading, reload } = useApi(`/grns?q=${encodeURIComponent(q)}`);
 
   return (
     <div>
       <PageHeader title="Shipments (GRN)" subtitle="Every shipment received from India. Search by GRN no, cargo or supplier."
-        actions={<Link to="/grn/new" className="btn btn-primary"><Icon name="plus" /> Receive goods</Link>} />
+        actions={<>
+          <button className="btn" onClick={() => setStickers(true)} title="Type product codes and print their stickers in bulk"><Icon name="tag" /> Print stickers</button>
+          <Link to="/grn/new" className="btn btn-primary"><Icon name="plus" /> Receive goods</Link>
+        </>} />
+      {stickers && <ManualStickerModal onClose={() => setStickers(false)} />}
       <div className="toolbar">
         <div className="search"><Icon name="search" size={16} /><input className="input" placeholder="GRN no, cargo, supplier…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       </div>

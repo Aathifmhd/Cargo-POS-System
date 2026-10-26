@@ -219,6 +219,26 @@ export const customerLabel = (c) => String(c?.shop_name || '').trim() || c?.name
 /** The person's name, shown under the shop name (null when the customer has no shop name). */
 export const customerPerson = (c) => (String(c?.shop_name || '').trim() ? c.name : null);
 /** Bills and cheques keep the customer's name as it was written; bring them in line with the customer's current names. */
+/**
+ * Product names read "{product name} - {product} - {category}" (e.g. Royal Check - Collar - T-shirts).
+ * Names saved the older way round ("{category} - {product} - {product name}") are turned round once — on the
+ * product and on the GRN and bill lines that carry its name, so the screens and printed bills agree.
+ */
+export async function reorderProductNames() {
+  const list = await find('products', { pname: { $nin: [null, ''] }, subtype: { $nin: [null, ''] }, category: { $nin: [null, ''] } }, { project: { id: 1, name: 1, category: 1, subtype: 1, pname: 1 } });
+  let done = 0;
+  for (const p of list) {
+    const old = `${p.category} - ${p.subtype} - ${p.pname}`;
+    if (String(p.name).trim().toLowerCase() !== old.toLowerCase()) continue;
+    const name = `${p.pname} - ${p.subtype} - ${p.category}`;
+    await setById('products', p.id, { name });
+    for (const c of ['grn_items', 'sale_items', 'damaged']) await updateMany(c, { product_id: p.id, name: p.name }, { $set: { name } });
+    done++;
+  }
+  if (done) console.log(`Product names turned round: ${done}`);
+  return done;
+}
+
 export async function relabelCustomers(ids = null) {
   const list = await find('customers', ids ? { id: { $in: ids } } : {}, { project: { id: 1, name: 1, shop_name: 1 } });
   for (const c of list) {

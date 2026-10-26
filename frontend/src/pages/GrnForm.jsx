@@ -196,7 +196,7 @@ export default function GrnForm() {
   const typePName = (key, pname) => setG((x) => mapItem(x, key, (i) => {
     const text = pname.trim();
     if (!text) return { ...i, pname, product_id: null, name: '', isNew: false };
-    const name = `${i.category} - ${i.subtype} - ${text}`;
+    const name = `${text} - ${i.subtype} - ${i.category}`;   // {product name} - {product} - {category}
     const existing = products.find((p) => p.name.toLowerCase() === name.toLowerCase());
     return existing ? { ...i, pname, product_id: existing.id, name: existing.name, isNew: false } : { ...i, pname, product_id: null, name, isNew: true };
   }));
@@ -346,7 +346,7 @@ export default function GrnForm() {
       const saved = editId ? await api.put(`/grns/${editId}`, body) : await api.post('/grns', body);
       if (!editId) localStorage.removeItem(DRAFT);
       toast(editId ? `${saved.grn_no} updated — stock adjusted` : `${saved.grn_no} saved — stock updated`);
-      if (editId) backToGrn(saved.id); else navigate(`/grn/${saved.id}`);
+      if (editId) backToGrn(saved.id); else navigate(`/grn/${saved.id}`, { state: { askStickers: true } });   // asks to print the set stickers
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   };
   /* ---------- hold this GRN and start another; bring a held one back ---------- */

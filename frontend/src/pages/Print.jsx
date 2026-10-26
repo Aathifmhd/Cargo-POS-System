@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useApi, money, lkr, inr, supMoney, niceDate, niceTime, int } from '../lib.js';
 import { Loading, Icon } from '../components/ui.jsx';
 import { useSettings } from '../App.jsx';
+import { StickerSheet, stickerDesign, stickerPageCss, stickerCC, sizesText, STICKER_PRINT_KEY } from '../components/Stickers.jsx';
 
 function PrintBar() {
   return (
@@ -114,4 +115,60 @@ export function PrintGrn() {
       </div>
     </>
   );
+}
+
+/** Set stickers, a row of the roll per printed page. */
+function StickerPrint({ stickers }) {
+  const { settings } = useSettings();
+  const d = stickerDesign(settings);
+  useAutoPrint(!!stickers);
+  if (!stickers) return <Loading />;
+  return (
+    <>
+      <style>{stickerPageCss(d)}</style>
+      <div className="print-bar"><span className="muted">{int(stickers.length)} stickers · {Math.ceil(stickers.length / d.cols)} rows</span><span className="spacer" />
+        <button className="btn" onClick={() => window.close()}>Close</button>
+        <button className="btn btn-primary" onClick={() => window.print()}><Icon name="print" /> Print</button>
+      </div>
+      <StickerSheet d={d} stickers={stickers} />
+    </>
+  );
+}
+export function PrintStickers() {
+  const { id } = useParams();
+  if (id === 'test') return <TestStickers />;
+  if (id === 'manual') return <ManualStickers />;
+  return <GrnStickers id={id} />;
+}
+function GrnStickers({ id }) {
+  const { settings } = useSettings();
+  const d = stickerDesign(settings);
+  const { data: g } = useApi(`/grns/${id}`);
+  let stickers = null;
+  if (g) {
+    const byId = new Map(g.items.map((i) => [String(i.id), i]));
+    stickers = [];
+    for (const part of (new URLSearchParams(window.location.search).get('c') || '').split(',')) {
+      const [lineId, pcs, count] = part.split(':');
+      const it = byId.get(lineId);
+      if (!it) continue;
+      const one = { code: it.code, name: it.name, pcs: Number(pcs) || it.pcs_per_set, sizes: sizesText(it.sizes), cc: stickerCC(it, d, settings) };
+      for (let k = 0; k < Math.min(Number(count) || 0, 5000); k++) stickers.push(one);
+    }
+  }
+  return <StickerPrint stickers={stickers} />;
+}
+/** Manual stickers (Shipments / Stock → Print stickers), handed over through localStorage. */
+function ManualStickers() {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(STICKER_PRINT_KEY)) || []; } catch { /* nothing to print */ }
+  const stickers = [];
+  for (const r of Array.isArray(list) ? list : []) for (let k = 0; k < Math.min(Number(r.count) || 0, 5000); k++) stickers.push({ code: r.code, name: r.name, cc: r.cc, pcs: r.pcs, sizes: r.sizes });
+  return <StickerPrint stickers={stickers} />;
+}
+function TestStickers() {
+  const { settings } = useSettings();
+  const count = Math.min(Number(new URLSearchParams(window.location.search).get('n')) || 2, 12);
+  const one = { code: 'P0016', name: 'Denim Baggy Jeans', pcs: 5, sizes: 'XL, L, M', cc: stickerCC({ landed_per_pcs_lkr: 1053, pcs_per_set: 5 }, stickerDesign(settings), settings) };
+  return <StickerPrint stickers={Array.from({ length: count }, () => one)} />;
 }

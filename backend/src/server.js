@@ -17,7 +17,7 @@ import authRoutes from './routes/auth.js';
 import { requireAuth, initAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
 import { setOnRateChange, startFxTimer } from './fx.js';
-import { revalueGrns, upgradeCosting, relabelCustomers } from './services.js';
+import { revalueGrns, upgradeCosting, relabelCustomers, reorderProductNames } from './services.js';
 import { setupBatches } from './db.js';
 import { autoPassSoon } from './cheques.js';
 import { attentionSoon } from './attention.js';
@@ -78,5 +78,6 @@ setOnRateChange((rate) => console.log(`Live INR rate now ${rate}`));
 setupBatches().then(() => upgradeCosting()).then(() => revalueGrns()).catch((e) => console.error('Stock batches / re-costing GRNs failed:', e.message));
 // customers go by their shop name: old bills and cheques written with the person's name are brought in line
 relabelCustomers().catch((e) => console.error('Customer names on bills failed:', e.message));
+reorderProductNames().catch((e) => console.error('Product names failed:', e.message));   // {product name} - {product} - {category}
 if (!process.env.VERCEL) startFxTimer();   // on Vercel the rate is refreshed when the dashboard asks for it
 if (!process.env.VERCEL) { setInterval(autoPassSoon, 60_000); setInterval(attentionSoon, 5 * 60_000); }   // on Vercel it runs with the requests

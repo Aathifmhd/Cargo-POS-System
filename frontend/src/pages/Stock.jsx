@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, useApi, n, r2, lkr, money, niceDate, int, stockText, margin, pct, parseCatalog, findCategory, costTiers, costGroups, costCode, seesCost, codeOf, can } from '../lib.js';
 import { useSettings, useAuth } from '../App.jsx';
 import SizePicker from '../components/SizePicker.jsx';
+import { ManualStickerModal } from '../components/Stickers.jsx';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, CostBadge, Modal, Field, NumInput, Segmented, Tabs, Stat, useToast } from '../components/ui.jsx';
 
 /**
@@ -37,6 +38,7 @@ export default function Stock() {
   const [cat, setCat] = useState('');
   const [filter, setFilter] = useState(params.get('low') ? 'low' : 'all');
   const { data, error, loading, reload } = useApi('/products?active=all');
+  const [stickers, setStickers] = useState(false);
   // damaged returns kept apart from the stock (their cost is written off as a loss)
   const damagedPcs = (data || []).reduce((t, p) => t + (p.damaged?.pcs || 0), 0);
   const damagedValue = (data || []).reduce((t, p) => t + (p.damaged?.value || 0), 0);
@@ -66,6 +68,7 @@ export default function Stock() {
     <div>
       <PageHeader title="Stock" subtitle="Stock goes up when you receive goods and down when you sell. Click a product to see its history or do a stock count."
         actions={<>
+          {manage && <button className="btn" onClick={() => setStickers(true)} title="Stickers for any product — e.g. a set with fewer pieces"><Icon name="tag" /> Print stickers</button>}
           {manage && <button className="btn" onClick={() => setOpen('new')}><Icon name="plus" /> Add product manually</button>}
           {manage && <Link to="/grn/new" className="btn btn-primary"><Icon name="truck" /> Receive goods</Link>}
         </>} />
@@ -154,6 +157,7 @@ export default function Stock() {
       </Card>
 
       {open && <ProductModal id={open === 'new' ? null : open} categories={categories} onClose={() => setOpen(null)} onChanged={reload} />}
+      {stickers && <ManualStickerModal onClose={() => setStickers(false)} />}
     </div>
   );
 }

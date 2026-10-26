@@ -1742,3 +1742,36 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .gt-pcs b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
 .gt-pcs span { font-size: 11px; color: var(--muted); font-weight: 650; }
 .gt-del { flex: none; min-width: 40px; min-height: 40px; color: var(--muted); }
+/* New Sale on a phone:
+   · the product search list only scrolls up and down (no sliding sideways), columns fit the screen
+   · ADD is a full-width, clear button
+   · bill lines: just the item, qty, price, discount (only if any) and amount; big edit / remove buttons */
+.ta-plus { display: none; }
+@media (max-width: 860px) {
+  .till-hitwrap.mobile .till-hits { overflow-x: hidden; overflow-y: auto; touch-action: pan-y; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  /* each result two lines: the product name in full, then code · stock · cost · expected price */
+  .till-hitwrap.mobile .till-hits table, .till-hitwrap.mobile .till-hits tbody { display: block; width: 100%; }
+  .till-hitwrap.mobile .till-hits thead { display: none; }
+  .till-hitwrap.mobile .till-hits tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 10px 12px; border-bottom: 1px solid var(--t-line2); }
+  .till-hitwrap.mobile .till-hits td { display: block; padding: 0; border: 0; white-space: nowrap; }
+  .till-hitwrap.mobile .till-hits td.d { order: -1; flex: 1 1 100%; font-size: 15px; white-space: normal; }
+  .till-hitwrap.mobile .till-hits td.n::before, .till-hitwrap.mobile .till-hits td.p::before { content: attr(data-label); margin-right: 4px; font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--t-steel); text-transform: uppercase; }
+  .till-hitwrap.mobile .till-hits td.p { margin-left: auto; font-size: 15px; }
+
+  .till-add { flex: 1 1 100%; height: 52px; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--primary); font-size: 16px; letter-spacing: .06em; border-radius: 12px; box-shadow: 0 6px 16px color-mix(in srgb, var(--primary) 30%, transparent); }
+  .till-add:disabled { opacity: .4; box-shadow: none; }
+  .till-add .ta-plus { display: inline; font-size: 22px; font-weight: 700; line-height: 1; color: #fff; }
+  .till-add i { display: none; }
+
+  .till-tbl tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas: "c c c am" "d d d d" "q pr ds x"; row-gap: 4px; }
+  .till-tbl td.d em { display: none; }
+  .till-tbl td.mrp { display: none; }
+  .till-tbl td.ds.no-disc { visibility: hidden; }
+  .till-tbl td.x { display: flex; gap: 8px; align-self: center; }
+  .till-tbl td.x button { min-width: 44px; min-height: 44px; font-size: 18px; border-radius: 10px; }
+}
+@media (max-width: 860px) {
+  .till-hitwrap.mobile .till-hits td:nth-child(3), .till-hitwrap.mobile .till-hits td:nth-child(4) { display: none; }
+  .till-hitwrap.mobile .till-hits tr td, .till-hitwrap.mobile .till-hits tr:hover td { background: transparent; }
+  .till-hitwrap.mobile .till-hits tr.on, .till-hitwrap.mobile .till-hits tr:active { background: var(--gold-soft); }
+}

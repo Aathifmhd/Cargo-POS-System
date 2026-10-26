@@ -554,7 +554,7 @@ export default function POS() {
             onChange={(e) => setEntry({ ...entry, disc_pct: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tDis')} />
         </label>
         <div className="f-amt"><span>AMOUNT</span><div className={`till-amt ${eUnder && showCost ? 'under' : ''}`}>{cur ? money(eAmt) : '0.00'}</div></div>
-        <button className="till-add" onClick={() => commit()} disabled={!cur}>ADD<i>Enter</i></button>
+        <button className="till-add" onClick={() => commit()} disabled={!cur}><span className="ta-plus">+</span>ADD<i>Enter</i></button>
       </div>
 
       {/* ================= MATCH LIST (on a phone it is right under the code box) ================= */}
@@ -588,7 +588,7 @@ export default function POS() {
                     ? <input id="lnPrice" className="ln-in" inputMode="decimal" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} onKeyDown={editKey} {...selectAll} />
                     : money(r.price)}
                     {showCost && edit?.i !== i && <em className={r.under ? 'loss' : ''}>{pct(margin(r.net, r.u.cost))}</em>}</td>
-                  <td className="n ds">{r.disc ? <><b>{r.disc_pct}%</b><em>{money(r.disc)}</em></> : '—'}</td>
+                  <td className={`n ds ${r.disc ? '' : 'no-disc'}`}>{r.disc ? <><b>{r.disc_pct}%</b><em>{money(r.disc)}</em></> : '—'}</td>
                   <td className="n am"><b>{money(r.amount)}</b></td>
                   <td className="x">{edit?.i === i ? <>
                     <button className="ln-ok" onClick={saveEdit} title="Keep (Enter)">✓</button>

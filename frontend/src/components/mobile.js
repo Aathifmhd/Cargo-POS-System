@@ -19,7 +19,7 @@ export function useNarrow(width = 900) {
  * every table on every page, also when rows are added or the page changes.
  */
 function labelTables(root) {
-  for (const table of root.querySelectorAll('table.table, table.till-tbl')) {
+  for (const table of root.querySelectorAll('table.table, table.till-tbl, .till-hits table')) {
     const heads = [...(table.tHead?.rows[0]?.cells || [])].map((th) => th.textContent.trim());
     if (!heads.length) continue;
     for (const body of [...table.tBodies, table.tFoot].filter(Boolean)) {

@@ -23,7 +23,14 @@ let database;
 export async function connect() {
   if (database) return database;
   if (!URI) throw new Error('MONGODB_URI is not set. Put it in backend/.env (or the hosting environment variables).');
-  globalThis.__cargoMongo ??= new MongoClient(URI, { serverSelectionTimeoutMS: 15000, maxPoolSize: 25, minPoolSize: 2 }).connect();
+  // the free (M0) cluster allows 500 connections in all. On Vercel every running copy of the backend has its own pool,
+  // so each keeps few connections and lets idle ones go; nothing is held open "just in case" (minPoolSize 0)
+  globalThis.__cargoMongo ??= new MongoClient(URI, {
+    serverSelectionTimeoutMS: 15000,
+    maxPoolSize: process.env.VERCEL ? 5 : 10,
+    minPoolSize: 0,
+    maxIdleTimeMS: 30_000,
+  }).connect();
   client = await globalThis.__cargoMongo;
   database = client.db(DB_NAME);
   return database;

@@ -146,17 +146,11 @@ export function usePullToRefresh(enabled = true) {
       if (startY == null) return;
       const dy = e.touches[0].clientY - startY;
       if (dy <= 0 || window.scrollY > 0) { dist = 0; setPull(0); return; }
-      dist = Math.min(dy * 0.55, PULL_TRIGGER);   // resistance: the page moves about half as far as the finger
+      dist = dy * 0.55;   // resistance: the page moves about half as far as the finger (and stops at the trigger)
       if (e.cancelable) e.preventDefault();
-      if (dist >= PULL_TRIGGER) {
-        // the icon has turned a quarter (90°): the pull stops here and the page refreshes — no need to let go
-        startY = null; dist = 0;
-        setPull(1); setRefreshing(true);
-        setTimeout(() => window.location.reload(), 120);
-        return;
-      }
-      setPull(dist / PULL_TRIGGER);
+      setPull(dist / PULL_TRIGGER);   // the icon only turns while pulling; the page refreshes when the finger lets go
     };
+    const onCancel = () => { startY = null; dist = 0; setPull(0); };
     const onEnd = () => {
       if (startY == null) return;
       startY = null;
@@ -167,12 +161,12 @@ export function usePullToRefresh(enabled = true) {
     document.addEventListener('touchstart', onStart, { passive: true });
     document.addEventListener('touchmove', onMove, { passive: false });
     document.addEventListener('touchend', onEnd);
-    document.addEventListener('touchcancel', onEnd);
+    document.addEventListener('touchcancel', onCancel);
     return () => {
       document.removeEventListener('touchstart', onStart);
       document.removeEventListener('touchmove', onMove);
       document.removeEventListener('touchend', onEnd);
-      document.removeEventListener('touchcancel', onEnd);
+      document.removeEventListener('touchcancel', onCancel);
     };
   }, [enabled]);
   return { pull, refreshing };

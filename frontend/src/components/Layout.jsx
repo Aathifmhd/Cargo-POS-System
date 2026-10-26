@@ -198,7 +198,7 @@ export default function Layout() {
       {(pull > 0 || refreshing) && (
         <div className={`ptr ${refreshing ? 'spin' : ''}`} style={{ height: `${Math.round(Math.min(pull, 1) * PULL_TRIGGER)}px` }} aria-hidden="true">
           {/* just the icon, turning with the pull — a quarter turn (90°) refreshes */}
-          <span className="ptr-ball" style={refreshing ? undefined : { transform: `rotate(${Math.min(pull, 1) * 90}deg)`, opacity: Math.min(1, pull * 1.6) }}><Icon name="refresh" size={18} /></span>
+          <span className="ptr-ball" style={refreshing ? undefined : { transform: `rotate(${pull * 90}deg)`, opacity: Math.min(1, pull * 1.6) }}><Icon name="refresh" size={18} /></span>
         </div>
       )}
       {/* phones: the daily jobs at the thumb; everything else is under Menu */}

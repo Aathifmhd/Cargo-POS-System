@@ -1700,3 +1700,8 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .kb-open .main { padding-bottom: 16px; }
   .kb-open .toasts { bottom: 12px; }
 }
+
+/* the menu header: shop name, "POS System · Wholesale", and the maker — clear, right at the top */
+.brand-sub { opacity: .78; }
+.brand-by { margin-top: 3px; font-size: 11.5px; letter-spacing: .02em; color: rgba(214, 221, 236, .85); white-space: nowrap; }
+.brand-by b { font-weight: 750; color: #E0A73A; }

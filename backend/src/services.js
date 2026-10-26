@@ -238,12 +238,12 @@ async function syncDamagedPcs(productId) {
   await setById('products', productId, { damaged_pcs: left });
 }
 /** A damaged return: kept apart from the stock, at its cost. */
-async function addDamaged(productId, pcs, costPc, ref, date, saleId) {
+export async function addDamaged(productId, pcs, costPc, ref, date, saleId) {
   await insert('damaged', { product_id: productId, sale_id: saleId, ref, date, cost_per_pcs: round2(costPc), in_pcs: pcs, left_pcs: pcs });
   await syncDamagedPcs(productId);
 }
 /** Selling damaged pieces: from the oldest damaged returns first. */
-async function takeDamaged(p, pcs) {
+export async function takeDamaged(p, pcs) {
   const list = (await find('damaged', { product_id: p.id, left_pcs: { $gt: 0 } })).sort(byDateId);
   const have = sum(list, (d) => d.left_pcs);
   if (have < pcs) fail(`Only ${have} damaged pcs of "${p.name}" are left`);

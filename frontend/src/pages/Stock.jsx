@@ -5,6 +5,29 @@ import { useSettings } from '../App.jsx';
 import SizePicker from '../components/SizePicker.jsx';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, CostBadge, Modal, Field, NumInput, Segmented, Tabs, Stat, useToast } from '../components/ui.jsx';
 
+/**
+ * Stock Count → Remove stock: why the pieces are taken off, and what happens.
+ * Damaged → into the damaged stock · Sold without a bill → a cash bill at the price · the rest → a loss under that reason.
+ */
+const REMOVE_REASONS = [
+  { code: 'damaged', label: 'Damaged', hint: 'They go to the damaged stock (a loss) — they can still be sold under cost.' },
+  { code: 'missing', label: "Missing — can't find", hint: 'Counted as a loss.' },
+  { code: 'sample', label: 'Free sample given', hint: 'Counted as a loss (free sample).' },
+  { code: 'gift', label: 'Gift / promotion', hint: 'Counted as a loss (gift / promotion).' },
+  { code: 'shopuse', label: 'Used by the shop', hint: 'Counted as a loss (shop use).' },
+  { code: 'counting', label: 'Counting mistake', hint: 'The stock was counted too high — counted as a loss.' },
+  { code: 'nobill', label: 'Sold without a bill', hint: 'A cash bill is made at the price they were sold for, so the money and the profit count.' },
+  { code: 'other', label: 'Other', hint: 'Counted as a loss — type the reason.' },
+];
+/** Stock Count → Add stock: the pieces go into their own "Stock Count" batch (the GRN stays as received). */
+const ADD_REASONS = [
+  { code: 'found', label: 'Found stock', hint: 'Pieces that were missing turned up — a gain, at the last GRN cost.' },
+  { code: 'counting', label: 'Counting mistake', hint: 'The stock was counted too low — a gain, at the last GRN cost.' },
+  { code: 'repaired', label: 'Damaged piece repaired', hint: 'From the damaged stock back into the good stock — the damaged loss comes back.' },
+  { code: 'supplierfree', label: 'Free goods from supplier', hint: 'Given free outside a GRN — a gain, at the last GRN cost.' },
+  { code: 'other', label: 'Other', hint: 'A gain, at the last GRN cost — type the reason.' },
+];
+
 export default function Stock() {
   const [params] = useSearchParams();
   const [q, setQ] = useState('');
@@ -38,7 +61,7 @@ export default function Stock() {
 
   return (
     <div>
-      <PageHeader title="Stock" subtitle="Stock goes up when you receive goods and down when you sell. Click a product to see its history or correct stock."
+      <PageHeader title="Stock" subtitle="Stock goes up when you receive goods and down when you sell. Click a product to see its history or do a stock count."
         actions={<>
           <button className="btn" onClick={() => setOpen('new')}><Icon name="plus" /> Add product manually</button>
           <Link to="/grn/new" className="btn btn-primary"><Icon name="truck" /> Receive goods</Link>
@@ -137,7 +160,7 @@ function ProductModal({ id, categories, onClose, onChanged }) {
   const [f, setF] = useState(null);
   const { settings } = useSettings();
   const catalog = useMemo(() => parseCatalog(settings), [settings]);
-  const [adj, setAdj] = useState({ mode: 'out', sets: '', pcs: '', reason: 'Damaged', batch_id: '' });
+  const [adj, setAdj] = useState({ mode: 'out', sets: '', pcs: '', reason_code: 'damaged', note: '', price: '', batch_id: '' });
   const perPc = (v, pps) => (n(v) > 0 ? r2(n(v) / Math.max(1, n(pps) || 1)) : '');
   const load = () => (id
     ? api.get(`/products/${id}`).then((x) => { setP(x); setF({ ...x, expected_pc: perPc(x.expected_per_set, x.pcs_per_set), mrp_pc: perPc(x.mrp_per_set, x.pcs_per_set) }); })
@@ -155,20 +178,25 @@ function ProductModal({ id, categories, onClose, onChanged }) {
   };
   const adjust = async () => {
     try {
-      await api.post(`/products/${id}/adjust`, { ...adj, direction: adj.mode });
-      toast('Stock updated'); setAdj({ ...adj, sets: '', pcs: '' }); load(); onChanged(); setTab('history');
+      const out = adj.mode === 'out';
+      if (adj.reason_code === 'other' && !String(adj.note || '').trim()) { toast(`Type the reason for ${out ? 'removing' : 'adding'} the stock`, 'error'); return; }
+      if (adj.mode === 'in' && adj.reason_code === 'repaired' && !(p.damaged?.pcs > 0)) { toast('This product has no damaged pieces', 'error'); return; }
+      if (out && adj.reason_code === 'nobill' && !(n(adj.price) > 0)) { toast('Enter the price each piece was sold for', 'error'); return; }
+      const res = await api.post(`/products/${id}/adjust`, { ...adj, direction: adj.mode });
+      toast(res.sale ? `Cash bill ${res.sale.invoice_no} made for ${lkr(res.sale.total)}` : out && adj.reason_code === 'damaged' ? 'Moved to the damaged stock' : adj.mode === 'in' && adj.reason_code === 'repaired' ? 'Back from the damaged stock' : 'Stock updated');
+      setAdj({ ...adj, sets: '', pcs: '', note: '', price: '' }); load(); onChanged(); setTab('history');
     } catch (e) { toast(e.message, 'error'); }
   };
 
   if (!f) return <Modal title="Loading…" onClose={onClose}><Loading /></Modal>;
   const cat = findCategory(catalog, f.category);
-  const moveLabel = { grn: 'Received', 'grn-edit': 'GRN edited', 'grn-delete': 'GRN deleted', sale: 'Sold', return: 'Customer return', void: 'Bill cancelled', adjust: 'Adjustment', 'short-received': 'Short pieces received', 'short-undo': 'Short pieces taken back' };
+  const moveLabel = { grn: 'Received', 'grn-edit': 'GRN edited', 'grn-delete': 'GRN deleted', sale: 'Sold', return: 'Customer return', void: 'Bill cancelled', adjust: 'Adjustment', damaged: 'To damaged stock', repaired: 'Repaired (from damaged)', 'short-received': 'Short pieces received', 'short-undo': 'Short pieces taken back' };
 
   return (
     <Modal size="lg" title={id ? p.name : 'Add product manually'} subtitle={id ? `${p.code} · ${stockText(p.stock_pcs, p.pcs_per_set)} in stock` : 'Use this for opening stock. Normally products are added through Receive Goods.'} onClose={onClose}
       footer={tab === 'edit' ? <><button className="btn" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={save}>Save product</button></> :
         tab === 'adjust' ? <><button className="btn" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={adjust}>Update stock</button></> : null}>
-      {id && <Tabs value={tab} onChange={setTab} tabs={[{ value: 'details', label: 'Overview' }, { value: 'history', label: 'Stock history' }, { value: 'adjust', label: 'Correct stock' }, { value: 'edit', label: 'Edit' }]} />}
+      {id && <Tabs value={tab} onChange={setTab} tabs={[{ value: 'details', label: 'Overview' }, { value: 'history', label: 'Stock history' }, { value: 'adjust', label: 'Stock Count' }, { value: 'edit', label: 'Edit' }]} />}
 
       {tab === 'details' && p && (
         <div className="stack">
@@ -217,12 +245,12 @@ function ProductModal({ id, categories, onClose, onChanged }) {
 
       {tab === 'adjust' && p && (
         <div className="stack">
-          <Segmented value={adj.mode} onChange={(mode) => setAdj({ ...adj, mode, reason: mode === 'out' ? 'Damaged' : mode === 'in' ? 'Customer return' : 'Stock count' })} options={[
-            { value: 'out', label: 'Remove stock' }, { value: 'in', label: 'Add stock' }, { value: 'count', label: 'Set counted stock' }]} />
-          <p className="muted small">{adj.mode === 'count' ? `Enter what you physically counted. Now the system says ${stockText(p.stock_pcs, p.pcs_per_set)}.` : adj.mode === 'out' ? 'For damaged, missing or free-sample goods.' : 'For customer returns or found stock.'}</p>
+          <Segmented value={adj.mode} onChange={(mode) => setAdj({ ...adj, mode, note: '', price: '', reason_code: mode === 'in' ? 'found' : 'damaged' })} options={[
+            { value: 'out', label: 'Remove stock' }, { value: 'in', label: 'Add stock' }]} />
+          <p className="muted small">{adj.mode === 'out' ? 'For damaged, missing or free-sample goods.' : 'The pieces go into their own "Stock Count" batch at the last GRN cost — the GRN stays as it was received. Customer returns go on New Sale.'}</p>
           <div className="grid grid-2">
             <Field label="Pieces"><NumInput value={adj.pcs} onChange={(v) => setAdj({ ...adj, pcs: v })} /></Field>
-            {(p.batches || []).length > 1 && adj.mode !== 'count' && (
+            {(p.batches || []).length > 1 && adj.mode === 'out' && (
               <Field label="Which stock" className="span-2" hint={adj.mode === 'out' ? 'Leave as "oldest first" if you are not sure' : 'Leave as "newest" if you are not sure'}>
                 <select className="input" value={adj.batch_id} onChange={(e) => setAdj({ ...adj, batch_id: e.target.value })}>
                   <option value="">{adj.mode === 'out' ? 'Oldest first' : 'Newest'}</option>
@@ -230,12 +258,36 @@ function ProductModal({ id, categories, onClose, onChanged }) {
                 </select>
               </Field>
             )}
-            <Field label="Reason">
-              <input className="input" list="adj-reasons" value={adj.reason} onChange={(e) => setAdj({ ...adj, reason: e.target.value })} />
-              <datalist id="adj-reasons">{['Damaged', 'Missing', 'Customer return', 'Stock count', 'Free sample', 'Found stock'].map((r) => <option key={r} value={r} />)}</datalist>
-            </Field>
+            {adj.mode === 'out' ? <>
+              <Field label="Reason" required hint={REMOVE_REASONS.find((r) => r.code === adj.reason_code)?.hint}>
+                <select className="input" value={adj.reason_code} onChange={(e) => setAdj({ ...adj, reason_code: e.target.value })}>
+                  {REMOVE_REASONS.map((r) => <option key={r.code} value={r.code}>{r.code === 'other' ? 'Other (type the reason)' : r.label}</option>)}
+                </select>
+              </Field>
+              {adj.reason_code === 'nobill' && (
+                <Field label="Sold for, each piece (Rs)" required hint={`Expected price ${money(p.expected_per_set / (p.pcs_per_set || 1))} a piece`}>
+                  <NumInput money value={adj.price} onChange={(v) => setAdj({ ...adj, price: v })} placeholder="0.00" />
+                </Field>
+              )}
+              <Field label={adj.reason_code === 'other' ? 'The reason' : 'Details'} required={adj.reason_code === 'other'} className="span-2">
+                <input className="input" value={adj.note} onChange={(e) => setAdj({ ...adj, note: e.target.value })} placeholder={adj.reason_code === 'other' ? 'Why is this stock removed?' : 'e.g. who, where, or which customer'} />
+              </Field>
+            </> : adj.mode === 'in' ? <>
+              <Field label="Reason" required hint={ADD_REASONS.find((r) => r.code === adj.reason_code)?.hint}>
+                <select className="input" value={adj.reason_code} onChange={(e) => setAdj({ ...adj, reason_code: e.target.value })}>
+                  {ADD_REASONS.map((r) => (
+                    <option key={r.code} value={r.code} disabled={r.code === 'repaired' && !(p.damaged?.pcs > 0)}>
+                      {r.code === 'other' ? 'Other (type the reason)' : r.code === 'repaired' ? (p.damaged?.pcs > 0 ? `${r.label} (${p.damaged.pcs} damaged)` : `${r.label} — no damaged pieces`) : r.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label={adj.reason_code === 'other' ? 'The reason' : 'Details'} required={adj.reason_code === 'other'} className="span-2">
+                <input className="input" value={adj.note} onChange={(e) => setAdj({ ...adj, note: e.target.value })} placeholder={adj.reason_code === 'other' ? 'Why is this stock added?' : 'e.g. where it was found'} />
+              </Field>
+            </> : null}
           </div>
-          <div className="alert alert-blue small"><Icon name="info" size={16} /> Change: {adj.mode === 'count' ? n(adj.sets) * p.pcs_per_set + n(adj.pcs) - p.stock_pcs : (adj.mode === 'out' ? -1 : 1) * (n(adj.sets) * p.pcs_per_set + n(adj.pcs))} pieces</div>
+          <div className="alert alert-blue small"><Icon name="info" size={16} /> Change: {(adj.mode === 'out' ? -1 : 1) * (n(adj.sets) * p.pcs_per_set + n(adj.pcs))} pieces</div>
         </div>
       )}
 

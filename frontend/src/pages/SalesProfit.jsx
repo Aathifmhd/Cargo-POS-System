@@ -13,10 +13,21 @@ const REASON = {
   undercost: { label: 'Sold under cost', tone: 'amber', text: 'cost − price' },
   short: { label: 'GRN short (lost)', tone: 'violet', text: 'paid for, not received' },
   stock: { label: 'Stock correction', tone: 'grey', text: 'taken off on a count' },
+  missing: { label: "Missing — can't find", tone: 'grey', text: 'Stock Count' },
+  sample: { label: 'Free sample given', tone: 'blue', text: 'Stock Count' },
+  gift: { label: 'Gift / promotion', tone: 'blue', text: 'Stock Count' },
+  shopuse: { label: 'Used by the shop', tone: 'violet', text: 'Stock Count' },
+  counting: { label: 'Counting mistake', tone: 'grey', text: 'Stock Count' },
+  other: { label: 'Other', tone: 'grey', text: 'Stock Count' },
 };
 const GAIN = {
   extra: { label: 'Extra kept free', tone: 'green' },
   stockfound: { label: 'Stock found', tone: 'blue' },
+  add_found: { label: 'Found stock', tone: 'blue' },
+  add_counting: { label: 'Counting mistake', tone: 'blue' },
+  add_supplierfree: { label: 'Free goods from supplier', tone: 'green' },
+  add_other: { label: 'Other', tone: 'blue' },
+  repaired: { label: 'Damaged piece repaired', tone: 'violet' },
 };
 
 export default function SalesProfit() {

@@ -92,7 +92,7 @@ const DEFAULTS = {
   sales: { customer_id: null, customer_name: null, discount: 0, paid_at_sale: 0, cost_total: 0, due_date: null, notes: null, status: 'completed' },
   sale_items: { batch_id: null, batches: [], no_stock_pcs: 0, damaged: false, damaged_cost: 0, damaged_takes: [], code: null, mrp_per_unit: 0, expected_per_unit: 0, cost_per_unit: 0, disc: 0, disc_pct: 0 },
   customer_payments: { sale_id: null, method: null, reference: null, notes: null, cheque_id: null },
-  stock_moves: { ref: null, note: null, batch_id: null },
+  stock_moves: { ref: null, note: null, batch_id: null, reason_code: null },
   damaged: { sale_id: null, ref: null, cost_per_pcs: 0, in_pcs: 0, left_pcs: 0 },
   batches: { grn_id: null, kind: 'grn', ref: null, cost_per_pcs: 0, expected_per_pcs: 0, mrp_per_pcs: 0, in_pcs: 0, left_pcs: 0 },
   users: { role: 'cashier', active: 1, last_login: null, token_version: 0 },
@@ -320,16 +320,16 @@ export async function recomputeProductCost(productId) {
 }
 
 /** Change the product's stock count and write one line on its stock card. */
-async function logMove(productId, pcs, type, ref, note, date, batchId) {
+async function logMove(productId, pcs, type, ref, note, date, batchId, reasonCode = null) {
   const p = await col('products').findOneAndUpdate({ id: productId }, { $inc: { stock_pcs: pcs }, $set: { updated_at: stamp() } },
     { ...opt(), returnDocument: 'after', projection: NO_ID });
   if (!p) fail('Product not found', 404);
-  await insert('stock_moves', { product_id: productId, date, type, ref: ref ?? null, pcs, balance: p.stock_pcs, note: note ?? null, batch_id: batchId ?? null });
+  await insert('stock_moves', { product_id: productId, date, type, ref: ref ?? null, pcs, balance: p.stock_pcs, note: note ?? null, batch_id: batchId ?? null, reason_code: reasonCode });
   return p;
 }
 
 /** The cost per piece of a product's last GRN (else its newest batch, else the product's own cost): what pieces sold without stock cost. */
-async function lastGrnCost(p) {
+export async function lastGrnCost(p) {
   const list = (await find('batches', { product_id: p.id, kind: { $ne: 'short' } })).sort(batchOrder);
   const grn = list.filter((b) => b.kind === 'grn').pop() || list.pop();
   return round2(grn ? grn.cost_per_pcs : p.last_cost_per_pcs || p.cost_per_pcs || 0);
@@ -368,7 +368,7 @@ export async function settleShort(productId) {
  * `newBatch` (e.g. opening stock) — or a product with no batch yet — starts a new one.
  * Returns where the pieces went: [{ batch_id, pcs, cost_per_pcs }] (pcs negative when taken out).
  */
-export async function moveStock(productId, pcs, type, ref, note, date = todayStr(), { batchId = null, batchIds = null, newBatch = null } = {}) {
+export async function moveStock(productId, pcs, type, ref, note, date = todayStr(), { batchId = null, batchIds = null, newBatch = null, reasonCode = null } = {}) {
   pcs = Math.round(pcs);
   if (!pcs) return [];
   const p = await findOne('products', { id: productId });
@@ -414,7 +414,7 @@ export async function moveStock(productId, pcs, type, ref, note, date = todayStr
   }
   for (const m of moves) {
     await col('batches').updateOne({ id: m.b.id }, { $inc: { left_pcs: m.pcs, ...(m.b.kind !== 'grn' && m.pcs > 0 && !chosen ? { in_pcs: m.pcs } : {}) } }, opt());
-    await logMove(productId, m.pcs, type, ref, note, date, m.b.id);
+    await logMove(productId, m.pcs, type, ref, note, date, m.b.id, reasonCode);
   }
   if (pcs > 0) await settleShort(productId);   // stock coming in makes good what was sold without stock
   await recomputeProductCost(productId);

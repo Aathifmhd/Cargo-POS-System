@@ -300,7 +300,7 @@ r.get('/reports/profit', async (req, res) => {
     () => (sales.length ? find('sale_items', { sale_id: { $in: sales.map((s) => s.id) } }) : []),
     () => find('grn_items', { $or: [{ extra_status: 'free', extra_date: inRange(from, to) }, { extra_sets: { $gt: 0 } }] }),
     () => find('grn_items', { short_status: 'lost', short_date: inRange(from, to) }),
-    () => find('stock_moves', { type: 'adjust', date: inRange(from, to), note: { $ne: 'Opening stock' } }),
+    () => find('stock_moves', { type: { $in: ['adjust', 'damaged', 'repaired'] }, date: inRange(from, to), note: { $ne: 'Opening stock' } }),
   );
   const grnIds = [...new Set([...extraLines, ...shortLines].map((i) => i.grn_id))];
   const [grns, batches, products] = await inParallel(
@@ -367,13 +367,15 @@ r.get('/reports/profit', async (req, res) => {
     const p = prodOf[m.product_id];
     const amount = round2(Math.abs(m.pcs) * (batchOf[m.batch_id]?.cost_per_pcs ?? p?.cost_per_pcs ?? 0));
     const row = { date: m.date, ref: 'Stock correction', code: p?.code, name: p?.name || `#${m.product_id}`, pcs: Math.abs(m.pcs), amount, note: m.note || '' };
-    if (m.pcs < 0) losses.push({ reason: 'stock', ...row });
-    else gains.push({ reason: 'stockfound', ...row });
+    if (m.type === 'damaged') losses.push({ ...row, reason: 'damaged', ref: 'Stock Count', note: `${m.note || 'Damaged'} — moved to damaged stock` });
+    else if (m.pcs < 0) losses.push({ reason: m.reason_code && m.reason_code !== 'nobill' ? m.reason_code : 'stock', ...row });
+    else if (m.type === 'repaired') gains.push({ ...row, reason: 'repaired', note: `${m.note || 'Repaired'} — back from the damaged stock` });
+    else gains.push({ reason: m.reason_code ? `add_${m.reason_code}` : 'stockfound', ...row });
   }
 
   const invoiceProfit = round2(sum(invoices, (i) => i.profit));
   const extraProfit = round2(sum(gains.filter((g) => g.reason === 'extra'), (g) => g.amount));
-  const stockGain = round2(sum(gains.filter((g) => g.reason === 'stockfound'), (g) => g.amount));
+  const stockGain = round2(sum(gains.filter((g) => g.reason !== 'extra'), (g) => g.amount));
   const lossTotal = round2(sum(losses, (l) => l.amount));
   const gross = round2(invoiceProfit + extraProfit + stockGain);
   const byReason = Object.entries(losses.reduce((m, l) => ({ ...m, [l.reason]: (m[l.reason] || 0) + l.amount }), {})).map(([reason, amount]) => ({ reason, amount: round2(amount), count: losses.filter((l) => l.reason === reason).length }));

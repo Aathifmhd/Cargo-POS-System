@@ -1,9 +1,21 @@
 import { Router } from 'express';
 import {
   find, findOne, insert, setById, updateMany, deleteMany, distinct, tx, fail, num, round2, sum, contains, todayStr, stamp,
-  nextProductCode, moveStock, inParallel,
+  nextProductCode, moveStock, inParallel, lastGrnCost,
 } from '../db.js';
 import { guard } from '../auth.js';
+import { addDamaged, takeDamaged, createSale } from '../services.js';
+
+/**
+ * Stock Count → Remove stock: the reasons, and what each does.
+ *  damaged  → off the stock and into the damaged stock (its cost is a loss; it can still be sold under cost)
+ *  nobill   → made into a cash bill at the price it was sold for (so the money and the profit count)
+ *  the rest → off the stock as a loss, under that reason (Sales & Profit → Profit & loss)
+ */
+export const REMOVE_REASONS = {
+  damaged: 'Damaged', missing: "Missing — can't find", sample: 'Free sample given', gift: 'Gift / promotion',
+  shopuse: 'Used by the shop', counting: 'Counting mistake', nobill: 'Sold without a bill', other: 'Other',
+};
 
 const r = Router();
 
@@ -171,6 +183,15 @@ r.post('/reprice', async (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * Stock Count → Add stock: the reasons. The pieces go into their own "Stock Count" batch (never into a GRN's batch,
+ * so the GRN stays as it was received), at the last GRN's cost — and show as a gain in Profit & loss.
+ *  repaired → taken from the damaged stock back into the good stock (the damaged loss comes back as a gain)
+ */
+export const ADD_REASONS = {
+  found: 'Found stock', counting: 'Counting mistake', repaired: 'Damaged piece repaired', supplierfree: 'Free goods from supplier', other: 'Other',
+};
+
 /* Stock adjustment: damaged, missing, found, customer return, stock count */
 r.post('/:id/adjust', async (req, res) => {
   const id = num(req.params.id);
@@ -186,8 +207,46 @@ r.post('/:id/adjust', async (req, res) => {
   if (!pcs) fail('Nothing to change');
   if (p.stock_pcs + pcs < 0) fail('Stock cannot go below zero');
   const batchId = req.body.batch_id ? num(req.body.batch_id) : null;
-  await guard(req, `Stock correction ${p.name}: ${pcs > 0 ? '+' : ''}${pcs} pcs (${req.body.reason || 'Adjustment'})`);
-  await tx(() => moveStock(id, pcs, 'adjust', null, req.body.reason || 'Adjustment', req.body.date || todayStr(), { batchId }));
+  const date = req.body.date || todayStr();
+  const adding = req.body.mode !== 'count' && req.body.direction !== 'out';
+  const LIST = adding ? ADD_REASONS : REMOVE_REASONS;
+  const code = req.body.mode !== 'count' ? String(req.body.reason_code || '') : '';
+  if (code && !LIST[code]) fail('Choose the reason');
+  const details = String(req.body.note || '').trim();
+  if (code === 'other' && !details) fail(`Type the reason for ${adding ? 'adding' : 'removing'} the stock`);
+  const reason = code ? (code === 'other' ? details : details ? `${LIST[code]} — ${details}` : LIST[code]) : (req.body.reason || 'Adjustment');
+
+  // sold without a bill: a cash bill at the price it went for
+  if (code === 'nobill') {
+    const price = round2(num(req.body.price));
+    if (!(price > 0)) fail('Enter the price each piece was sold for');
+    await guard(req, `Stock Count ${p.name}: ${-pcs} pcs sold without a bill — cash bill at Rs ${price} a piece`);
+    const sale = await createSale({
+      payment_type: 'cash', customer_name: 'Walk-in customer', date,
+      notes: `Sold without a bill — entered from Stock Count${details ? ` (${details})` : ''}`,
+      items: [{ product_id: id, unit: 'pcs', qty: -pcs, price, batch_id: batchId }],
+    }, (action) => guard(req, action));
+    return res.json({ ...(await oneProduct(id)), sale: { id: sale.id, invoice_no: sale.invoice_no, total: sale.total } });
+  }
+  await guard(req, `Stock Count ${p.name}: ${pcs > 0 ? '+' : ''}${pcs} pcs (${reason})`);
+  await tx(async () => {
+    if (pcs > 0 && code === 'repaired') {
+      // from the damaged stock back into the good stock, at the cost it had
+      const takes = await takeDamaged(p, pcs);
+      const cost = sum(takes, (x) => x.pcs * x.cost_per_pcs) / pcs;
+      await moveStock(id, pcs, 'repaired', 'Stock Count', reason, date, { newBatch: { kind: 'count', ref: 'Repaired', cost_per_pcs: round2(cost) }, reasonCode: code });
+    } else if (pcs > 0) {
+      // added on a count: its own batch at the last GRN's cost (the GRN's batch stays as received)
+      await moveStock(id, pcs, 'adjust', 'Stock Count', reason, date, { newBatch: { kind: 'count', ref: 'Stock Count', cost_per_pcs: await lastGrnCost(p) }, reasonCode: code || null });
+    } else if (code === 'damaged') {
+      // off the good stock, into the damaged stock at the cost it had
+      const taken = await moveStock(id, pcs, 'damaged', 'Stock Count', reason, date, { batchId, reasonCode: code });
+      const cost = sum(taken, (t) => Math.abs(t.pcs) * t.cost_per_pcs) / Math.abs(pcs);
+      await addDamaged(id, -pcs, cost, 'Stock Count', date, null);
+    } else {
+      await moveStock(id, pcs, 'adjust', null, reason, date, { batchId, reasonCode: code || null });
+    }
+  });
   res.json(await oneProduct(id));
 });
 

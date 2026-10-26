@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, useApi, lkr, inr, niceDate, today, addDays, niceDateTime } from '../lib.js';
+import { api, useApi, lkr, inr, niceDate, today, addDays, niceDateTime, can } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Stat, Tabs, Badge, Modal, Field, NumInput, DateInput, useToast } from '../components/ui.jsx';
 import { BankList } from '../components/forms.jsx';
+import { useAuth } from '../App.jsx';
 
 /*
  * Cheque Desk: every cheque, received (from customers) and given (to cargo companies and suppliers).
@@ -121,7 +122,9 @@ export default function Cheques() {
   const toast = useToast();
   const [version, setVersion] = useState(0);
   const { data, error, loading, reload } = useApi(`/cheques?v=${version}`);
-  const [side, setSide] = useState('in');
+  const givenToo = can(useAuth().user, 'suppliers');   // cheques given (suppliers, cargo): not for Cashier, KP, Employee
+  const [sidePicked, setSide] = useState('in');
+  const side = givenToo ? sidePicked : 'in';
   const [tab, setTab] = useState('today');
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(null);
@@ -195,7 +198,7 @@ export default function Cheques() {
       </div>
 
       <div className="chq-sides" role="tablist" aria-label="Received or given cheques">
-        {SIDES.map((x) => {
+        {SIDES.filter((x) => givenToo || x.value === 'in').map((x) => {
           const waiting = (data || []).filter((c) => c.direction === x.value && open(c));
           const due = sideCount(x.value);
           return (

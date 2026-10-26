@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { find, findOne, deleteMany, fail, num, getSettings } from '../db.js';
 import { revalueGrns, customerLabel } from '../services.js';
-import { guard } from '../auth.js';
+import { guard, can } from '../auth.js';
+
+/** Cheques given (to suppliers and cargo) are part of the "suppliers" permission — Cashier, KP, Employee see received ones only. */
+const givenOk = (req, ch) => { if (ch && ch.direction === 'out' && !can(req.user, 'suppliers')) fail('Cheque not found', 404); };
 import { cargoLedgers, payCargo, setChequeStatus, updateCheque, deleteCheque } from '../cheques.js';
 import { chequeReturned } from '../attention.js';
 
@@ -25,7 +28,7 @@ r.delete('/cargo/payments/:id', async (req, res) => {
 
 /* ---------------- cheques (Cheque Desk) ---------------- */
 r.get('/cheques', async (req, res) => {
-  const list = await find('cheques', {}, { sort: { cheque_date: 1, id: 1 }, limit: 2000 });
+  const list = await find('cheques', can(req.user, 'suppliers') ? {} : { direction: 'in' }, { sort: { cheque_date: 1, id: 1 }, limit: 2000 });
   // the bill each cheque was given for (GRN or bill number)
   const grnIds = list.filter((c) => c.party === 'supplier' && c.bill_id).map((c) => c.bill_id);
   const saleIds = list.filter((c) => c.party === 'customer' && c.bill_id).map((c) => c.bill_id);
@@ -47,6 +50,7 @@ r.post('/cheques/:id/status', async (req, res) => {
   const id = num(req.params.id);
   const ch = await findOne('cheques', { id });
   if (!ch) fail('Cheque not found', 404);
+  givenOk(req, ch);
   const status = String(req.body?.status || '');
   await guard(req, `Cheque ${ch.cheque_no} (${ch.direction === 'in' ? 'from' : 'to'} ${ch.party_name}, Rs ${ch.amount}) ${STATUS_TEXT[status] || status}`);
   const done = await setChequeStatus(id, status, req.user, req.body?.note);
@@ -63,6 +67,7 @@ r.put('/cheques/:id', async (req, res) => {
   const id = num(req.params.id);
   const ch = await findOne('cheques', { id });
   if (!ch) fail('Cheque not found', 404);
+  givenOk(req, ch);
   await guard(req, `Edit cheque ${ch.cheque_no} (${ch.direction === 'in' ? 'from' : 'to'} ${ch.party_name}, Rs ${ch.amount})`, 'superadmin', { always: true });
   res.json(await updateCheque(id, req.body || {}, req.user));
 });
@@ -71,6 +76,7 @@ r.delete('/cheques/:id', async (req, res) => {
   const id = num(req.params.id);
   const ch = await findOne('cheques', { id });
   if (!ch) fail('Cheque not found', 404);
+  givenOk(req, ch);
   await guard(req, `Delete cheque ${ch.cheque_no} (${ch.direction === 'in' ? 'from' : 'to'} ${ch.party_name}, Rs ${ch.amount})`, 'superadmin', { always: true });
   res.json(await deleteCheque(id));
 });

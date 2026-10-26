@@ -1957,3 +1957,44 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .msk-sum b { font-size: 14.5px; }
 .msk-sum small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .msk-x { flex: none; font-weight: 750; font-size: 14px; font-variant-numeric: tabular-nums; }
+
+/* =========================================================
+   Printing animation (no print page): a bill coming out of the printer, or labels running off the roll
+   ========================================================= */
+.pa-overlay { position: fixed; inset: 0; z-index: 90; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 16px; background: rgba(15, 23, 42, .35); animation: fade .15s; transition: opacity .25s; }
+.pa-overlay.out { opacity: 0; }
+.pa-card { width: min(320px, 100%); background: var(--surface); border-radius: 18px; box-shadow: var(--shadow-l); padding: 22px 20px 18px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; animation: pop .18s ease-out; }
+.pa-art { height: 150px; width: 100%; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 8px; }
+.pa-title { font-size: 16px; }
+.pa-sub { font-size: 13px; color: var(--muted); }
+.pa-overlay.done .pa-title { color: var(--green); }
+.pa-paper i { display: block; height: 4px; border-radius: 2px; background: #cbd5e1; margin: 0 0 5px; width: 90%; }
+.pa-paper i.w40 { width: 40%; } .pa-paper i.w50 { width: 50%; } .pa-paper i.w60 { width: 60%; } .pa-paper i.w70 { width: 70%; } .pa-paper i.w80 { width: 80%; }
+
+/* bill: the paper slides out of the printer, line by line */
+.pa-printer { position: relative; width: 150px; height: 150px; }
+.pa-body { position: absolute; left: 0; right: 0; top: 0; height: 58px; border-radius: 12px; background: linear-gradient(180deg, #1B2A4E, #0B0F19); box-shadow: 0 6px 14px rgba(15, 23, 42, .25); }
+.pa-body::after { content: ''; position: absolute; left: 22px; right: 22px; bottom: 12px; height: 5px; border-radius: 3px; background: #05070d; }
+.pa-light { position: absolute; top: 12px; right: 14px; width: 8px; height: 8px; border-radius: 50%; background: #34d399; box-shadow: 0 0 8px #34d399; animation: pa-blink .6s infinite alternate; }
+.pa-bill { position: absolute; left: 30px; right: 30px; top: 44px; height: 100px; padding: 12px 10px 0; background: #fff; border-radius: 0 0 4px 4px; box-shadow: 0 4px 10px rgba(15, 23, 42, .15);
+  transform-origin: top; animation: pa-feed 1.6s cubic-bezier(.3, .7, .4, 1) forwards; clip-path: inset(0 0 100% 0); }
+.pa-bill .pa-rule { display: block; border-top: 1px dashed #cbd5e1; margin: 4px 0 6px; }
+.pa-bill .pa-total { background: #1B2A4E; height: 6px; margin-left: auto; }
+.pa-overlay.done .pa-bill { clip-path: inset(0 0 0 0); animation: none; }
+@keyframes pa-feed { from { clip-path: inset(0 0 100% 0); transform: translateY(-14px); } to { clip-path: inset(0 0 0 0); transform: translateY(0); } }
+@keyframes pa-blink { to { opacity: .35; } }
+
+/* labels: the strip runs off the roll, label after label */
+.pa-labeler { display: flex; align-items: center; width: 100%; min-width: 0; height: 120px; }
+.pa-roll { flex: none; width: 74px; height: 74px; border-radius: 50%; background: radial-gradient(circle, var(--surface-2) 0 13px, #fff 14px 100%); border: 3px solid #e2e8f0; box-shadow: 0 4px 10px rgba(15, 23, 42, .15); display: grid; place-items: center; animation: pa-spin 1.2s linear infinite; }
+.pa-roll span { width: 26px; height: 4px; background: #cbd5e1; border-radius: 2px; }
+.pa-track { flex: 1; min-width: 0; overflow: hidden; height: 64px; margin-left: -6px; -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent); mask-image: linear-gradient(90deg, #000 70%, transparent); }
+.pa-strip { display: flex; gap: 6px; padding: 4px 0 4px 6px; width: max-content; background: linear-gradient(#f1f5f9, #f1f5f9) 0 50% / 100% 46px no-repeat; animation: pa-run 1.8s linear infinite; }
+.pa-label { flex: none; width: 92px; height: 56px; padding: 5px 7px; border-radius: 6px; background: #fff; border: 1px solid #cbd5e1; display: flex; flex-direction: column; justify-content: space-between; color: #000; }
+.pa-label b { font-size: 17px; font-weight: 900; line-height: 1; letter-spacing: .02em; text-align: center; }
+.pa-label i { display: block; height: 3px; border-radius: 2px; background: #cbd5e1; width: 90%; }
+.pa-label i.w50 { width: 50%; margin-left: auto; } .pa-label i.w70 { width: 70%; }
+.pa-overlay.done .pa-roll, .pa-overlay.done .pa-strip { animation-play-state: paused; }
+@keyframes pa-spin { to { transform: rotate(360deg); } }
+@keyframes pa-run { from { transform: translateX(-196px); } to { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .pa-bill, .pa-roll, .pa-strip, .pa-light { animation: none; clip-path: none; } }

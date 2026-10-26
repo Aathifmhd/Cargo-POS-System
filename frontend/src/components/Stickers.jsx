@@ -3,6 +3,7 @@ import { codeOf, int, n, useApi } from '../lib.js';
 import { Field, NumInput, Icon, Modal } from './ui.jsx';
 import { useSettings } from '../App.jsx';
 import { useNarrow } from './mobile.js';
+import { printFrame, withPrinting } from './printing.jsx';
 
 /*
  * Set stickers: one sticker for each set received on a GRN — product code (big), product name, pieces in the set
@@ -73,6 +74,23 @@ export function StickerSheet({ d, stickers }) {
 /** The @page size for one row of stickers. */
 export const stickerPageCss = (d) => `@page { size: ${d.cols * d.w + (d.cols - 1) * d.gap}mm ${d.h}mm; margin: 0; }`;
 
+/**
+ * Print stickers on this page (no print page), with the labels animation.
+ * stickers: [{ code, name, pcs, sizes, cc }] — one entry a sticker.
+ */
+export function printStickers(stickers, d) {
+  const list = stickers.slice(0, 5000);
+  if (!list.length) return Promise.resolve();
+  return withPrinting({ kind: 'label', title: `${list.length} sticker${list.length === 1 ? '' : 's'}`, sub: `${Math.ceil(list.length / d.cols)} row${Math.ceil(list.length / d.cols) === 1 ? '' : 's'} on the roll`, code: list[0].code },
+    async () => {
+      const { win, cleanup } = await printFrame({
+        title: 'Stickers', width: `${d.cols * d.w + (d.cols - 1) * d.gap}mm`, height: `${d.h}mm`, css: stickerPageCss(d),
+        element: <StickerSheet d={d} stickers={list} />,
+      });
+      try { win.focus(); win.print(); } finally { cleanup(); }
+    });
+}
+
 /** A GRN line's cost code for its sticker (of one piece, or of the set). */
 export const stickerCC = (it, d, settings) => codeOf(null, d.cc_of === 'set' ? it.landed_per_pcs_lkr * (it.pcs_per_set || 1) : it.landed_per_pcs_lkr, settings);
 
@@ -85,14 +103,20 @@ export const stickerLines = (items) => items.filter((i) => (i.sets || 0) > 0)
 
 /** "Print stickers?" — the count for each product can be changed before printing. */
 export function StickerModal({ grn, onClose, asked }) {
+  const { settings } = useSettings();
   const [lines, setLines] = useState(() => stickerLines(grn.items));
   const upd = (key, patch) => setLines((l) => l.map((x) => (x.key === key ? { ...x, ...patch } : x)));
   const total = lines.reduce((s, l) => s + Math.max(0, Math.round(n(l.count))), 0);
   const print = () => {
-    const c = lines.filter((l) => n(l.count) > 0 && n(l.pcs) > 0).map((l) => `${l.item.id}:${Math.round(n(l.pcs))}:${Math.round(n(l.count))}`).join(',');
-    if (!c) return;
-    window.open(`/print/stickers/${grn.id}?c=${c}`, '_blank');
+    const d = stickerDesign(settings);
+    const stickers = [];
+    for (const l of lines.filter((x) => n(x.count) > 0 && n(x.pcs) > 0)) {
+      const one = { code: l.item.code, name: l.item.name, pcs: Math.round(n(l.pcs)), sizes: sizesText(l.item.sizes), cc: stickerCC(l.item, d, settings) };
+      for (let k = 0; k < Math.min(Math.round(n(l.count)), 5000); k++) stickers.push(one);
+    }
+    if (!stickers.length) return;
     onClose();
+    printStickers(stickers, d);
   };
   return (
     <Modal title={asked ? `${grn.grn_no} saved — print the stickers?` : `Stickers for ${grn.grn_no}`}
@@ -129,7 +153,7 @@ export function StickerDesign({ f, set, SaveBar, settings }) {
   );
   const sample = { code: 'P0016', name: 'Denim Baggy Jeans', pcs: 5, sizes: 'XL, L, M', cc: codeOf(null, 1053, { ...settings, ...f }) };
   const safe = { ...d, w: n(d.w) || 50, h: n(d.h) || 25, cols: Math.max(1, Math.round(n(d.cols)) || 1) };
-  const testPrint = () => window.open(`/print/stickers/test?n=${safe.cols * 2}`, '_blank');
+  const testPrint = () => printStickers(Array.from({ length: safe.cols * 2 }, () => sample), { ...safe, gap: n(d.gap) || 0 });
   return (
     <div className="stack set-form">
       <p className="muted small">One sticker is printed for each set received on a GRN. The printer takes a roll with <b>{safe.cols}</b> sticker{safe.cols === 1 ? '' : 's'} side by side, so each printed row is one page of {safe.cols * safe.w + (safe.cols - 1) * (n(d.gap) || 0)} × {safe.h} mm — set the same paper size on the printer.</p>
@@ -207,9 +231,12 @@ export function ManualStickerModal({ onClose }) {
   const total = filled.reduce((t, r) => t + Math.round(n(r.count)), 0);
   const print = () => {
     if (!total) return;
-    const list = filled.map((r) => ({ code: String(r.code).trim(), name: r.name, cc: r.cc, pcs: Math.round(n(r.pcs)), sizes: r.sizes, count: Math.min(5000, Math.round(n(r.count))) }));
-    try { localStorage.setItem(STICKER_PRINT_KEY, JSON.stringify(list)); } catch { return; }
-    window.open('/print/stickers/manual', '_blank');
+    const stickers = [];
+    for (const r of filled) {
+      const one = { code: String(r.code).trim(), name: r.name, cc: r.cc, pcs: Math.round(n(r.pcs)), sizes: r.sizes };
+      for (let k = 0; k < Math.min(5000, Math.round(n(r.count))); k++) stickers.push(one);
+    }
+    printStickers(stickers, d);
   };
   const cols = [d.show_name && 'name', d.show_cc && 'cc', d.show_pcs && 'pcs', d.show_sizes && 'sizes'].filter(Boolean);
   const head = { name: 'Product name', cc: 'Cost code', pcs: 'Pieces / set', sizes: 'Sizes' };

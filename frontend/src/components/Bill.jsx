@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { flushSync } from 'react-dom';
 import { money, lkr, niceDate, niceTime, int, today } from '../lib.js';
 import { Field, NumInput, Icon, Modal, useToast } from './ui.jsx';
 import { useSettings } from '../App.jsx';
 import { usePhone } from './mobile.js';
+import { printFrame, withPrinting } from './printing.jsx';
 
 /*
  * Printed bills, in two sizes: A5 landscape (the usual one) and an 80 mm receipt.
@@ -140,34 +139,19 @@ export const printerSetup = () => {
 const savePrinters = (p) => { try { localStorage.setItem(PRINTERS_KEY, JSON.stringify(p)); } catch { /* storage blocked */ } };
 
 /**
- * Print a bill on this page (no new tab). Returns 'sent' (to the print agent) or 'window' (this computer's print window).
+ * Print a bill on this page (no print page), with the printing animation. Returns 'sent' (to the print agent) or
+ * 'window' (this computer's print window).
  * The print agent gets: POST { printer, paper: 'A5-landscape' | '80mm', document, html }.
  */
-export async function printBill(sale, size, settings) {
+export function printBill(sale, size, settings) {
+  return withPrinting({ kind: 'bill', title: sale.invoice_no || 'the bill', sub: size === '80' ? '80 mm receipt' : 'A5 bill' }, () => sendBill(sale, size, settings));
+}
+async function sendBill(sale, size, settings) {
   const d = billDesign(settings);
-  const frame = document.createElement('iframe');
-  frame.setAttribute('aria-hidden', 'true');
-  frame.tabIndex = -1;
-  Object.assign(frame.style, { position: 'fixed', left: '-10000px', top: '0', width: size === '80' ? '80mm' : '210mm', height: '148mm', border: '0' });
-  document.body.appendChild(frame);
-  const doc = frame.contentDocument;
-  doc.open();
-  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${String(sale.invoice_no || 'Bill').replace(/[<&]/g, '')}</title></head><body></body></html>`);
-  doc.close();
-  // the app's own styles, then the page size
-  const loads = [];
-  for (const n of document.querySelectorAll('style, link[rel="stylesheet"]')) {
-    const c = n.cloneNode(true);
-    if (n.tagName === 'LINK') { c.href = n.href; loads.push(new Promise((r) => { c.onload = r; c.onerror = r; setTimeout(r, 2000); })); }
-    doc.head.appendChild(c);
-  }
-  const page = doc.createElement('style');
-  page.textContent = billPageCss(size);
-  doc.head.appendChild(page);
-  const root = createRoot(doc.body);
-  flushSync(() => root.render(<BillDoc s={sale} size={size} d={d} settings={settings} />));
-  await Promise.all(loads);
-  await new Promise((r) => setTimeout(r, 120));
+  const { doc, win, cleanup } = await printFrame({
+    title: sale.invoice_no || 'Bill', width: size === '80' ? '80mm' : '210mm', height: '148mm', css: billPageCss(size),
+    element: <BillDoc s={sale} size={size} d={d} settings={settings} />,
+  });
   const setup = printerSetup();
   try {
     if (setup.mode === 'agent' && setup.url) {
@@ -178,11 +162,11 @@ export async function printBill(sale, size, settings) {
       if (!res.ok) throw new Error(`The printer did not take the bill (${res.status})`);
       return 'sent';
     }
-    frame.contentWindow.focus();
-    frame.contentWindow.print();
+    win.focus();
+    win.print();
     return 'window';
   } finally {
-    setTimeout(() => { root.unmount(); frame.remove(); }, 1500);
+    cleanup();
   }
 }
 

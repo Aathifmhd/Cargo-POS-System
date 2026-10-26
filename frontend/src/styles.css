@@ -1906,3 +1906,19 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .modal, .modal-sm, .modal-md, .modal-lg, .modal-xl { max-height: calc(100% - 20px - env(safe-area-inset-top)); }
   .modal-body { min-height: 0; }
 }
+
+/* Action Center on a phone: one card an activity — what happened (in full), then time · who · role and who approved it */
+.ac-list { display: flex; flex-direction: column; }
+.ac-item { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.ac-item:last-child { border-bottom: 0; }
+.ac-item.ac-is-new { background: var(--amber-soft); }
+.ac-item.ac-is-attention { background: var(--red-soft); }
+.ac-what { font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
+.ac-what .badge { font-size: 10.5px; padding: 1px 7px; margin-right: 6px; vertical-align: 1px; }
+.ac-item.ac-is-login .ac-what { font-weight: 500; color: var(--muted); }
+.ac-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 5px; font-size: 12px; color: var(--muted); }
+.ac-time { font-variant-numeric: tabular-nums; font-weight: 600; }
+.ac-who { color: var(--text-2); font-weight: 650; }
+.ac-meta .role-badge { font-size: 10.5px; padding: 1px 6px; }
+.ac-ok { margin-left: auto; }
+.ac-ok .badge { font-size: 10.5px; padding: 1px 7px; }

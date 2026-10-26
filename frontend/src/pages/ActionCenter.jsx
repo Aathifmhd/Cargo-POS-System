@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Tabs, Badge, RoleBadge } from '../components/ui.jsx';
+import { useNarrow } from '../components/mobile.js';
 
 const LIVE_MS = 5000;          // how often the list checks for new activity
 const SEEN_KEY = 'cargo-action-center-seen';
@@ -8,6 +9,11 @@ const pad = (x) => String(x).padStart(2, '0');
 
 /** A stored time ("2026-10-16 09:30:12", UTC) as a Date on this computer's clock. */
 const toDate = (s) => new Date(String(s).replace(' ', 'T') + (String(s).includes('Z') ? '' : 'Z'));
+/** hh:mm (the phone list) */
+function shortTime(s) {
+  const d = toDate(s);
+  return Number.isNaN(d.getTime()) ? '—' : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 /** hh:mm:ss */
 function timeOf(s) {
   const d = toDate(s);
@@ -41,6 +47,7 @@ export default function ActionCenter() {
   const [logins, setLogins] = useState(true);
   const [fresh, setFresh] = useState(() => new Set());   // ids that just arrived (highlighted for a moment)
   const newest = useRef(0);
+  const narrow = useNarrow();   // a phone: each activity as a short card instead of the table
 
   const load = async (initial = false) => {
     try {
@@ -113,6 +120,31 @@ export default function ActionCenter() {
             <Card key={d.key} pad={false}
               title={<span className="row gap-s"><Icon name="calendar" size={16} /> {dayLabel(d.key)}</span>}
               actions={<span className="badge badge-grey">{d.items.length} {d.items.length === 1 ? 'activity' : 'activities'}</span>}>
+              {narrow ? (
+                /* phone: what happened first (in full), then time · who and who approved it */
+                <div className="ac-list">
+                  {d.items.map((a) => (
+                    <div key={a.id} className={`ac-item ${fresh.has(a.id) ? 'ac-is-new' : ''} ${isLogin(a) ? 'ac-is-login' : ''} ${a.level === 'attention' ? 'ac-is-attention' : ''}`}>
+                      <div className="ac-what">
+                        {a.level === 'attention' && <Badge tone="red"><Icon name="alert" size={11} /> Attention</Badge>}
+                        {a.level === 'nostock' && <Badge tone="amber">No stock</Badge>}
+                        <span>{a.action}</span>
+                      </div>
+                      <div className="ac-meta">
+                        <span className="ac-time">{shortTime(a.at)}</span>
+                        <b className="ac-who">{a.username || '—'}</b>
+                        {a.role && <RoleBadge role={a.role} />}
+                        {/* who approved it — not repeated when a Super Admin did it themself */}
+                        {(a.approved_by ? a.approved_by !== a.username : a.super && a.role !== 'superadmin') && (
+                          <span className="ac-ok">
+                            <Badge tone={a.super ? 'amber' : 'violet'}><Icon name={a.super ? 'crown' : 'lock'} size={11} /> {a.approved_by ? `OK by ${a.approved_by}` : 'Super Admin'}</Badge>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
               <div className="table-wrap">
                 <table className="table">
                   <thead><tr><th>Time</th><th>Who</th><th>What happened</th><th>Approved by</th></tr></thead>
@@ -130,6 +162,7 @@ export default function ActionCenter() {
                   </tbody>
                 </table>
               </div>
+              )}
             </Card>
           ))}
         </div>

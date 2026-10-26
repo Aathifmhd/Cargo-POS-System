@@ -187,18 +187,18 @@ export default function Layout() {
       </aside>
       <div className="scrim" onClick={() => setOpen(false)} />
       <main className={`main ${atPos ? 'on-pos' : ''} ${pull > 0 || refreshing ? 'pulling' : ''} ${refreshing ? 'held' : ''}`}
-        style={pull > 0 || refreshing ? { transform: `translateY(${Math.round(Math.min(pull, 1.9) * PULL_TRIGGER)}px)` } : undefined}>
+        style={pull > 0 || refreshing ? { transform: `translateY(${Math.round(Math.min(pull, 1) * PULL_TRIGGER)}px)` } : undefined}>
         <div className="mobile-bar">
           <button className="btn btn-icon btn-ghost" onClick={() => setOpen(true)} aria-label="Menu"><Icon name="menu" /></button>
           <b>{settings.shop_name}</b>
         </div>
         <div key={location.pathname} className="page-in"><Outlet /></div>
       </main>
-      {/* phones: pull to refresh — the page comes down and the arrow sits in the space above it, turning, then spinning */}
+      {/* phones: pull to refresh — the page comes down and the icon sits in the space above it, turning as it is pulled */}
       {(pull > 0 || refreshing) && (
-        <div className={`ptr ${pull >= 1 ? 'ready' : ''} ${refreshing ? 'spin' : ''}`} style={{ height: `${Math.round(Math.min(pull, 1.9) * PULL_TRIGGER)}px` }} aria-hidden="true">
-          <span className="ptr-ball" style={{ transform: `rotate(${Math.min(pull, 1) * 300}deg)`, opacity: Math.min(1, pull * 1.4) }}><Icon name="refresh" size={18} /></span>
-          {pull >= 0.55 && <span className="ptr-text">{refreshing ? 'Refreshing…' : pull >= 1 ? 'Release to refresh' : 'Pull to refresh'}</span>}
+        <div className={`ptr ${refreshing ? 'spin' : ''}`} style={{ height: `${Math.round(Math.min(pull, 1) * PULL_TRIGGER)}px` }} aria-hidden="true">
+          {/* just the icon, turning with the pull — a quarter turn (90°) refreshes */}
+          <span className="ptr-ball" style={refreshing ? undefined : { transform: `rotate(${Math.min(pull, 1) * 90}deg)`, opacity: Math.min(1, pull * 1.6) }}><Icon name="refresh" size={18} /></span>
         </div>
       )}
       {/* phones: the daily jobs at the thumb; everything else is under Menu */}

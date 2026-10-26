@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { codeOf, int, n, useApi } from '../lib.js';
 import { Field, NumInput, Icon, Modal } from './ui.jsx';
 import { useSettings } from '../App.jsx';
+import { useNarrow } from './mobile.js';
 
 /*
  * Set stickers: one sticker for each set received on a GRN — product code (big), product name, pieces in the set
@@ -181,6 +182,7 @@ export function ManualStickerModal({ onClose }) {
   const { settings } = useSettings();
   const d = stickerDesign(settings);
   const { data: products } = useApi('/products?active=all');
+  const narrow = useNarrow();   // a phone: one card a sticker instead of the table
   const blank = () => ({ key: Date.now() + Math.random(), code: '', name: '', cc: '', pcs: '', sizes: '', count: 1, found: null });
   const [rows, setRows] = useState(() => [blank()]);
   const upd = (key, patch) => setRows((l) => l.map((x) => (x.key === key ? { ...x, ...patch } : x)));
@@ -205,6 +207,65 @@ export function ManualStickerModal({ onClose }) {
   };
   const cols = [d.show_name && 'name', d.show_cc && 'cc', d.show_pcs && 'pcs', d.show_sizes && 'sizes'].filter(Boolean);
   const head = { name: 'Product name', cc: 'Cost code', pcs: 'Pieces / set', sizes: 'Sizes' };
+  // phone: products matching what is typed in a code box, to tap instead of typing the whole code
+  const matches = (r) => {
+    const t = String(r.code).trim().toLowerCase();
+    if (!t || r.found) return [];
+    return (products || []).filter((p) => p.active && (String(p.code).toLowerCase().includes(t) || String(p.name).toLowerCase().includes(t))).slice(0, 5);
+  };
+  const step = (r, by) => setRows((l) => l.map((x) => (x.key === r.key ? { ...x, count: Math.max(1, Math.round(n(x.count)) + by) } : x)));
+
+  if (narrow) {
+    return (
+      <Modal size="xl" title="Print stickers" subtitle="Type or tap a product — the rest fills in" onClose={onClose}
+        footer={<><button className="btn" onClick={onClose}>Close</button>
+          <button className="btn btn-primary" disabled={!total} onClick={print}><Icon name="print" /> Print {int(total)} sticker{total === 1 ? '' : 's'}</button></>}>
+        <div className="msk-list">
+          {rows.map((r, idx) => (
+            <div key={r.key} className="msk-card">
+              <div className="msk-head">
+                <b>Sticker {idx + 1}</b>
+                {rows.length > 1 && <button type="button" className="btn btn-sm btn-icon btn-ghost" title="Remove" onClick={() => setRows((x) => x.filter((y) => y.key !== r.key))}><Icon name="trash" size={16} /></button>}
+              </div>
+              <Field label="Product code">
+                <input className="input msk-code" value={r.code} placeholder="e.g. P0016" autoCapitalize="characters" autoComplete="off" enterKeyHint="done"
+                  onChange={(e) => lookUp(r, e.target.value)} />
+              </Field>
+              {matches(r).length > 0 && (
+                <div className="msk-hits">
+                  {matches(r).map((p) => (
+                    <button type="button" key={p.id} onClick={() => lookUp(r, p.code)}><b>{p.code}</b><span>{p.name}</span></button>
+                  ))}
+                </div>
+              )}
+              {r.found === false && <div className="sub text-amber">Not a product code — type the rest</div>}
+              <div className="msk-grid">
+                {cols.includes('name') && <Field label="Product name" className="msk-wide"><input className="input" value={r.name} onChange={(e) => upd(r.key, { name: e.target.value })} /></Field>}
+                {cols.includes('cc') && <Field label="Cost code"><input className="input cc-input" value={r.cc} autoCapitalize="characters" onChange={(e) => upd(r.key, { cc: e.target.value.toUpperCase() })} /></Field>}
+                {cols.includes('pcs') && <Field label="Pieces / set"><NumInput value={r.pcs} inputMode="numeric" enterKeyHint="done" onChange={(v) => upd(r.key, { pcs: v })} /></Field>}
+                {cols.includes('sizes') && <Field label="Sizes" className="msk-wide"><input className="input" value={r.sizes} placeholder="e.g. XL, L, M" onChange={(e) => upd(r.key, { sizes: e.target.value })} /></Field>}
+              </div>
+              <div className="msk-count">
+                <span>Stickers to print</span>
+                <div className="msk-step">
+                  <button type="button" onClick={() => step(r, -1)} disabled={Math.round(n(r.count)) <= 1} aria-label="One less">−</button>
+                  <NumInput value={r.count} inputMode="numeric" enterKeyHint="done" onChange={(v) => upd(r.key, { count: v })} />
+                  <button type="button" onClick={() => step(r, 1)} aria-label="One more">+</button>
+                </div>
+              </div>
+              {String(r.code).trim() && (
+                <div className="msk-preview">
+                  <Sticker d={{ ...d, border: true }} code={String(r.code).trim()} name={r.name} pcs={r.pcs} cc={r.cc} sizes={r.sizes} />
+                </div>
+              )}
+            </div>
+          ))}
+          <button type="button" className="msk-add" onClick={addRow}><Icon name="plus" size={16} /> Add another sticker</button>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal size="xl" title="Print stickers" subtitle="Type a product code — the rest fills in and can be changed. Add as many as you need and print them together."
       onClose={onClose}

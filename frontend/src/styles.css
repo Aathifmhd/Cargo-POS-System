@@ -1922,3 +1922,29 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .ac-meta .role-badge { font-size: 10.5px; padding: 1px 6px; }
 .ac-ok { margin-left: auto; }
 .ac-ok .badge { font-size: 10.5px; padding: 1px 7px; }
+
+/* manual stickers on a phone: one card a sticker — code (with products to tap), the details, a − / + count and a preview */
+.msk-list { display: flex; flex-direction: column; gap: 12px; }
+.msk-card { border: 1px solid var(--border); border-radius: 14px; padding: 12px; background: var(--surface); display: flex; flex-direction: column; gap: 10px; }
+.msk-head { display: flex; justify-content: space-between; align-items: center; min-height: 32px; }
+.msk-head b { font-size: 14px; }
+.msk-card .field { margin: 0; }
+.msk-code { font-size: 18px !important; font-weight: 750; letter-spacing: .04em; }
+.msk-hits { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-top: -4px; }
+.msk-hits button { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.msk-hits button:last-child { border-bottom: 0; }
+.msk-hits button:active { background: var(--row-hover); }
+.msk-hits b { flex: none; font-size: 14px; }
+.msk-hits span { min-width: 0; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.msk-grid .msk-wide { grid-column: 1 / -1; }
+.msk-count { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 2px; }
+.msk-count > span { font-size: 13px; font-weight: 650; color: var(--text-2); }
+.msk-step { display: flex; align-items: stretch; border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden; }
+.msk-step button { width: 44px; border: 0; background: var(--surface-2); color: var(--text); font-size: 22px; font-weight: 600; cursor: pointer; }
+.msk-step button:disabled { opacity: .35; }
+.msk-step button:active:not(:disabled) { background: var(--row-hover); }
+.msk-step .input { width: 64px; border: 0; border-radius: 0; text-align: center; font-size: 17px; font-weight: 750; }
+.msk-preview { display: flex; justify-content: center; padding: 10px; background: var(--surface-2); border-radius: 10px; overflow-x: auto; }
+.msk-add { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 48px; border: 1.5px dashed var(--border-strong); border-radius: 14px; background: transparent; color: var(--text-2); font: inherit; font-weight: 700; cursor: pointer; }
+.msk-add:active { background: var(--surface-2); }

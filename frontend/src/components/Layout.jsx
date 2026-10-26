@@ -116,7 +116,7 @@ export default function Layout() {
       if (e.key === 'F2') go('/');
       else if (e.key === 'F3' && !onPos) go('/pos');
       else if (e.key === 'F9') go('/sales');
-      else if (e.key === 'F7' && !onPos) go('/dues?tab=receivables');
+      else if (e.key === 'F7' && !onPos && !/^\/grn\/new/.test(location.pathname)) go('/dues?tab=receivables');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

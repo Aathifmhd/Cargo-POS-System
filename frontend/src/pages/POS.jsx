@@ -35,7 +35,7 @@ export const POS_KEYS = [
   ['F8', 'Bill discount'],
   ['F10', 'Take payment (same as Enter Enter)'],
   ['F7 / Ctrl + H', 'Hold the bill'],
-  ['F5', 'Held bills'],
+  ['F5 / Ctrl + R', 'Held bills'],
   ['F12', 'Reprint the last bill'],
   ['Ctrl + Delete', 'Clear the bill'],
   ['?', 'This list'],
@@ -387,7 +387,7 @@ export default function POS() {
       if (k === '`' || e.code === 'Backquote') return take(() => setShowCost((s) => !s));
       if (k === 'F1') return take(toCode);
       if (k === 'F4') return take(() => { setAfter(null); setModal('customer'); });
-      if (k === 'F5') return take(() => setModal('held'));
+      if (k === 'F5' || (e.ctrlKey && k.toLowerCase() === 'r')) return take(() => setModal('held'));
       if (k === 'F7' || (e.ctrlKey && k.toLowerCase() === 'h')) return take(hold);
       if (k === 'F8') return take(() => focus('tBillDisc'));
       if (k === 'F10') return take(openPay);
@@ -614,7 +614,7 @@ export default function POS() {
           onChangeCustomer={() => { setAfter('credit'); setModal('customer-credit'); }} />
       )}
       {modal === 'held' && (
-        <Modal title="Held bills" subtitle="Bills put aside on this computer (F7). Pick one to carry on with it." onClose={() => { setModal(null); toCode(); }}>
+        <Modal title="Held bills" subtitle="Bills put aside on this computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => { setModal(null); toCode(); }}>
           {held.length === 0 ? <p className="muted">No bills on hold.</p> : (
             <div className="stack-s">{held.map((b, idx) => (
               <div key={b.id} className="held-row">

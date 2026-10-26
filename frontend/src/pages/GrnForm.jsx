@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, n, r2, lkr, inr, isLocalSup, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
-import { PageHeader, Card, Icon, Field, NumInput, DateInput, Combobox, Segmented, useToast, Loading } from '../components/ui.jsx';
+import { PageHeader, Card, Icon, Field, NumInput, DateInput, Combobox, Segmented, Modal, useToast, Loading } from '../components/ui.jsx';
 import { SupplierForm } from '../components/forms.jsx';
 import SizePicker from '../components/SizePicker.jsx';
-import { useSettings } from '../App.jsx';
+import { useSettings, useAuth } from '../App.jsx';
 
 const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR; each item has its own cargo charge
+const HELD = 'cargo-grn-held';         // GRNs put aside on this computer (F7 / Ctrl+H), brought back with F5 / Ctrl+R
+const readHeld = () => { try { const l = JSON.parse(localStorage.getItem(HELD)); return Array.isArray(l) ? l : []; } catch { return []; } };
+const writeHeld = (l) => { try { localStorage.setItem(HELD, JSON.stringify(l)); } catch { /* storage full or blocked */ } };
 /** A supplier bill is due this many days after the supplier's bill date. */
 const GRN_DUE_DAYS = 60;
 let keySeq = 1;
@@ -323,6 +326,44 @@ export default function GrnForm() {
       if (editId) backToGrn(saved.id); else navigate(`/grn/${saved.id}`);
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   };
+  /* ---------- hold this GRN and start another; bring a held one back ---------- */
+  const me = useAuth().user;
+  const [held, setHeld] = useState(readHeld);
+  const [showHeld, setShowHeld] = useState(false);
+  const hasWork = Boolean(g.supplier_id || g.items.length || entryStarted || g.supplier_invoice_no);
+  const snapshot = () => {
+    const sup = (suppliers || []).find((s) => s.id === g.supplier_id);
+    return { id: Date.now(), at: new Date().toISOString(), by: me?.name || me?.username || '', supplier: sup?.name || 'No supplier yet', items: g.items.length, invoice: g.supplier_invoice_no || '', g };
+  };
+  const hold = () => {
+    if (editId) return toast('A GRN being edited can\'t be held — save or cancel it', 'error');
+    if (!hasWork) return toast('Nothing to hold yet', 'error');
+    const list = [...readHeld(), snapshot()];
+    writeHeld(list);
+    localStorage.removeItem(DRAFT);   // a clean form for the next GRN
+    toast(`GRN held — F5 or Ctrl + R brings it back`);
+    window.location.reload();
+  };
+  const resume = (h) => {
+    // the GRN on the form now is held in its place
+    const list = readHeld().filter((x) => x.id !== h.id);
+    writeHeld(hasWork ? [...list, snapshot()] : list);
+    localStorage.setItem(DRAFT, JSON.stringify(h.g));
+    window.location.reload();
+  };
+  const dropHeld = (h) => { if (!confirm(`Delete the held GRN of ${h.supplier}?`)) return; const list = readHeld().filter((x) => x.id !== h.id); writeHeld(list); setHeld(list); };
+  useEffect(() => {
+    if (editId) return undefined;
+    const key = (e) => {
+      if (document.querySelector('.modal') && !showHeld) return;
+      const k = e.key;
+      if (k === 'F7' || (e.ctrlKey && k.toLowerCase() === 'h')) { e.preventDefault(); e.stopPropagation(); hold(); }
+      else if (k === 'F5' || (e.ctrlKey && k.toLowerCase() === 'r')) { e.preventDefault(); e.stopPropagation(); setHeld(readHeld()); setShowHeld((x) => !x); }
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }); // eslint-disable-line
+
   const reset = () => { if (confirm('Clear this form and start again?')) { localStorage.removeItem(DRAFT); setG({ ...initial, items: [], entry: blankItem(), editingKey: null, supplier_id: null }); window.location.reload(); } };
 
   // Cancel / Back while editing: ask before throwing away changes
@@ -344,7 +385,11 @@ export default function GrnForm() {
           </>} />
       ) : (
         <PageHeader title="Receive Goods (GRN)" subtitle="Enter a shipment from India. The system works out the real cost of every item in LKR."
-          actions={<button className="btn btn-ghost" onClick={reset}><Icon name="trash" size={16} /> Clear form</button>} />
+          actions={<>
+            <button className="btn" onClick={hold} disabled={!hasWork} title="Put this GRN aside and start another (F7 / Ctrl + H)"><Icon name="pause" size={16} /> Hold GRN <kbd>F7</kbd></button>
+            <button className="btn" onClick={() => { setHeld(readHeld()); setShowHeld(true); }} title="Held GRNs (F5 / Ctrl + R)"><Icon name="clock" size={16} /> Held GRNs{held.length > 0 && <b className="count-dot">{held.length}</b>} <kbd>F5</kbd></button>
+            <button className="btn btn-ghost" onClick={reset}><Icon name="trash" size={16} /> Clear form</button>
+          </>} />
       )}
 
       <div className="grn-layout">
@@ -723,6 +768,25 @@ export default function GrnForm() {
       {newSupplier != null && (
         <SupplierForm initialName={newSupplier} initialOrigin={g.origin || 'india'} onClose={() => setNewSupplier(null)}
           onSaved={(s) => { setSuppliers((x) => [...x, { ...s, balance_inr: s.opening_balance_inr }]); set('supplier_id')(s.id); setNewSupplier(null); }} />
+      )}
+      {showHeld && (
+        <Modal title="Held GRNs" subtitle="GRNs put aside on this computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => setShowHeld(false)}>
+          {!held.length ? <p className="muted">No GRN held. Press <kbd>F7</kbd> or <kbd>Ctrl + H</kbd> to put the one on the form aside.</p> : (
+            <div className="stack-s">
+              {held.slice().reverse().map((h) => (
+                <div key={h.id} className="list-row">
+                  <div><div className="t">{h.supplier}{h.invoice ? ` · invoice ${h.invoice}` : ''}</div>
+                    <div className="s">{h.items} item{h.items === 1 ? '' : 's'} · held {new Date(h.at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{h.by ? ` by ${h.by}` : ''}</div></div>
+                  <div className="row gap-s">
+                    <button className="btn btn-sm btn-primary" onClick={() => resume(h)}><Icon name="arrowRight" size={14} /> Carry on</button>
+                    <button className="btn btn-sm btn-icon btn-ghost" title="Delete" onClick={() => dropHeld(h)}><Icon name="trash" size={15} /></button>
+                  </div>
+                </div>
+              ))}
+              {hasWork && <p className="muted small">The GRN on the form now is held in its place.</p>}
+            </div>
+          )}
+        </Modal>
       )}
     </div>
   );

@@ -78,3 +78,51 @@ export function useKeyboardOpen() {
     };
   }, []);
 }
+
+/**
+ * Phones: pull the page down from the top to refresh it (the browser's own pull-to-refresh is off, so the page
+ * doesn't bounce). A round arrow follows the finger; let go past the mark and the page reloads with fresh data
+ * (a bill or GRN being made is kept — they are saved as you go). Not while a pop-up or the menu is open, while
+ * typing, or once the page is scrolled down. Returns how far it is pulled (0 … 1+) for the arrow.
+ */
+export const PULL_TRIGGER = 70;   // px of pull that refreshes
+export function usePullToRefresh(enabled = true) {
+  const [pull, setPull] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let startY = null; let dist = 0;
+    const blocked = (el) => document.querySelector('.modal') || document.documentElement.classList.contains('kb-open')
+      || document.querySelector('.nav-open') || el?.closest?.('.modal, .sidebar, .till-hits, .table-wrap[style*="overflow"]');
+    const onStart = (e) => {
+      if (e.touches.length !== 1 || window.scrollY > 0 || blocked(e.target)) { startY = null; return; }
+      startY = e.touches[0].clientY; dist = 0;
+    };
+    const onMove = (e) => {
+      if (startY == null) return;
+      const dy = e.touches[0].clientY - startY;
+      if (dy <= 0 || window.scrollY > 0) { dist = 0; setPull(0); return; }
+      dist = Math.min(dy * 0.5, PULL_TRIGGER * 1.6);   // resistance: the arrow moves half as far as the finger
+      setPull(dist / PULL_TRIGGER);
+      if (e.cancelable) e.preventDefault();
+    };
+    const onEnd = () => {
+      if (startY == null) return;
+      startY = null;
+      if (dist >= PULL_TRIGGER) { setRefreshing(true); setPull(1); setTimeout(() => window.location.reload(), 150); }
+      else setPull(0);
+      dist = 0;
+    };
+    document.addEventListener('touchstart', onStart, { passive: true });
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+    document.addEventListener('touchcancel', onEnd);
+    return () => {
+      document.removeEventListener('touchstart', onStart);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onEnd);
+    };
+  }, [enabled]);
+  return { pull, refreshing };
+}

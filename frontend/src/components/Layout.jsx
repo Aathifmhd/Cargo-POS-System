@@ -4,7 +4,7 @@ import { Icon, ThemeSwitch, Modal, useToast } from './ui.jsx';
 import { ChangePasswordModal } from './auth.jsx';
 import { api, isAdmin, isSuper, can, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime } from '../lib.js';
 import { useAuth, useFx, useSettings } from '../App.jsx';
-import { useTableLabels, useKeyboardOpen } from './mobile.js';
+import { useTableLabels, useKeyboardOpen, usePullToRefresh, PULL_TRIGGER } from './mobile.js';
 
 const BACKUP_SNOOZE = 'cargo-backup-snooze';   // the day "Remind me tomorrow" was pressed
 
@@ -54,6 +54,7 @@ export default function Layout() {
   const atPos = location.pathname === '/pos';   // New Sale: its Take Payment bar sits above the tab bar
   useTableLabels();   // phones: tables shown as cards, each value with its column's name
   useKeyboardOpen();  // phones: the tab bar steps aside while the keyboard is open
+  const { pull, refreshing } = usePullToRefresh();   // phones: pull down from the top to refresh
 
   /*
    * Monthly backup reminder (admins): from the 1st of each month until a full backup is downloaded that month.
@@ -192,6 +193,13 @@ export default function Layout() {
         </div>
         <div key={location.pathname} className="page-in"><Outlet /></div>
       </main>
+      {/* phones: pull to refresh — the arrow follows the finger, turns, and spins while the page reloads */}
+      {(pull > 0 || refreshing) && (
+        <div className={`ptr ${pull >= 1 ? 'ready' : ''} ${refreshing ? 'spin' : ''}`} style={{ transform: `translate(-50%, ${Math.min(pull, 1.6) * PULL_TRIGGER - 46}px)` }} aria-hidden="true">
+          <span className="ptr-ball" style={{ transform: `rotate(${Math.min(pull, 1) * 300}deg)` }}><Icon name="refresh" size={18} /></span>
+          <span className="ptr-text">{refreshing ? 'Refreshing…' : pull >= 1 ? 'Release to refresh' : 'Pull to refresh'}</span>
+        </div>
+      )}
       {/* phones: the daily jobs at the thumb; everything else is under Menu */}
       <nav className="bottom-nav" aria-label="Main">
         {BOTTOM.map((i) => (!i.perm || can(user, i.perm) ? i : i.else)).filter(Boolean).map((i) => (

@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
 
+/** A phone or a touch screen: a choice in a pop-up acts on a tap (no Continue / Enter buttons), no keyboard hints. */
+export function usePhone() {
+  const narrow = useNarrow();
+  const [touch] = useState(() => typeof window !== 'undefined' && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+  return narrow || touch;
+}
+
 /** True on a phone-sized screen (follows the window as it is resized or turned). */
 export function useNarrow(width = 900) {
   const q = `(max-width: ${width}px)`;
@@ -60,16 +67,21 @@ export function useKeyboardOpen() {
       || el.tagName === 'SELECT');
     const vv = window.visualViewport;
     let timer;
+    let touchedAt = 0;   // the last tap: a box focused without one (autofocus) doesn't open the phone's keyboard
+    let tapped = false;
     const update = () => {
       const shrunk = vv ? vv.height < window.innerHeight * 0.78 : false;
-      root.classList.toggle('kb-open', typingBox(document.activeElement) || shrunk);
+      root.classList.toggle('kb-open', (tapped && typingBox(document.activeElement)) || shrunk);
     };
-    const onIn = () => { clearTimeout(timer); update(); };
-    const onOut = () => { clearTimeout(timer); timer = setTimeout(update, 120); };   // the next box may take the focus straight away
+    const onTouch = () => { touchedAt = Date.now(); };
+    const onIn = () => { clearTimeout(timer); tapped = Date.now() - touchedAt < 1000; update(); };
+    const onOut = () => { clearTimeout(timer); timer = setTimeout(() => { if (!typingBox(document.activeElement)) tapped = false; update(); }, 120); };   // the next box may take the focus straight away
+    document.addEventListener('touchstart', onTouch, { passive: true });
     document.addEventListener('focusin', onIn);
     document.addEventListener('focusout', onOut);
     vv?.addEventListener('resize', update);
     return () => {
+      document.removeEventListener('touchstart', onTouch);
       document.removeEventListener('focusin', onIn);
       document.removeEventListener('focusout', onOut);
       vv?.removeEventListener('resize', update);

@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom';
 import { money, lkr, niceDate, niceTime, int, today } from '../lib.js';
 import { Field, NumInput, Icon, Modal, useToast } from './ui.jsx';
 import { useSettings } from '../App.jsx';
+import { usePhone } from './mobile.js';
 
 /*
  * Printed bills, in two sizes: A5 landscape (the usual one) and an 80 mm receipt.
@@ -210,6 +211,7 @@ export function SizeChoice({ value, onChange, onPick }) {
 /** Print a bill again (bill view, New Sale's reprint): choose the size, it prints on this page. */
 export function PrintChoiceModal({ sale, onClose }) {
   const { settings } = useSettings();
+  const phone = usePhone();   // a phone: tapping A5 or 80 mm prints
   const toast = useToast();
   const [size, setSize] = useState(billDesign(settings).default_size);
   const go = async (sz) => {
@@ -217,8 +219,8 @@ export function PrintChoiceModal({ sale, onClose }) {
     onClose();
   };
   return (
-    <Modal size="sm" title={`Print ${sale.invoice_no}`} subtitle="← → to choose · Enter to print" onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Cancel</button><span className="spacer" /><button className="btn btn-primary" onClick={() => go(size)}><Icon name="print" /> Print {size === '80' ? '80 mm' : 'A5'}</button></>}>
+    <Modal size="sm" title={`Print ${sale.invoice_no}`} subtitle={phone ? 'Tap a size to print' : '← → to choose · Enter to print'} onClose={onClose}
+      footer={<><button className="btn" onClick={onClose}>Cancel</button><span className="spacer" />{!phone && <button className="btn btn-primary" onClick={() => go(size)}><Icon name="print" /> Print {size === '80' ? '80 mm' : 'A5'}</button>}</>}>
       <SizeChoice value={size} onChange={setSize} onPick={go} />
     </Modal>
   );

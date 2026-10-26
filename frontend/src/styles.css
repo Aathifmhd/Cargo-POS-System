@@ -1775,3 +1775,45 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .till-hitwrap.mobile .till-hits tr td, .till-hitwrap.mobile .till-hits tr:hover td { background: transparent; }
   .till-hitwrap.mobile .till-hits tr.on, .till-hitwrap.mobile .till-hits tr:active { background: var(--gold-soft); }
 }
+
+/* touch screens: no keyboard key badges anywhere (F1, F7, Enter, Esc …) — choices are tapped */
+@media (hover: none) and (pointer: coarse) { kbd { display: none !important; } }
+@media (max-width: 860px) {
+  .pt-card kbd, .size-card kbd { display: none; }
+  .pt-card, .size-card, .return-kind { min-height: 96px; }
+  .pt-card:active, .return-kind:active { transform: scale(.97); }
+}
+@media (max-width: 860px) {
+  /* New Sale on a phone: no key badges beside the box names (F1, F8 …) */
+  .till-entry label > span > i, .till-entry .f-item > span > i, .sum-line > span > i, .till-gp kbd { display: none; }
+}
+
+/* New Sale on a phone:
+   · no invoice summary — the floating Take Payment bar shows items · pieces and the total (the bill discount box stays)
+   · the bill's buttons (Hold, Held, Clear, Last bill) at the top, beside the customer */
+.head-acts { display: none; }
+@media (max-width: 860px) {
+  .till-sum .sum-top, .till-sum .sum-net, .till-sum .sum-gp, .till-sum .sum-acts,
+  .till-sum .sum-block > .sum-line:not(.edit) { display: none; }
+  .till-sum .sum-block { padding-top: 10px; padding-bottom: 10px; }
+
+  .till-head .till-who { order: 5; flex: 1 1 0; min-width: 0; }
+  .head-acts { order: 6; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: 0 0 132px; }
+  .head-acts button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 46px; padding: 4px; border: 0; border-radius: var(--t-r); background: var(--surface); color: var(--t-ink); font: inherit; font-size: 11px; font-weight: 750; cursor: pointer; }
+  .head-acts button:disabled { opacity: .45; }
+  .head-acts button:active:not(:disabled) { transform: scale(.95); }
+  .head-acts .count-dot { position: absolute; top: -5px; right: -5px; }
+
+  .pay-bar { text-align: left; }
+  .pb-left { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .pb-left small { font-size: 12px; font-weight: 600; opacity: .8; }
+  .pay-bar .pb-total { font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+}
+@media (max-width: 860px) {
+  /* the top of New Sale on a phone: date | bill no, then customer | Hold · Held · Clear · Last bill */
+  .till-head .till-date, .till-head .till-no { flex: 1 1 calc(50% - 4px); order: 1; }
+  .till-head .till-who { order: 5; flex: 1 1 0; min-width: 0; padding-right: 12px; }
+  .till-head .head-acts { order: 6; }
+  .till-head .till-who > b { font-size: 16px; }
+  .till-head .till-who em, .till-head .till-who > span:not(.till-whobtn) { white-space: normal; }
+}

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers, costGroups, seesCost, codeOf } from '../lib.js';
 import { Icon, Modal, Field, NumInput, DateInput, CostBadge, useToast, Loading, useListKeys } from '../components/ui.jsx';
 import { printBill, billDesign, SizeChoice, PrintChoiceModal } from '../components/Bill.jsx';
-import { useNarrow } from '../components/mobile.js';
+import { useNarrow, usePhone } from '../components/mobile.js';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 import { isAdmin, isSuper, custName, custPerson, niceTime, costCode } from '../lib.js';
@@ -505,10 +505,20 @@ export default function POS() {
           <b>{customer ? custName(customer).toUpperCase() : 'WALK-IN CUSTOMER'}</b>
           <em>{customer
             ? <>{custPerson(customer) ? `${custPerson(customer)} · ` : ''}{customer.phone || 'no phone'} · due {money(owed)}{customer.credit_limit > 0 ? ` of ${money(customer.credit_limit)}` : ''}{overLimit ? ' · OVER LIMIT' : ''}</>
-            : 'no account · press F4 to choose'}</em>
+            : narrow ? 'no account · tap to choose' : 'no account · press F4 to choose'}</em>
           <span>cashier <b>{user.name}</b></span>
           <span className="till-whobtn">{customer ? 'Change' : 'Choose'} customer <i>F4</i></span>
         </div>
+
+        {/* phones: the bill's buttons beside the customer (the summary at the bottom is not shown on a phone) */}
+        {narrow && (
+          <div className="head-acts">
+            <button onClick={hold} disabled={!lines.length}><Icon name="pause" size={16} /><span>Hold</span></button>
+            <button onClick={() => { loadHeld(); setModal('held'); }}><Icon name="clock" size={16} /><span>Held</span>{held.length > 0 && <b className="count-dot">{held.length}</b>}</button>
+            <button onClick={() => { if (!lines.length || confirm('Clear this bill?')) clearBill(); }} disabled={!lines.length && !customerId}><Icon name="trash" size={16} /><span>Clear</span></button>
+            <button onClick={reprint}><Icon name="print" size={16} /><span>Last bill</span></button>
+          </div>
+        )}
 
         <div className="till-date">
           <div><b>{now.toLocaleDateString('en-GB', { weekday: 'long' })}</b> <span>{now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</span></div>
@@ -535,7 +545,7 @@ export default function POS() {
             {cur ? <>
               <b>{cur.name.toUpperCase()}</b>
               <em>{cur.code}{cur.sizes ? ` · ${cur.sizes}` : ''}{curB && groupsOf(cur).length > 1 ? ` · ${batchText(curB)}` : ''} · stock {freePcs(cur, curB) > 0 ? pcsText(freePcs(cur, curB)) : 'none — sells without stock'}</em>
-            </> : <i>scan or key a code — F1</i>}
+            </> : <i>{narrow ? 'search above, then tap a product' : 'scan or key a code — F1'}</i>}
           </div>
         </div>
         <label className="f-qty"><span>QTY (PCS)</span>
@@ -670,7 +680,10 @@ export default function POS() {
         onClose={() => setPriceHist(null)} />}
       {/* phones: Take Payment always one tap away */}
       {narrow && lines.length > 0 && !modal && (
-        <button className="pay-bar" onClick={openPay}><b>TAKE PAYMENT</b><span>{lkr(T.net)}</span></button>
+        <button className="pay-bar" onClick={openPay}>
+          <span className="pb-left"><b>TAKE PAYMENT</b><small>{lines.length} item{lines.length === 1 ? '' : 's'} · {T.pcs} pcs</small></span>
+          <span className="pb-total">{lkr(T.net)}</span>
+        </button>
       )}
       {reprinting && <PrintChoiceModal sale={reprinting} onClose={() => { setReprinting(null); toCode(); }} />}
       {done && (
@@ -683,6 +696,7 @@ export default function POS() {
 
 /* ---------------- held bills: ↑ ↓ to pick, Enter to carry on, Delete to remove ---------------- */
 function HeldBills({ held, onResume, onDelete }) {
+  const phone = usePhone();
   const [hi, setHi] = useListKeys(held.length, { onEnter: (i) => onResume(held[i]), onDelete: (i) => onDelete(held[i]) });
   if (!held.length) return <p className="muted">No bills on hold.</p>;
   return (
@@ -697,7 +711,7 @@ function HeldBills({ held, onResume, onDelete }) {
           <button className="btn btn-sm btn-icon btn-ghost" tabIndex={-1} title="Delete" onClick={() => onDelete(b)}><Icon name="trash" size={15} /></button>
         </div>))}
       </div>
-      <p className="muted small mt-s"><kbd>↑</kbd> <kbd>↓</kbd> to pick · <kbd>Enter</kbd> to carry on · <kbd>Delete</kbd> to remove · <kbd>Esc</kbd> to close</p>
+      {!phone && <p className="muted small mt-s"><kbd>↑</kbd> <kbd>↓</kbd> to pick · <kbd>Enter</kbd> to carry on · <kbd>Delete</kbd> to remove · <kbd>Esc</kbd> to close</p>}
     </>
   );
 }
@@ -706,6 +720,7 @@ function HeldBills({ held, onResume, onDelete }) {
 /** ← → picks Normal or Damaged, Enter chooses it (the highlighted one), Esc goes back. */
 export function ReturnKind({ onChoose, onClose }) {
   const [sel, setSel] = useState(0);   // 0 = normal, 1 = damaged
+  const phone = usePhone();
   const refs = [useRef(), useRef()];
   const opened = useRef(Date.now());   // an Enter still held from adding the line doesn't choose
   useEffect(() => { refs[sel].current?.focus(); }, [sel]);   // eslint-disable-line
@@ -722,7 +737,7 @@ export function ReturnKind({ onChoose, onClose }) {
     return () => window.removeEventListener('keydown', key, true);
   }, [onChoose]); // eslint-disable-line
   return (
-    <Modal size="sm" title="What kind of return is this?" subtitle="← → to pick · Enter to choose" onClose={onClose}>
+    <Modal size="sm" title="What kind of return is this?" subtitle={phone ? 'Tap one' : '← → to pick · Enter to choose'} onClose={onClose}>
       <div className="return-kinds">
         <button type="button" ref={refs[0]} className={`return-kind normal ${sel === 0 ? 'on' : ''}`} onFocus={() => setSel(0)} onClick={() => onChoose(false)}>
           <b>Normal return</b><small>In good condition — goes back into the stock</small>
@@ -737,6 +752,7 @@ export function ReturnKind({ onChoose, onClose }) {
 
 /* ---------------- customer picker (F4) ---------------- */
 function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose }) {
+  const phone = usePhone();
   const [q, setQ] = useState('');
   const [hi, setHi] = useState(0);
   const list = useMemo(() => {
@@ -751,7 +767,7 @@ function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose
     if (e.key === 'Enter') { e.preventDefault(); const c = list[Math.min(hi, list.length - 1)]; if (c) onPick(c.id); }
   };
   return (
-    <Modal title={creditOnly ? 'Who is this credit bill for?' : 'Choose customer'} subtitle="Type a shop, name, phone or town · ↑ ↓ · Enter" onClose={onClose}
+    <Modal title={creditOnly ? 'Who is this credit bill for?' : 'Choose customer'} subtitle={phone ? 'Type a shop, name, phone or town — tap to choose' : 'Type a shop, name, phone or town · ↑ ↓ · Enter'} onClose={onClose}
       footer={<>
         <button className="btn btn-primary" onClick={() => onNew(q.trim())} style={{ marginRight: 'auto' }}>
           <Icon name="plus" size={16} /> {q.trim() ? `Add customer “${q.trim()}”` : 'Add customer'}
@@ -775,6 +791,7 @@ function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose
 
 /* ---------------- take payment (F10) ---------------- */
 function PayModal({ total, busy, onPay, onClose }) {
+  const phone = usePhone();
   const [got, setGot] = useState('');
   const settled = useSettled();
   const done = useRef(false);   // one bill per pop-up, however many times the button is pressed
@@ -796,7 +813,7 @@ function PayModal({ total, busy, onPay, onClose }) {
   const go = (e) => { e.preventDefault(); if (n(got) && change < 0) return; pay(n(got) || total); };
   return (
     <Modal size="sm" title="Take payment — cash" onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Back</button><button className="btn btn-primary" form="pay-form" disabled={busy || (n(got) > 0 && change < 0)}><Icon name="check" /> {busy ? 'Saving…' : 'Finish bill (Enter)'}</button></>}>
+      footer={<><button className="btn" onClick={onClose}>Back</button><button className="btn btn-primary" form="pay-form" disabled={busy || (n(got) > 0 && change < 0)}><Icon name="check" /> {busy ? 'Saving…' : phone ? 'Finish bill' : 'Finish bill (Enter)'}</button></>}>
       <form id="pay-form" className="stack" onSubmit={go} onKeyDown={noHeldEnter}>
         <div className="pay-total"><span>To pay</span><b>{lkr(total)}</b></div>
         <Field label="Cash received" hint="Leave empty if they paid the exact amount">
@@ -829,6 +846,7 @@ const noHeldEnter = (e) => { if (e.key === 'Enter' && e.repeat) { e.preventDefau
 /* ---------------- take payment: cash or credit? ---------------- */
 function PayTypeModal({ total, customer, onChoose, onClose }) {
   const [type, setType] = useState('cash');   // cash is the default
+  const phone = usePhone();   // a phone: tapping Cash or Credit goes on straight away
   const boxRef = useRef();
   // Keys are read from the pop-up itself (it takes the focus), never from the window — so the Enter
   // that opened it can't also answer it.
@@ -841,13 +859,13 @@ function PayTypeModal({ total, customer, onChoose, onClose }) {
   };
   return (
     <Modal size="sm" title={total < 0 ? 'Refund' : 'Take payment'} subtitle={total < 0 ? `${lkr(-total)} to give back · how?` : `${lkr(total)} · how is the customer paying?`} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Back</button><button className="btn btn-primary" onClick={() => onChoose(type)}><Icon name="arrowRight" /> Continue (Enter)</button></>}>
+      footer={<><button className="btn" onClick={onClose}>Back</button>{!phone && <button className="btn btn-primary" onClick={() => onChoose(type)}><Icon name="arrowRight" /> Continue (Enter)</button>}</>}>
       <div className="paytype" ref={boxRef} tabIndex={-1} onKeyDown={onKey} role="radiogroup" aria-label="Payment type">
-        <button tabIndex={-1} className={`pt-card ${type === 'cash' ? 'on' : ''}`} onClick={() => setType('cash')} onDoubleClick={() => onChoose('cash')}>
+        <button tabIndex={-1} className={`pt-card ${type === 'cash' ? 'on' : ''}`} onClick={() => (phone ? onChoose('cash') : setType('cash'))} onDoubleClick={() => onChoose('cash')}>
           <span className="pt-icon"><Icon name="cash" size={24} /></span>
           <b>Cash</b><small>{total < 0 ? 'Give the money back now' : 'Paid now in full'}</small><kbd>1</kbd>
         </button>
-        <button tabIndex={-1} className={`pt-card credit ${type === 'credit' ? 'on' : ''}`} onClick={() => setType('credit')} onDoubleClick={() => onChoose('credit')}>
+        <button tabIndex={-1} className={`pt-card credit ${type === 'credit' ? 'on' : ''}`} onClick={() => (phone ? onChoose('credit') : setType('credit'))} onDoubleClick={() => onChoose('credit')}>
           <span className="pt-icon"><Icon name="clock" size={24} /></span>
           <b>{total < 0 ? 'To account' : 'Credit'}</b><small>{total < 0 ? (customer ? `Off what ${custName(customer)} owes` : 'Registered customers only') : customer ? `On ${custName(customer)}'s account` : 'Registered customers only'}</small><kbd>2</kbd>
         </button>
@@ -858,6 +876,8 @@ function PayTypeModal({ total, customer, onChoose, onClose }) {
 
 /* ---------------- on account (credit) ---------------- */
 function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onChangeCustomer, onClose }) {
+  const phone = usePhone();
+  const key = phone ? '' : ' (Enter)';
   const [paid, setPaid] = useState('');
   const [due, setDue] = useState(addDays(today(), customer.credit_days || 0));
   const [raising, setRaising] = useState(false);
@@ -884,7 +904,7 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
       footer={<>
         <button className="btn" onClick={raising ? () => setRaising(false) : onClose}>Back</button>
         <button className="btn btn-primary" form="credit-form" disabled={busy || (raising && n(newLimit) < after)}>
-          <Icon name={over ? 'shield' : 'check'} /> {busy ? 'Saving…' : refund ? 'Credit to account (Enter)' : !over ? 'Put on account (Enter)' : raising ? 'Raise limit & bill (Enter)' : 'Raise credit limit… (Enter)'}
+          <Icon name={over ? 'shield' : 'check'} /> {busy ? 'Saving…' : `${refund ? 'Credit to account' : !over ? 'Put on account' : raising ? 'Raise limit & bill' : 'Raise credit limit…'}${key}`}
         </button>
       </>}>
       <form id="credit-form" className="stack" onSubmit={submit} onKeyDown={noHeldEnter}>
@@ -927,6 +947,7 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
 
 /* ---------------- F3: what the product was sold for before (to this customer, or to anyone) ---------------- */
 export function PriceHistoryModal({ product, customer, onUse, onClose }) {
+  const phone = usePhone();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   useEffect(() => {
@@ -937,7 +958,7 @@ export function PriceHistoryModal({ product, customer, onUse, onClose }) {
   return (
     <Modal size="lg" title={`Price history — ${product.code}`} onClose={onClose}
       subtitle={<>{product.name} · {customer ? <b>{custName(customer)}</b> : <span><b>Walk-in customer</b> — walk-in sales first, then registered customers</span>}</>}
-      footer={<><span className="muted small">{onUse ? '↑ ↓ and Enter to use a price · ' : ''}F3 or Esc to close</span><span className="spacer" /><button className="btn" onClick={onClose}>Close (F3)</button></>}>
+      footer={<><span className="muted small">{phone ? (onUse ? 'Tap a price to use it' : '') : `${onUse ? '↑ ↓ and Enter to use a price · ' : ''}F3 or Esc to close`}</span><span className="spacer" /><button className="btn" onClick={onClose}>Close (F3)</button></>}>
       {error ? <p className="text-red">{error}</p> : !data ? <Loading /> : !lines.length ? (
         <p className="muted">{customer ? `${custName(customer)} has not bought this product before.` : 'This product has not been sold yet.'}</p>
       ) : (
@@ -968,6 +989,7 @@ export function PriceHistoryModal({ product, customer, onUse, onClose }) {
 
 /* ---------------- bill saved: print it — A5 (usual) or 80 mm, ← → to choose, Enter to print ---------------- */
 export function DoneModal({ sale, change, onClose, onView }) {
+  const phone = usePhone();   // a phone: tapping A5 or 80 mm prints
   const { settings } = useSettings();
   const toast = useToast();
   const [size, setSize] = useState(() => billDesign(settings).default_size);
@@ -987,9 +1009,9 @@ export function DoneModal({ sale, change, onClose, onView }) {
     <Modal size="md" title="Bill saved ✔ — print it?" subtitle={`${sale.invoice_no} · ${sale.customer_name}`} onClose={onClose}
       footer={<>
         <button className="btn" onClick={onView}>View bill</button>
-        <button className="btn" onClick={onClose}>Don't print (Esc)</button>
+        <button className="btn" onClick={onClose}>{phone ? "Don't print" : "Don't print (Esc)"}</button>
         <span className="spacer" />
-        <button className="btn btn-primary" disabled={busy} onClick={() => print(size)}><Icon name="print" /> Print {size === '80' ? '80 mm' : 'A5'} (Enter)</button>
+        {!phone && <button className="btn btn-primary" disabled={busy} onClick={() => print(size)}><Icon name="print" /> Print {size === '80' ? '80 mm' : 'A5'} (Enter)</button>}
       </>}>
       <SizeChoice value={size} onChange={setSize} onPick={print} />
       <div className="done-sum">

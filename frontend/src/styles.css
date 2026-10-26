@@ -1824,3 +1824,4 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .key-list .held-grn .s { font-size: 12.5px; margin-top: 2px; }
   .key-list .held-grn:active, .key-list .held-row:active { background: var(--row-hover); }
 }
+.key-list .held-row { cursor: pointer; }

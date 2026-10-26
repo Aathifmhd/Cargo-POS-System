@@ -859,7 +859,7 @@ export default function GrnForm() {
           onSaved={(s) => { setSuppliers((x) => [...x, { ...s, balance_inr: s.opening_balance_inr }]); set('supplier_id')(s.id); setNewSupplier(null); }} />
       )}
       {showHeld && (
-        <Modal title="Held GRNs" subtitle="GRNs put aside by anyone, on any computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => setShowHeld(false)}>
+        <Modal title="Held GRNs" onClose={() => setShowHeld(false)}>
           <HeldGrns held={held.slice().reverse()} hasWork={hasWork} onResume={resume} onDelete={dropHeld} />
         </Modal>
       )}

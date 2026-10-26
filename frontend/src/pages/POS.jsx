@@ -665,7 +665,7 @@ export default function POS() {
           onChangeCustomer={() => { setAfter('credit'); setModal('customer-credit'); }} />
       )}
       {modal === 'held' && (
-        <Modal title="Held bills" subtitle="Bills put aside by anyone, on any computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => { setModal(null); toCode(); }}>
+        <Modal title="Held bills" onClose={() => { setModal(null); toCode(); }}>
           <HeldBills held={held} onResume={resume} onDelete={dropHeld} />
         </Modal>
       )}
@@ -702,13 +702,12 @@ function HeldBills({ held, onResume, onDelete }) {
   return (
     <>
       <div className="stack-s key-list">{held.map((b, idx) => (
-        <div key={b.id} className={`held-row ${idx === hi ? 'on' : ''}`} onMouseEnter={() => setHi(idx)} onDoubleClick={() => onResume(b)}>
+        <div key={b.id} className={`held-row ${idx === hi ? 'on' : ''}`} onMouseEnter={() => setHi(idx)} onClick={() => onResume(b)} role="button" title="Carry on with this bill">
           <span className="held-no">{idx + 1}</span>
           <div className="spacer"><div className="strong">{b.label}</div>
             <div className="muted small">{b.lines.length} lines · {new Date(b.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · by {b.by}</div></div>
           <b className="mono">{lkr(b.lines.reduce((s, l) => s + lineCalc(l).amount, 0))}</b>
-          <button className="btn btn-sm btn-primary" tabIndex={-1} onClick={() => onResume(b)}>Continue</button>
-          <button className="btn btn-sm btn-icon btn-ghost" tabIndex={-1} title="Delete" onClick={() => onDelete(b)}><Icon name="trash" size={15} /></button>
+          <button className="btn btn-sm btn-icon btn-ghost" tabIndex={-1} title="Delete" onClick={(e) => { e.stopPropagation(); onDelete(b); }}><Icon name="trash" size={15} /></button>
         </div>))}
       </div>
       {!phone && <p className="muted small mt-s"><kbd>↑</kbd> <kbd>↓</kbd> to pick · <kbd>Enter</kbd> to carry on · <kbd>Delete</kbd> to remove · <kbd>Esc</kbd> to close</p>}

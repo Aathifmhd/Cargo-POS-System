@@ -1817,3 +1817,10 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .till-head .till-who > b { font-size: 16px; }
   .till-head .till-who em, .till-head .till-who > span:not(.till-whobtn) { white-space: normal; }
 }
+/* phones: a held GRN is a card like a held bill — bordered, roomy, easy to tap */
+@media (max-width: 860px) {
+  .key-list .held-grn, .key-list .held-row { min-height: 64px; padding: 12px 12px; border: 1px solid var(--border); border-radius: 12px; border-bottom: 1px solid var(--border); }
+  .key-list .held-grn .t { font-size: 15px; font-weight: 700; }
+  .key-list .held-grn .s { font-size: 12.5px; margin-top: 2px; }
+  .key-list .held-grn:active, .key-list .held-row:active { background: var(--row-hover); }
+}

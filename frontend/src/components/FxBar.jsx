@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { api, n } from '../lib.js';
+import { api, n, isAdmin } from '../lib.js';
 import { Icon, Modal, Field, NumInput, Segmented, useToast } from './ui.jsx';
-import { useFx } from '../App.jsx';
+import { useFx, useAuth } from '../App.jsx';
 
 function ago(iso) {
   if (!iso) return 'never';
@@ -30,6 +30,7 @@ function Spark({ points }) {
 /** The live INR rate strip at the top of the dashboard. */
 export default function FxBar() {
   const { fx, setFx, reloadFx } = useFx();
+  const admin = isAdmin(useAuth().user);   // Refresh and Edit are for Admins; Cashier, KP and Employee only see the rate
   const toast = useToast();
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -66,10 +67,10 @@ export default function FxBar() {
         {fx.error && <span className="fx-err" title={fx.error}><Icon name="alert" size={13} /> offline — last known rate</span>}
         <span className="fx-note">Unpaid credit GRNs are re-costed with this rate</span>
       </div>
-      <div className="fx-actions">
+      {admin && <div className="fx-actions">
         {!manual && <button className="btn btn-sm" onClick={refresh} disabled={busy} title="Fetch the rate now"><Icon name="adjust" size={14} /> {busy ? 'Checking…' : 'Refresh'}</button>}
         <button className="btn btn-sm" onClick={() => setEditing(true)}><Icon name="edit" size={14} /> Edit</button>
-      </div>
+      </div>}
       {editing && <FxEdit fx={fx} onClose={() => setEditing(false)} onSaved={(d) => { setFx(d); setEditing(false); reloadFx(); }} />}
     </div>
   );

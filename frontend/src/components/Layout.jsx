@@ -4,7 +4,7 @@ import { Icon, ThemeSwitch, Modal, useToast } from './ui.jsx';
 import { ChangePasswordModal } from './auth.jsx';
 import { api, isAdmin, isSuper, can, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime } from '../lib.js';
 import { useAuth, useFx, useSettings } from '../App.jsx';
-import { useTableLabels } from './mobile.js';
+import { useTableLabels, useKeyboardOpen } from './mobile.js';
 
 const BACKUP_SNOOZE = 'cargo-backup-snooze';   // the day "Remind me tomorrow" was pressed
 
@@ -53,6 +53,7 @@ export default function Layout() {
   useEffect(() => setOpen(false), [location.pathname]);
   const atPos = location.pathname === '/pos';   // New Sale: its Take Payment bar sits above the tab bar
   useTableLabels();   // phones: tables shown as cards, each value with its column's name
+  useKeyboardOpen();  // phones: the tab bar steps aside while the keyboard is open
 
   /*
    * Monthly backup reminder (admins): from the 1st of each month until a full backup is downloaded that month.
@@ -189,7 +190,7 @@ export default function Layout() {
           <button className="btn btn-icon btn-ghost" onClick={() => setOpen(true)} aria-label="Menu"><Icon name="menu" /></button>
           <b>{settings.shop_name}</b>
         </div>
-        <Outlet />
+        <div key={location.pathname} className="page-in"><Outlet /></div>
       </main>
       {/* phones: the daily jobs at the thumb; everything else is under Menu */}
       <nav className="bottom-nav" aria-label="Main">

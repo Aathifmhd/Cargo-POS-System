@@ -1655,3 +1655,48 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
   .date-input-native { right: 2px; top: 50%; bottom: auto; transform: translateY(-50%); width: 42px; height: 42px; opacity: 0; pointer-events: auto; z-index: 2; font-size: 16px; cursor: pointer; -webkit-appearance: none; appearance: none; }
   .date-input-native::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 }
+
+/* =========================================================
+   Feels like a phone app
+   · no zoom (double-tap included), no rubber-band bounce or pull-to-refresh
+   · no grey flash or text-selection pop-ups when tapping buttons; text in boxes and values can still be selected
+   · buttons, cards and rows press in when tapped; each page slides in
+   · installed (full screen): kept clear of the notch and the home bar
+   ========================================================= */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+@media (max-width: 860px) {
+  html, body { overscroll-behavior: none; }
+  body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  button, .btn, .bn-item, .nav-link, .tabs button, .segmented button, .set-link, .quick, .stat, .card-head, .page-header h1,
+  .modal-head h2, .till-btn, .sum-more button, .size-card, .es-option, label { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  input, textarea, select, [contenteditable] { -webkit-user-select: text; user-select: text; }
+  a, img { -webkit-touch-callout: none; }
+
+  /* press-in feedback */
+  .btn:active:not(:disabled), .bn-item:active, .quick:active, .set-link:active, .size-card:active, .sum-pay:active, .pay-bar:active { transform: scale(.97); }
+  .table tbody tr.click:active, .list-row:active { background: var(--row-hover); }
+  .btn, .bn-item, .quick, .set-link, .size-card, .pay-bar { transition: transform .08s ease-out; }
+
+  /* screens slide in */
+  .page-in { animation: page-in .2s ease-out; }
+
+  /* messages above the tab bar, full width */
+  .toasts { left: 12px; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); align-items: stretch; }
+  .toast { max-width: none; border-radius: 14px; }
+}
+@keyframes page-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .page-in { animation: none; } }
+
+/* installed on the phone (full screen): clear of the notch / status bar and the home bar */
+@media (display-mode: standalone) and (max-width: 860px) {
+  .main { padding-top: calc(12px + env(safe-area-inset-top)); }
+  .sidebar { padding-top: env(safe-area-inset-top); }
+  .modal { max-height: calc(100dvh - 20px - env(safe-area-inset-top)); }
+}
+
+/* phones: while the keyboard is open the tab bar and the Take Payment bar step aside (they never ride up over the keyboard) */
+@media (max-width: 860px) {
+  .kb-open .bottom-nav, .kb-open .pay-bar { display: none; }
+  .kb-open .main { padding-bottom: 16px; }
+  .kb-open .toasts { bottom: 12px; }
+}

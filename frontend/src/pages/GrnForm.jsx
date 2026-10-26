@@ -4,6 +4,7 @@ import { api, n, r2, lkr, inr, isLocalSup, money, today, addDays, computeLanding
 import { PageHeader, Card, Icon, Field, NumInput, DateInput, Combobox, Segmented, Modal, useToast, Loading, useListKeys } from '../components/ui.jsx';
 import { SupplierForm } from '../components/forms.jsx';
 import { CargoForm } from './Cargo.jsx';
+import { useNarrow } from '../components/mobile.js';
 import SizePicker from '../components/SizePicker.jsx';
 import { useSettings, useAuth } from '../App.jsx';
 
@@ -107,6 +108,7 @@ export default function GrnForm() {
     };
   }, []); // eslint-disable-line
   const [g, setG] = useState(initial);
+  const narrow = useNarrow();   // a phone: the Goods Table is a short list — tap a product to edit it
   const set = (k) => (v) => setG((x) => ({ ...x, [k]: v && v.target ? (v.target.type === 'checkbox' ? v.target.checked : v.target.value) : v }));
 
   useEffect(() => { if (!editId) localStorage.setItem(DRAFT, JSON.stringify(g)); }, [g, editId]);   // edits are not kept as a draft
@@ -490,6 +492,25 @@ export default function GrnForm() {
                     <b>{cat}</b>
                     <span className="muted small">{rows.length} {rows.length === 1 ? 'product' : 'products'} · {int(rows.reduce((t, r) => t + (r.c.pcs || 0), 0))} pcs</span>
                   </div>
+                  {narrow ? (
+                    /* phone: only the product, its name, sizes and pieces — tap to edit, the bin removes it */
+                    <div className="gt-list">
+                      {rows.map(({ it: row, c: rc }) => (
+                        <div key={row.key} className={`gt-row ${g.editingKey === row.key ? 'editing' : ''}`} role="button" onClick={() => g.editingKey !== row.key && editItem(row)}>
+                          <div className="gt-main">
+                            <b className="gt-name">{row.pname || row.subtype || row.name}</b>
+                            <div className="gt-sub">
+                              {row.pname && row.subtype && <span>{row.subtype}</span>}
+                              {row.sizes && <span>{row.sizes}</span>}
+                              {g.editingKey === row.key && <span className="badge badge-amber">Editing</span>}
+                            </div>
+                          </div>
+                          <div className="gt-pcs"><b>{int(rc.pcs)}</b><span>pcs</span></div>
+                          <button type="button" className="btn btn-icon btn-sm btn-ghost gt-del" title="Remove" onClick={(e) => { e.stopPropagation(); delItem(row); }}><Icon name="trash" size={16} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
                   <table className="table item-table">
                     <thead><tr><th>Product</th><th className="right">Pieces</th><th className="right">Cargo & other / pc</th><th className="right">Cost / pc</th><th className="right">Selling / pc</th><th /></tr></thead>
                     <tbody>
@@ -529,6 +550,7 @@ export default function GrnForm() {
                       ))}
                     </tbody>
                   </table>
+                  )}
                 </div>
               ))}
             </div>

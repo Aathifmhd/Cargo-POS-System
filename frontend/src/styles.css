@@ -1728,3 +1728,17 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .main.pulling:not(.held) { transition: none; }   /* follows the finger exactly while pulling */
 .main.pulling { position: relative; z-index: 2; background: var(--bg); }
 @media (min-width: 861px) { .ptr { display: none; } }
+
+/* Receive Goods on a phone: the Goods Table as a short list — product name, product · sizes, pieces; tap to edit */
+.gt-list { display: flex; flex-direction: column; }
+.gt-row { display: flex; align-items: center; gap: 10px; padding: 12px 6px 12px 12px; border-top: 1px solid var(--border); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.gt-row:active { background: var(--row-hover); }
+.gt-row.editing { background: var(--amber-soft); cursor: default; }
+.gt-main { flex: 1; min-width: 0; }
+.gt-name { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gt-sub { display: flex; flex-wrap: wrap; gap: 2px 6px; margin-top: 2px; font-size: 12.5px; color: var(--muted); }
+.gt-sub > span:not(.badge) + span:not(.badge)::before { content: '·'; margin-right: 6px; }
+.gt-pcs { flex: none; text-align: right; line-height: 1.1; }
+.gt-pcs b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
+.gt-pcs span { font-size: 11px; color: var(--muted); font-weight: 650; }
+.gt-del { flex: none; min-width: 40px; min-height: 40px; color: var(--muted); }

@@ -549,18 +549,18 @@ export default function POS() {
           </div>
         </div>
         <label className="f-qty"><span>QTY (PCS)</span>
-          <input id="tQty" inputMode="decimal" autoComplete="off" value={entry.qty} {...selectAll}
+          <input id="tQty" inputMode="decimal" enterKeyHint="enter" autoComplete="off" value={entry.qty} {...selectAll}
             onChange={(e) => setEntry({ ...entry, qty: e.target.value.replace(/[^\d.-]/g, '').replace(/(?!^)-/g, '') })} onKeyDown={entryKey('tQty')} />
         </label>
         {showCost && <div className="f-ro"><span>COST</span><div className="till-ro cost">{cur ? money(eu.cost) : '—'}</div></div>}
         <div className="f-ro"><span>EXPECTED</span>
           <div className="till-ro click exp" onClick={() => cur && setEntry({ ...entry, price: eu.expected.toFixed(2) })} title="Use the expected price">{cur ? money(eu.expected) : '—'}</div></div>
         <label className="f-price"><span>LAST PRICE</span>
-          <input id="tPrice" className={eUnder && showCost ? 'under' : ''} inputMode="decimal" autoComplete="off" value={entry.price} {...selectAll}
+          <input id="tPrice" className={eUnder && showCost ? 'under' : ''} inputMode="decimal" enterKeyHint="enter" autoComplete="off" value={entry.price} {...selectAll}
             onChange={(e) => setEntry({ ...entry, price: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tPrice')} />
         </label>
         <label className="f-dis"><span>DIS %</span>
-          <input id="tDis" inputMode="decimal" autoComplete="off" value={entry.disc_pct} placeholder="0" {...selectAll}
+          <input id="tDis" inputMode="decimal" enterKeyHint="enter" autoComplete="off" value={entry.disc_pct} placeholder="0" {...selectAll}
             onChange={(e) => setEntry({ ...entry, disc_pct: e.target.value.replace(/[^\d.]/g, '') })} onKeyDown={entryKey('tDis')} />
         </label>
         <div className="f-amt"><span>AMOUNT</span><div className={`till-amt ${eUnder && showCost ? 'under' : ''}`}>{cur ? money(eAmt) : '0.00'}</div></div>
@@ -591,11 +591,11 @@ export default function POS() {
                     {showCost && r.under && <span className="tag bad">under cost</span>}
                   </td>
                   <td className="n q">{edit?.i === i
-                    ? <input id="lnQty" className="ln-in" inputMode="decimal" value={edit.qty} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} onKeyDown={editKey} {...selectAll} />
+                    ? <input id="lnQty" className="ln-in" inputMode="decimal" enterKeyHint="enter" value={edit.qty} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} onKeyDown={editKey} {...selectAll} />
                     : <b>{r.qty}</b>}</td>
                   <td className="n mrp">{money(r.u.expected)}</td>
                   <td className={`n pr ${showCost && r.under ? 'under' : ''}`}>{edit?.i === i
-                    ? <input id="lnPrice" className="ln-in" inputMode="decimal" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} onKeyDown={editKey} {...selectAll} />
+                    ? <input id="lnPrice" className="ln-in" inputMode="decimal" enterKeyHint="enter" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} onKeyDown={editKey} {...selectAll} />
                     : money(r.price)}
                     {showCost && edit?.i !== i && <em className={r.under ? 'loss' : ''}>{pct(margin(r.net, r.u.cost))}</em>}</td>
                   <td className={`n ds ${r.disc ? '' : 'no-disc'}`}>{r.disc ? <><b>{r.disc_pct}%</b><em>{money(r.disc)}</em></> : '—'}</td>

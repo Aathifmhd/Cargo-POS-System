@@ -40,7 +40,7 @@ export default function GrnList() {
                   <tr key={g.id} className="click" onClick={() => setOpenId(g.id)}>
                     <td className="strong">{g.grn_no}</td>
                     <td className="nowrap">{niceDate(g.date)}</td>
-                    <td>{g.supplier_name}<div className="sub">{int(g.total_sets)} sets · {int(g.total_pcs)} pcs</div></td>
+                    <td className="m-sub">{g.supplier_name}<div className="sub">{int(g.total_sets)} sets · {int(g.total_pcs)} pcs</div></td>
                     <td>{g.cargo_name || '—'}</td>
                     <td className="right">{g.exchange_rate.toFixed(2)}</td>
                     <td className="right">{supMoney(g)(g.goods_inr)}</td>

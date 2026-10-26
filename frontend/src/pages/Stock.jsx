@@ -117,13 +117,13 @@ export default function Stock() {
                     const exp = src?.expected_per_pcs || p.expected_per_set / p.pcs_per_set;
                     return (
                       <tr key={`${p.id}-${b?.id ?? 0}`} className={`click ${b ? 'multi-cost' : ''} ${b && k < lines.length - 1 ? 'multi-more' : ''}`} onClick={() => setOpen(p.id)}>
-                        <td className="muted strong">{p.code}</td>
-                        <td>
+                        <td className="muted strong m-sub">{p.code}</td>
+                        <td className="m-title">
                           <b>{p.name}</b> {b && <CostBadge tier={tiers[b.id]} />}
                           <div className="sub">{b ? `${b.ref} · ${niceDate(b.date)}` : <>{p.category || 'No category'}{p.subtype ? ` · ${p.subtype}` : ''}{p.pname ? ` · ${p.pname}` : ''}{p.supplier_name ? ` · ${p.supplier_name}` : ''}</>}</div>
                         </td>
                         <td className="nowrap">{p.pcs_per_set} pcs/set<div className="sub">{p.colors_count ? `${p.colors_count} colours` : ''}{p.sizes ? ` · ${p.sizes}` : ''}</div></td>
-                        <td>
+                        <td className="m-badge">
                           <Badge tone={pcs <= 0 ? 'red' : !b && low ? 'amber' : 'green'}>{stockText(pcs, p.pcs_per_set)}</Badge>
                           {b && k === 0 && <div className="sub">{int(p.stock_pcs)} pcs in all</div>}
                           {!b && p.stock_pcs < 0 && <div className="sub text-amber">{int(-p.stock_pcs)} pcs sold without stock</div>}

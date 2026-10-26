@@ -4,6 +4,7 @@ import { api, useApi, lkr, niceDate, today, addDays, niceTime, seesCost } from '
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, StatusBadge, Segmented, Stat, useToast } from '../components/ui.jsx';
 import { SaleModal } from './SaleView.jsx';
 import { useAuth } from '../App.jsx';
+import { useNarrow } from '../components/mobile.js';
 
 const RANGES = {
   today: () => [today(), today()],
@@ -13,6 +14,7 @@ const RANGES = {
 };
 
 export default function Sales() {
+  const narrow = useNarrow();   // a phone: a short list of bills instead of the table
   const seeCost = seesCost(useAuth().user);   // profit: Admins only
   const [openId, setOpenId] = useState(null);   // the bill shown in the pop-up
   const toast = useToast();
@@ -64,6 +66,29 @@ The stock goes back. This cannot be undone. The Super Admin's password is needed
       <Card pad={false}>
         {loading && !data ? <Loading /> : rows.length === 0 ? (
           <Empty icon="receipt" title="No bills in this period" text="Try a different date range or make a new sale." action={<Link to="/pos" className="btn btn-primary">New sale</Link>} />
+        ) : narrow ? (
+          /* phone: two short lines a bill — who and how much, then bill no · date · time and its state; tap for the details */
+          <div className="bill-list">
+            {rows.map((s) => (
+              <div key={s.id} className={`bill-row ${s.status === 'void' ? 'void' : ''}`} role="button" onClick={() => setOpenId(s.id)}>
+                <div className="br-top">
+                  <b className="br-who">{s.customer_name}</b>
+                  <b className="br-total">{lkr(s.total)}</b>
+                </div>
+                <div className="br-bottom">
+                  <span className="br-meta">{s.invoice_no} · {niceDate(s.date).slice(0, 5)}{s.created_at ? ` · ${niceTime(s.created_at)}` : ''}</span>
+                  <span className="br-tags">
+                    {s.balance > 0 && s.status !== 'void'
+                      ? <span className="br-due">Rs {Math.round(s.balance).toLocaleString('en-GB')} due</span>
+                      : <Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge>}
+                    <StatusBadge status={s.pay_status} />
+                  </span>
+                  <button type="button" className="btn btn-icon btn-sm btn-ghost br-del" title="Delete bill (Super Admin)"
+                    onClick={(e) => { e.stopPropagation(); deleteBill(s); }}><Icon name="trash" size={15} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="table">

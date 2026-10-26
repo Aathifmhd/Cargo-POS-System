@@ -25,6 +25,29 @@ export function useNarrow(width = 900) {
  * "Mobile"). The label of a cell is its column's heading, put on the cell as data-label. This keeps it so for
  * every table on every page, also when rows are added or the page changes.
  */
+/** The cells a compact phone row shows: title, sub, value (the amount) and badge — the rest show when it is opened. */
+function markRoles(tr) {
+  const cells = [...tr.cells];
+  if (cells.length < 2 || cells.some((c) => c.colSpan > 1)) { tr.classList.add('whole'); return; }   // a note or group row: shown whole
+  const filled = (td) => td.textContent.trim() && td.getAttribute('data-label') !== '';
+  // a page can name them: m-title, m-sub, m-value, m-badge on the cells
+  const hint = (k) => cells.find((td) => td.classList.contains(`m-${k}`));
+  const title = hint('title') || cells[0];
+  const value = hint('value') || cells.find((td, i) => i > 0 && td.classList.contains('right') && td.classList.contains('strong') && filled(td))
+    || cells.find((td, i) => i > 0 && td.classList.contains('right') && /(Rs|₹|\d)/.test(td.textContent) && filled(td))
+    || cells.slice(1).reverse().find((td) => /(Rs|₹)\s?[\d,]/.test(td.textContent) && filled(td));
+  const badge = hint('badge') || cells.find((td) => td !== title && td !== value && td.querySelector('.badge, .status-badge'));
+  const sub = hint('sub') || cells.find((td) => td !== title && td !== value && td !== badge && filled(td) && !td.querySelector('button'));
+  const role = (td) => (td === title ? 'title' : td === value ? 'value' : td === badge ? 'badge' : td === sub ? 'sub' : '');
+  let more = false;
+  for (const td of cells) {
+    const r = role(td);
+    if (td.getAttribute('data-role') !== r) { if (r) td.setAttribute('data-role', r); else td.removeAttribute('data-role'); }
+    if (!r && td.textContent.trim()) more = true;
+  }
+  tr.classList.toggle('has-more', more);   // there is more to see: the row can be opened
+}
+
 function labelTables(root) {
   for (const table of root.querySelectorAll('table.table, table.till-tbl, .till-hits table')) {
     const heads = [...(table.tHead?.rows[0]?.cells || [])].map((th) => th.textContent.trim());
@@ -37,6 +60,7 @@ function labelTables(root) {
           if (td.getAttribute('data-label') !== label) td.setAttribute('data-label', label);
           col += td.colSpan || 1;
         }
+        if (table.classList.contains('table') && body !== table.tFoot) markRoles(tr);
       }
     }
   }
@@ -44,13 +68,20 @@ function labelTables(root) {
 
 export function useTableLabels() {
   useEffect(() => {
+    const tap = (e) => {
+      if (!window.matchMedia('(max-width: 860px)').matches) return;
+      const tr = e.target.closest?.('table.table tbody tr.has-more');
+      if (!tr || tr.classList.contains('click') || e.target.closest('button, a, input, select, textarea, label')) return;
+      tr.classList.toggle('open');
+    };
+    document.addEventListener('click', tap);
     let queued = false;
     const run = () => { queued = false; labelTables(document); };
     const queue = () => { if (!queued) { queued = true; requestAnimationFrame(run); } };
     run();
     const watch = new MutationObserver(queue);
     watch.observe(document.body, { childList: true, subtree: true, characterData: true });
-    return () => watch.disconnect();
+    return () => { watch.disconnect(); document.removeEventListener('click', tap); };
   }, []);
 }
 

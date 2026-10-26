@@ -1827,3 +1827,71 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .key-list .held-row { cursor: pointer; }
 .key-list .held-grn { justify-content: flex-start; gap: 12px; }
 .key-list .held-grn .held-no { flex: none; }
+
+/* Sales & Bills on a phone: a short, easy-to-read list — tap a bill for its details */
+.bill-list { display: flex; flex-direction: column; }
+.bill-row { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.bill-row:last-child { border-bottom: 0; }
+.bill-row:active { background: var(--row-hover); }
+.bill-row.void { opacity: .55; }
+.bill-row.void .br-total { text-decoration: line-through; }
+.br-top, .br-bottom { display: flex; align-items: center; gap: 8px; }
+.br-top { justify-content: space-between; }
+.br-who { min-width: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.br-total { flex: none; font-size: 15.5px; font-variant-numeric: tabular-nums; }
+.br-bottom { margin-top: 3px; }
+.br-meta { flex: 1; min-width: 0; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.br-tags { display: flex; gap: 4px; flex: none; }
+.br-tags .badge { font-size: 10.5px; padding: 1px 7px; }
+.br-due { font-size: 12px; font-weight: 750; color: var(--red); white-space: nowrap; }
+.br-del { flex: none; min-width: 32px !important; min-height: 32px !important; margin: -6px -8px -6px 0; color: var(--muted); }
+
+/* =========================================================
+   Phones — every table row compact: title and amount, then a short line and its status; the rest when tapped
+   (a row with its own details pop-up opens it; any other row opens in place — tap again to fold)
+   ========================================================= */
+@media (max-width: 860px) {
+  .table tbody tr:not(.whole) { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 2px; align-items: baseline; padding: 10px 14px; }
+  .table tbody tr:not(.whole) > td { grid-column: 1 / -1; }
+  .table tbody tr:not(.whole):not(.open) > td:not([data-role]) { display: none; }
+  .table tbody tr:not(.whole) > td[data-role] { display: block; padding: 0; text-align: left; }
+  .table tbody tr:not(.whole) > td[data-role]::before { content: none; }
+  .table tbody tr:not(.whole) > td[data-role="title"] { grid-column: 1; grid-row: 1; font-size: 15px; font-weight: 700; padding: 0; min-width: 0; overflow-wrap: anywhere; }
+  .table tbody tr:not(.whole) > td[data-role="title"] .sub { font-weight: 400; }
+  .table tbody tr:not(.whole) > td[data-role="value"] { grid-column: 2; grid-row: 1; text-align: right; font-weight: 750; font-size: 15px; white-space: nowrap; }
+  .table tbody tr:not(.whole) > td[data-role="value"] .sub { font-weight: 400; font-size: 11.5px; }
+  .table tbody tr:not(.whole) > td[data-role="sub"] { grid-column: 1; grid-row: 2; font-size: 12.5px; color: var(--muted); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .table tbody tr:not(.whole) > td[data-role="sub"] .sub { display: inline; margin: 0 0 0 4px; }
+  .table tbody tr:not(.whole) > td[data-role="sub"] .sub::before { content: '· '; }
+  .table tbody tr:not(.whole) > td[data-role="sub"] b, .table tbody tr:not(.whole) > td[data-role="sub"] strong { font-weight: 600; color: var(--text-2); }
+  .table tbody tr:not(.whole) > td[data-role="badge"] { grid-column: 2; grid-row: 2; justify-self: end; text-align: right; }
+  .table tbody tr:not(.whole) > td[data-role="badge"] .badge { font-size: 10.5px; }
+  /* opened: every other value under it, label on the left */
+  .table tbody tr.open { background: var(--surface-2); }
+  .table tbody tr.open > td:not([data-role]) { margin-top: 2px; }
+  .table tbody tr.open > td:not([data-role]):first-of-type { margin-top: 8px; }
+  /* a row that opens in place shows a small ▾ */
+  .table tbody tr.has-more:not(.click) > td[data-role="title"]::after { content: '▾'; margin-left: 6px; font-size: 11px; color: var(--muted); display: inline-block; transition: transform .15s; }
+  .table tbody tr.has-more.open:not(.click) > td[data-role="title"]::after { transform: rotate(180deg); }
+  .table tbody tr.has-more:not(.click) { cursor: pointer; }
+  /* a group / note row (one cell across) is shown whole */
+  .table tbody tr.whole > td { display: block; text-align: left; }
+  .table tbody tr.whole > td::before { content: none; }
+}
+@media (max-width: 860px) {
+  /* compact rows: what a cell holds sits plainly in it (no old card-grid placement) */
+  .table tbody tr:not(.whole) > td[data-role] > * { grid-column: auto; margin-left: 0; justify-self: auto; }
+  .table tbody tr:not(.whole) > td[data-role="title"] > .sub, .table tbody tr:not(.whole) > td[data-role="title"] .sub { display: block; text-align: left; font-size: 12.5px; }
+  .table tbody tr:not(.whole) > td[data-role="value"] > .sub { display: block; text-align: right; }
+  /* the ▾ of a row that opens in place: at the right edge, out of the way */
+  .table tbody tr.has-more:not(.click) { position: relative; padding-right: 30px; }
+  .table tbody tr.has-more:not(.click) > td[data-role="title"]::after { position: absolute; right: 10px; top: 14px; margin: 0; }
+}
+@media (max-width: 860px) {
+  /* compact rows: no right-pushing of lines inside a cell (newer browsers apply it to plain blocks too) */
+  .table tbody tr:not(.whole) > td[data-role] { justify-items: normal; place-items: normal; }
+  .table tbody tr:not(.whole) > td[data-role="value"] { justify-items: end; }
+}
+@media (max-width: 860px) {
+  .table tbody tr:not(.whole) > td[data-role="title"] .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}

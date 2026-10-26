@@ -34,7 +34,7 @@ export default function Dashboard() {
       </div>
 
       <div className="quick-actions">
-        <Link to="/pos" className="quick main-q"><div className="stat-icon"><Icon name="cart" /></div><div>New Sale<small>Make a bill (F3)</small></div></Link>
+        <Link to="/pos" className="quick main-q"><div className="stat-icon"><Icon name="cart" /></div><div>New Sale<small>Make a bill</small></div></Link>
         {goods && <Link to="/grn/new" className="quick"><div className="stat-icon"><Icon name="truck" /></div><div>Receive Goods<small>New GRN from India</small></div></Link>}
         {collect && <Link to="/dues?tab=receivables" className="quick"><div className="stat-icon stat-green" style={{ background: 'var(--green-soft)', color: 'var(--green)' }}><Icon name="cash" /></div><div>Collect Payment<small>From customers</small></div></Link>}
         {suppliers && <Link to="/dues?tab=payables" className="quick"><div className="stat-icon" style={{ background: 'var(--amber-soft)', color: 'var(--amber)' }}><Icon name="wallet" /></div><div>Pay Supplier<small>Settle India dues</small></div></Link>}

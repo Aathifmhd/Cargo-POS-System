@@ -11,7 +11,7 @@ const NAV = [
   { to: '/action-center', icon: 'bell', label: 'Action Center', perm: 'action_center' },
   { group: 'Daily work' },
   { to: '/', icon: 'dashboard', label: 'Dashboard', end: true, hint: 'F2' },
-  { to: '/pos', icon: 'cart', label: 'New Sale', hint: 'F3', primary: true },
+  { to: '/pos', icon: 'cart', label: 'New Sale', primary: true },
   { to: '/sales', icon: 'receipt', label: 'Sales & Bills', hint: 'F9' },
   { to: '/grn/new', icon: 'truck', label: 'Receive Goods', hint: 'GRN', perm: 'receive_goods' },
   { group: 'Records' },
@@ -107,14 +107,13 @@ export default function Layout() {
     api.get('/cheques').then((l) => setChequesToday(l.filter((c) => (c.status === 'pending' && c.cheque_date <= day) || (c.status === 'holding' && c.cheque_date === day)).length)).catch(() => {});
   }, [location.pathname]);
 
-  // Function keys anywhere: F2 dashboard · F3 billing · F9 bills · F7 take a payment
+  // Function keys anywhere: F2 dashboard · F9 bills · F7 take a payment (F3 is New Sale's price history)
   useEffect(() => {
     const onKey = (e) => {
       if (document.querySelector('.modal')) return;
       const onPos = location.pathname === '/pos';
       const go = (to) => { e.preventDefault(); if (location.pathname !== to) navigate(to); };
       if (e.key === 'F2') go('/');
-      else if (e.key === 'F3' && !onPos) go('/pos');
       else if (e.key === 'F9') go('/sales');
       else if (e.key === 'F7' && !onPos && !/^\/grn\/new/.test(location.pathname)) go('/dues?tab=receivables');
     };

@@ -32,6 +32,7 @@ export const POS_KEYS = [
   ['Delete', 'Remove the line'],
   ['Ctrl + ↑ ↓', 'Move the line'],
   ['`', 'Show / hide cost and profit'],
+  ['F3', 'Price history — what this customer paid for the product before (F3 again to close)'],
   ['F4', 'Customer'],
   ['F8', 'Bill discount'],
   ['F10', 'Take payment (same as Enter Enter)'],
@@ -86,6 +87,7 @@ export default function POS() {
   const [entry, setEntry] = useState(blankEntry);
   const [hi, setHi] = useState(0);
   const [sel, setSel] = useState(-1);
+  const [priceHist, setPriceHist] = useState(null);   // F3: { product } — the prices it was sold at before
   const [edit, setEdit] = useState(null);          // { i, qty, price } while a bill line is being edited
   const [showCostPref, setShowCost] = useState(() => readLS('pos-show-cost', true));
   // held bills are shared: every user, on every computer, sees the same list (kept on the server)
@@ -405,6 +407,16 @@ export default function POS() {
   /* ---------- keyboard ---------- */
   useEffect(() => {
     const onKey = (e) => {
+      if (e.key === 'F3') {
+        e.preventDefault(); e.stopPropagation();
+        if (priceHist) return setPriceHist(null);
+        if (document.querySelector('.modal')) return;
+        // the product being added, else the line picked on the bill, else the last line
+        const line = sel >= 0 ? lines[sel] : lines[lines.length - 1];
+        const p = cur || (line ? byId[line.product_id] : null);
+        if (!p) return toast('Scan or pick a product first — F3 shows what it was sold for before', 'error');
+        return setPriceHist({ product: p });
+      }
       if (document.querySelector('.modal')) return;
       const k = e.key;
       const typing = typingIn(document.activeElement);
@@ -646,9 +658,12 @@ export default function POS() {
       {modal === 'keys' && (
         <Modal title="Billing keys" onClose={() => { setModal(null); toCode(); }}>
           <div className="keys-grid">{POS_KEYS.map(([k, l]) => <div key={k} className="key-row"><kbd>{k}</kbd><span>{l}</span></div>)}</div>
-          <p className="muted small mt">Anywhere in the app: <kbd>F2</kbd> Dashboard · <kbd>F3</kbd> New sale · <kbd>F9</kbd> Bills · <kbd>F7</kbd> Take a payment</p>
+          <p className="muted small mt">Anywhere in the app: <kbd>F2</kbd> Dashboard · <kbd>F9</kbd> Bills · <kbd>F7</kbd> Take a payment</p>
         </Modal>
       )}
+      {priceHist && <PriceHistoryModal product={priceHist.product} customer={customer}
+        onUse={cur && cur.id === priceHist.product.id ? (price) => { setEntry((x) => ({ ...x, price: Number(price).toFixed(2) })); setPriceHist(null); focus('tPrice'); } : null}
+        onClose={() => setPriceHist(null)} />}
       {reprinting && <PrintChoiceModal sale={reprinting} onClose={() => { setReprinting(null); toCode(); }} />}
       {done && (
         <DoneModal sale={done.sale} change={done.change} onClose={() => { setDone(null); toCode(); }}
@@ -898,6 +913,47 @@ function CreditModal({ customer, total, busy, canRaise, onConfirm, onRaise, onCh
           </div>
         )}
       </form>
+    </Modal>
+  );
+}
+
+/* ---------------- F3: what the product was sold for before (to this customer, or to anyone) ---------------- */
+export function PriceHistoryModal({ product, customer, onUse, onClose }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    api.get(`/sales/price-history?product_id=${product.id}${customer ? `&customer_id=${customer.id}` : ''}`).then(setData).catch((e) => setError(e.message));
+  }, [product.id, customer?.id]);
+  const lines = data?.lines || [];
+  const [hi, setHi] = useListKeys(lines.length, { onEnter: (i) => onUse?.(lines[i].per_pcs) });
+  return (
+    <Modal size="lg" title={`Price history — ${product.code}`} onClose={onClose}
+      subtitle={<>{product.name} · {customer ? <b>{custName(customer)}</b> : <span><b>Walk-in customer</b> — walk-in sales first, then registered customers</span>}</>}
+      footer={<><span className="muted small">{onUse ? '↑ ↓ and Enter to use a price · ' : ''}F3 or Esc to close</span><span className="spacer" /><button className="btn" onClick={onClose}>Close (F3)</button></>}>
+      {error ? <p className="text-red">{error}</p> : !data ? <Loading /> : !lines.length ? (
+        <p className="muted">{customer ? `${custName(customer)} has not bought this product before.` : 'This product has not been sold yet.'}</p>
+      ) : (
+        <>
+          <table className="table key-list ph-table">
+            <thead><tr><th>Date</th><th>Bill</th>{!customer && <th>Customer</th>}<th className="right">Qty</th><th className="right">Price</th><th className="right">Dis</th><th className="right">Per piece</th></tr></thead>
+            <tbody>{lines.map((l, i) => [
+              // walk-in: a heading over the walk-in sales, and one over the registered customers' (when there are none yet, it says so)
+              !customer && l.group !== lines[i - 1]?.group && (
+                <tr key={`g-${l.group}`} className="ph-group"><td colSpan={7}>{l.group === 'walkin' ? 'Walk-in customers' : <>Registered customers{!lines.some((x) => x.group === 'walkin') && <span className="muted"> · no walk-in sales of this product yet</span>}</>}</td></tr>
+              ),
+              <tr key={`${l.sale_id}-${i}`} className={i === hi ? 'on' : ''} onMouseEnter={() => setHi(i)} onClick={() => onUse?.(l.per_pcs)} style={onUse ? { cursor: 'pointer' } : undefined}>
+                <td>{niceDate(l.date)}{l.created_at ? <span className="muted small"> {niceTime(l.created_at)}</span> : null}</td>
+                <td>{l.invoice_no}{l.payment_type === 'credit' && <span className="muted small"> · credit</span>}</td>
+                {!customer && <td>{l.customer_name}</td>}
+                <td className="right">{int(l.qty)} {l.unit}</td>
+                <td className="right">{money(l.price)}</td>
+                <td className="right">{l.disc_pct ? `${l.disc_pct}%` : '—'}</td>
+                <td className="right strong">{money(l.per_pcs)}</td>
+              </tr>,
+            ])}</tbody>
+          </table>
+        </>
+      )}
     </Modal>
   );
 }

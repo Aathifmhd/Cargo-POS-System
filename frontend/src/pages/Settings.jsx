@@ -198,7 +198,6 @@ export default function Settings() {
                   <h4 className="set-sub">Anywhere</h4>
                   <dl className="info-list">
                     <dt><kbd>F2</kbd></dt><dd>Dashboard</dd>
-                    <dt><kbd>F3</kbd></dt><dd>New Sale (billing)</dd>
                     <dt><kbd>F9</kbd></dt><dd>Sales & Bills</dd>
                     <dt><kbd>F7</kbd></dt><dd>Take a payment (outside billing)</dd>
                     <dt><kbd>Esc</kbd></dt><dd>Close a pop-up</dd>

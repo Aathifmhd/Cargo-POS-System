@@ -43,6 +43,43 @@ r.get('/', async (req, res) => {
 });
 
 r.get('/next-no', async (req, res) => res.json({ invoice_no: await nextNo('sales', 'invoice_no', (await getSettings()).invoice_prefix || 'INV-', 5) }));
+/** The newest lines (up to `max`) of a product on completed bills that match `saleFilter` — newest first. */
+async function soldAt(productId, saleFilter, max = 25) {
+  const lines = [];
+  // a page of bill lines at a time, until enough of the matching bills are found
+  for (let before = Infinity, page = 0; lines.length < max && page < 20; page++) {
+    const items = await find('sale_items', { product_id: productId, pcs: { $gt: 0 }, ...(before < Infinity ? { id: { $lt: before } } : {}) },
+      { sort: { id: -1 }, limit: 100, project: { id: 1, sale_id: 1, unit: 1, qty: 1, pcs: 1, price: 1, disc_pct: 1, line_total: 1 } });
+    if (!items.length) break;
+    before = items[items.length - 1].id;
+    const sales = await find('sales', { id: { $in: [...new Set(items.map((i) => i.sale_id))] }, status: 'completed', ...saleFilter },
+      { project: { id: 1, invoice_no: 1, date: 1, created_at: 1, customer_id: 1, customer_name: 1, payment_type: 1 } });
+    const byId = new Map(sales.map((x) => [x.id, x]));
+    for (const i of items) {
+      const x = byId.get(i.sale_id);
+      if (!x || lines.length >= max) continue;
+      lines.push({
+        sale_id: x.id, invoice_no: x.invoice_no, date: x.date, created_at: x.created_at, customer_name: x.customer_name, payment_type: x.payment_type,
+        unit: i.unit, qty: i.qty, pcs: i.pcs, price: i.price, disc_pct: i.disc_pct || 0,
+        per_pcs: i.pcs ? round2(i.line_total / i.pcs) : i.price,   // what one piece really cost them, after the line discount
+      });
+    }
+  }
+  return lines;
+}
+
+/**
+ * New Sale → F3: the prices a product was sold at before.
+ * A customer chosen: that customer's. Walk-in: the walk-in sales first, then the registered customers' (group on each line).
+ */
+r.get('/price-history', async (req, res) => {
+  const productId = num(req.query.product_id);
+  const customerId = req.query.customer_id ? num(req.query.customer_id) : null;
+  if (!productId) return res.json({ lines: [] });
+  if (customerId) return res.json({ lines: await soldAt(productId, { customer_id: customerId }) });
+  const [walkin, registered] = await Promise.all([soldAt(productId, { customer_id: null }), soldAt(productId, { customer_id: { $ne: null } })]);
+  res.json({ lines: [...walkin.map((l) => ({ ...l, group: 'walkin' })), ...registered.map((l) => ({ ...l, group: 'registered' }))] });
+});
 r.get('/:id', async (req, res) => res.json(await getSale(num(req.params.id))));
 r.post('/', async (req, res) => {
   const sale = await createSale(req.body, (action) => guard(req, action));

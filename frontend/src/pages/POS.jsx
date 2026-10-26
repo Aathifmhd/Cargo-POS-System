@@ -72,6 +72,19 @@ const selectAll = {
 };
 const typingIn = (el) => el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
 
+/** True on a phone-sized screen (follows the window as it is resized or turned). */
+function useNarrow(width = 900) {
+  const q = `(max-width: ${width}px)`;
+  const [on, setOn] = useState(() => typeof window !== 'undefined' && window.matchMedia(q).matches);
+  useEffect(() => {
+    const m = window.matchMedia(q);
+    const f = () => setOn(m.matches);
+    m.addEventListener('change', f);
+    return () => m.removeEventListener('change', f);
+  }, [q]);
+  return on;
+}
+
 export default function POS() {
   const toast = useToast();
   const navigate = useNavigate();
@@ -87,6 +100,7 @@ export default function POS() {
   const [entry, setEntry] = useState(blankEntry);
   const [hi, setHi] = useState(0);
   const [sel, setSel] = useState(-1);
+  const narrow = useNarrow();   // a phone: the match list goes right under the code box
   const [priceHist, setPriceHist] = useState(null);   // F3: { product } — the prices it was sold at before
   const [edit, setEdit] = useState(null);          // { i, qty, price } while a bill line is being edited
   const [showCostPref, setShowCost] = useState(() => readLS('pos-show-cost', true));
@@ -454,6 +468,46 @@ export default function POS() {
   const eAmt = lineCalc(entry).amount;
   const eUnder = cur && eu.cost > 0 && lineCalc(entry).net < eu.cost;
 
+  // the products that match what is typed (code or name; * lists all)
+  const hitList = hitRows.length > 0 && (
+      <div className="till-hits">
+        <table>
+          <thead><tr><th>CODE</th><th>ITEM</th><th>STOCK FROM</th><th>SIZES</th><th className="n">IN STOCK</th>{showCost && <th className="n">COST / PC</th>}<th className="n">EXPECTED / PC</th></tr></thead>
+          <tbody>
+            {hitRows.map(({ p, b, tier, damaged }, i) => {
+              if (damaged) {
+                return (
+                  <tr key={`${p.id}-dmg`} className={`${i === hi ? 'on' : ''} batch dmg`} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p, null, true); }}>
+                    <td className="c">{p.code}</td>
+                    <td className="d">{p.name} <span className="cost-code hit-code">{codeOf(p.damaged, p.damaged.cost_per_pcs, settings)}</span> <span className="dmg-badge">Damaged</span></td>
+                    <td className="s">Damaged returns</td>
+                    <td className="s">{p.sizes || '—'}</td>
+                    <td className="n">{pcsText(p.damaged.pcs)}</td>
+                    {showCost && <td className="n cost">{money(p.damaged.cost_per_pcs)}</td>}
+                    <td className="p">sell under cost</td>
+                  </tr>
+                );
+              }
+              const u = unitInfo(p, 'pcs', b);
+              const stock = b ? b.left_pcs : p.stock_pcs;
+              const many = groupsOf(p).length > 1;
+              return (
+                <tr key={`${p.id}-${b?.id ?? 0}`} className={`${i === hi ? 'on' : ''} ${many ? 'batch' : ''}`} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p, b); }}>
+                  <td className="c">{p.code}</td>
+                  <td className="d">{p.name} <span className="cost-code hit-code">{codeOf(b || p, u.costPc, settings)}</span>{tier && <> <CostBadge tier={tier} /></>}</td>
+                  <td className="s">{many ? batchText(b) : p.category || '—'}</td>
+                  <td className="s">{p.sizes || '—'}</td>
+                  <td className={`n ${stock <= 0 ? 'neg' : !many && stock < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{stock < 0 ? `−${pcsText(-stock)}` : stock === 0 ? 'none' : pcsText(stock)}</td>
+                  {showCost && <td className="n cost">{money(u.costPc)}</td>}
+                  <td className="p">{money(u.expectedPc)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+  );
+
   return (
     <div className="till">
       {/* ================= HEADER BAND ================= */}
@@ -487,6 +541,7 @@ export default function POS() {
           <input id="tCode" ref={codeRef} autoFocus autoComplete="off" placeholder="code or name · * lists all" value={entry.q}
             onChange={(e) => { setEntry({ ...blankEntry, q: e.target.value }); setHi(0); }} onKeyDown={entryKey('tCode')} onFocus={() => setSel(-1)} />
         </label>
+        {narrow && hitList && <div className="till-hitwrap mobile">{hitList}</div>}
         <div className="f-item"><span>ITEM</span>
           <div className={`till-item ${cur ? 'has' : ''}`}>
             {cur ? <>
@@ -514,47 +569,8 @@ export default function POS() {
         <button className="till-add" onClick={() => commit()} disabled={!cur}>ADD<i>Enter</i></button>
       </div>
 
-      {/* ================= MATCH LIST ================= */}
-      <div className="till-hitwrap">
-        {hitRows.length > 0 && (
-          <div className="till-hits">
-            <table>
-              <thead><tr><th>CODE</th><th>ITEM</th><th>STOCK FROM</th><th>SIZES</th><th className="n">IN STOCK</th>{showCost && <th className="n">COST / PC</th>}<th className="n">EXPECTED / PC</th></tr></thead>
-              <tbody>
-                {hitRows.map(({ p, b, tier, damaged }, i) => {
-                  if (damaged) {
-                    return (
-                      <tr key={`${p.id}-dmg`} className={`${i === hi ? 'on' : ''} batch dmg`} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p, null, true); }}>
-                        <td className="c">{p.code}</td>
-                        <td className="d">{p.name} <span className="cost-code hit-code">{codeOf(p.damaged, p.damaged.cost_per_pcs, settings)}</span> <span className="dmg-badge">Damaged</span></td>
-                        <td className="s">Damaged returns</td>
-                        <td className="s">{p.sizes || '—'}</td>
-                        <td className="n">{pcsText(p.damaged.pcs)}</td>
-                        {showCost && <td className="n cost">{money(p.damaged.cost_per_pcs)}</td>}
-                        <td className="p">sell under cost</td>
-                      </tr>
-                    );
-                  }
-                  const u = unitInfo(p, 'pcs', b);
-                  const stock = b ? b.left_pcs : p.stock_pcs;
-                  const many = groupsOf(p).length > 1;
-                  return (
-                    <tr key={`${p.id}-${b?.id ?? 0}`} className={`${i === hi ? 'on' : ''} ${many ? 'batch' : ''}`} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p, b); }}>
-                      <td className="c">{p.code}</td>
-                      <td className="d">{p.name} <span className="cost-code hit-code">{codeOf(b || p, u.costPc, settings)}</span>{tier && <> <CostBadge tier={tier} /></>}</td>
-                      <td className="s">{many ? batchText(b) : p.category || '—'}</td>
-                      <td className="s">{p.sizes || '—'}</td>
-                      <td className={`n ${stock <= 0 ? 'neg' : !many && stock < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{stock < 0 ? `−${pcsText(-stock)}` : stock === 0 ? 'none' : pcsText(stock)}</td>
-                      {showCost && <td className="n cost">{money(u.costPc)}</td>}
-                      <td className="p">{money(u.expectedPc)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* ================= MATCH LIST (on a phone it is right under the code box) ================= */}
+      {!narrow && <div className="till-hitwrap">{hitList}</div>}
 
       {/* ================= BILL + SUMMARY ================= */}
       <div className="till-main">

@@ -48,24 +48,20 @@ const withPcsPrices = (it) => {
 };
 const forSaving = (it) => ({ ...it, cost_inr_per_set: r2(n(it.cost_inr_per_pcs) * ppsOf(it)), expected_per_set: r2(n(it.expected_per_pcs) * ppsOf(it)), mrp_per_set: r2(n(it.mrp_per_pcs) * ppsOf(it)) });
 
-/** Held GRNs: ↑ ↓ to pick, Enter to carry on, Delete to remove. */
+/** Held GRNs: tap (or ↑ ↓ and Enter) to carry on with one; the bin removes it. */
 function HeldGrns({ held, hasWork, onResume, onDelete }) {
   const [hi, setHi] = useListKeys(held.length, { onEnter: (i) => onResume(held[i]), onDelete: (i) => onDelete(held[i]) });
   if (!held.length) return <p className="muted">No GRN held. Press <kbd>F7</kbd> or <kbd>Ctrl + H</kbd> to put the one on the form aside.</p>;
   return (
     <div className="stack-s key-list">
       {held.map((h, idx) => (
-        <div key={h.id} className={`list-row held-grn ${idx === hi ? 'on' : ''}`} onMouseEnter={() => setHi(idx)} onDoubleClick={() => onResume(h)}>
+        <div key={h.id} className={`list-row held-grn ${idx === hi ? 'on' : ''}`} onMouseEnter={() => setHi(idx)} onClick={() => onResume(h)} role="button" title="Carry on with this GRN">
           <div><div className="t">{h.supplier}{h.invoice ? ` · invoice ${h.invoice}` : ''}</div>
             <div className="s">{h.items} item{h.items === 1 ? '' : 's'} · held {new Date(h.at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{h.by ? ` by ${h.by}` : ''}</div></div>
-          <div className="row gap-s">
-            <button className="btn btn-sm btn-primary" tabIndex={-1} onClick={() => onResume(h)}><Icon name="arrowRight" size={14} /> Carry on</button>
-            <button className="btn btn-sm btn-icon btn-ghost" tabIndex={-1} title="Delete" onClick={() => onDelete(h)}><Icon name="trash" size={15} /></button>
-          </div>
+          <button className="btn btn-sm btn-icon btn-ghost" tabIndex={-1} title="Delete" onClick={(e) => { e.stopPropagation(); onDelete(h); }}><Icon name="trash" size={15} /></button>
         </div>
       ))}
       {hasWork && <p className="muted small">The GRN on the form now is held in its place.</p>}
-      <p className="muted small"><kbd>↑</kbd> <kbd>↓</kbd> to pick · <kbd>Enter</kbd> to carry on · <kbd>Delete</kbd> to remove · <kbd>Esc</kbd> to close</p>
     </div>
   );
 }

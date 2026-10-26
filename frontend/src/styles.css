@@ -1705,3 +1705,13 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .brand-sub { opacity: .78; }
 .brand-by { margin-top: 3px; font-size: 11.5px; letter-spacing: .02em; color: rgba(214, 221, 236, .85); white-space: nowrap; }
 .brand-by b { font-weight: 750; color: #E0A73A; }
+
+/* held GRNs: the whole row is the button (tap to carry on) */
+.key-list .held-grn { cursor: pointer; }
+
+/* Receive Goods: cargo charge and other expenses side by side — labels, boxes and hints on the same lines,
+   even when one label takes two lines (narrow phones) */
+.item-charges { grid-template-rows: auto auto auto; }
+.item-charges > .field { display: grid; grid-row: span 3; grid-template-rows: subgrid; align-content: start; row-gap: 5px; }
+.item-charges > .field > .field-label { align-self: end; }
+.item-charges > .field > .field-hint { align-self: start; }

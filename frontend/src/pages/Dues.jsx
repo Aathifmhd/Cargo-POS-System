@@ -3,7 +3,6 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, useApi, lkr, inr, supMoney, bothMoney, niceDate, dueText, niceTime, seesCost, can } from '../lib.js';
 import { PageHeader, Card, Loading, ErrorBox, Empty, Stat, Tabs, Icon, Segmented, DateInput, Badge, Modal, Field, useToast } from '../components/ui.jsx';
 import { SupplierPaymentModal, CustomerPaymentModal, CargoPaymentModal, ChequeReturned } from '../components/forms.jsx';
-import { ShipmentReport, PRESETS } from './Reports.jsx';
 import { MoreMenu } from './Cheques.jsx';
 import { whatsappReminder } from './CustomerView.jsx';
 import { useSettings, useAuth } from '../App.jsx';
@@ -91,8 +90,6 @@ function CargoTab({ version, onPaid }) {
   const [paying, setPaying] = useState(null);   // the company key being paid ('' = choose)
   const [open, setOpen] = useState(null);       // the company whose shipments are shown
   const [q, setQ] = useState('');
-  const [preset, setPreset] = useState('month');
-  const [[from, to], setRange] = useState(PRESETS.month());
   const list = data || [];
   const shown = list.filter((c) => !q.trim() || c.cargo_name.toLowerCase().includes(q.trim().toLowerCase()));
   const owe = list.reduce((a, c) => a + c.balance, 0);
@@ -139,7 +136,7 @@ function CargoTab({ version, onPaid }) {
                           <table className="table mini">
                             <thead><tr><th>GRN</th><th>Date</th><th className="right">Cargo</th><th className="right">Still to pay</th></tr></thead>
                             <tbody>{c.bills.slice().reverse().map((b) => (
-                              <tr key={b.id}><td><Link to={`/grn/${b.id}`}>{b.grn_no}</Link></td><td>{niceDate(b.date)}</td><td className="right">{lkr(b.amount)}</td><td className="right">{b.balance > 0.009 ? lkr(b.balance) : <span className="text-green">{b.paid_by_cheque ? 'Paid by cheque' : 'Paid'}</span>}{(b.cheques_returned || []).map((x) => <div key={x.id} className="sub"><ChequeReturned c={x} /></div>)}</td></tr>
+                              <tr key={b.id}><td>{b.pending ? <>{b.grn_no} <span className="badge badge-violet">With next bill</span></> : <Link to={`/grn/${b.id}`}>{b.grn_no}</Link>}</td><td>{niceDate(b.date)}</td><td className="right">{lkr(b.amount)}{(b.adjustments || []).map((a, i) => <div key={i} className="sub">{a.amount < 0 ? '−' : '+'} {lkr(Math.abs(a.amount))} {a.amount < 0 ? 'short, lost by cargo' : 'extra pieces'}</div>)}</td><td className="right">{b.balance > 0.009 ? lkr(b.balance) : <span className="text-green">{b.paid_by_cheque ? 'Paid by cheque' : 'Paid'}</span>}{(b.cheques_returned || []).map((x) => <div key={x.id} className="sub"><ChequeReturned c={x} /></div>)}</td></tr>
                             ))}</tbody>
                           </table>
                         </div>
@@ -165,16 +162,6 @@ function CargoTab({ version, onPaid }) {
       </Card>
       {notNamed && <p className="muted small mt-s">"Cargo not named" is the cargo charge of GRNs without a cargo company. Open those GRNs and enter the cargo name to pay them here.</p>}
 
-      {/* moved from Reports: shipments & cargo for a period */}
-      <Card className="mt" title={<span className="row gap-s"><Icon name="chart" size={16} /> Shipments &amp; cargo report</span>}>
-        <div className="toolbar">
-          <Segmented value={preset} onChange={(p) => { setPreset(p); setRange(PRESETS[p]()); }} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: '7 days' }, { value: 'month', label: 'This month' }, { value: 'last30', label: '30 days' }, { value: 'year', label: 'This year' }]} />
-          <DateInput style={{ width: 160 }} value={from} onChange={(e) => { setPreset(''); setRange([e.target.value, to]); }} />
-          <span className="muted">to</span>
-          <DateInput style={{ width: 160 }} value={to} onChange={(e) => { setPreset(''); setRange([from, e.target.value]); }} />
-        </div>
-        <ShipmentReport from={from} to={to} />
-      </Card>
 
       {paying != null && <CargoPaymentModal companies={list} initial={paying} onClose={() => setPaying(null)} onSaved={() => { setPaying(null); reload(); onPaid(); }} />}
     </>

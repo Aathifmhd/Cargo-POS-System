@@ -1,21 +1,29 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, useApi, lkr, supMoney, bothMoney, niceDate, int, today } from '../lib.js';
-import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Stat, Segmented, Modal, Field, DateInput, useToast } from '../components/ui.jsx';
+import { api, useApi, lkr, supMoney, bothMoney, niceDate, int, today, isLocalSup } from '../lib.js';
+import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Stat, Segmented, Modal, Field, DateInput, NumInput, useToast } from '../components/ui.jsx';
 
 /*
- * How a line's extra or short pieces were resolved (empty = still to resolve).
- * short: received later → added to stock at the line's cost · lost at the cargo / clearance → a loss
- * extra: kept free → a profit (off the supplier bill) · paid with the bill · settled in the next shipment (off this bill)
+ * How a line's extra or short pieces were resolved (empty = still to resolve). Each is worth the PRODUCT COST of the
+ * pieces (the supplier's price — no cargo charge); the amount fills in and can be changed:
+ * short: lost (no one responsible) → a loss · lost by cargo → off that shipment's cargo bill · supplier lost (the supplier's
+ *        mistake) → off that GRN's supplier bill · received later → into stock, and their cargo charge onto the cargo bill
+ * extra: kept free → a profit · paid to cargo → onto that shipment's cargo bill · pay to supplier → onto that GRN's supplier bill
+ * on: 'loss' | 'cargo' | 'supplier' | 'profit' — where the amount goes (supplier: in the supplier's money)
  */
 const SHORT = {
-  received: { label: 'Received later', tone: 'green', text: 'The supplier sent them in a later shipment. They are added to stock at this line\'s cost per piece.' },
-  lost: { label: 'Lost', tone: 'red', text: 'Lost at the cargo or customs clearance. Nothing is added to stock; the cost stays as a loss.' },
+  lost: { label: 'Lost', tone: 'red', on: 'loss', text: 'No one is responsible. Nothing is added to stock; the product cost of the pieces is a loss on our side.' },
+  cargo: { label: 'Lost by Cargo', tone: 'blue', on: 'cargo', text: 'The cargo is responsible. The product cost (no cargo charge) is taken off that cargo bill.' },
+  supplier: { label: 'Supplier Lost', tone: 'violet', on: 'supplier', text: 'The supplier\'s mistake. The product cost is taken off this GRN\'s supplier bill.' },
+  received: { label: 'Received later', tone: 'green', on: 'cargo', text: 'They came later. They are added to stock, and their cargo charge is added to that cargo bill.' },
 };
 const EXTRA = {
-  free: { label: 'Kept free', tone: 'green', text: 'The supplier says keep them. They come off the supplier bill and count as profit.' },
-  billed: { label: 'Paid with bill', tone: 'blue', text: 'The supplier wants them paid. They stay on this GRN\'s bill.' },
-  next: { label: 'Next shipment', tone: 'violet', text: 'The supplier will settle them in the next shipment. They come off this bill.' },
+  free: { label: 'Kept free', tone: 'green', on: 'profit', text: 'We keep them. The product cost (no cargo charge) counts as profit.' },
+  cargo: { label: 'Paid to Cargo', tone: 'amber', on: 'cargo', text: 'Paid to the cargo: the product cost (no cargo charge) is added to that cargo bill.' },
+  supplier: { label: 'Pay to Supplier', tone: 'violet', on: 'supplier', text: 'Paid to the supplier: the product cost is added to this GRN\'s supplier bill.' },
+  // older ways, still shown on lines resolved before
+  billed: { label: 'Paid to Cargo', tone: 'amber', on: 'cargo', text: 'Paid to the cargo: added to that cargo bill.' },
+  next: { label: 'Paid with next cargo bill', tone: 'violet', on: 'cargo', text: 'Paid to the cargo with its next shipment.' },
 };
 
 /** One GRN line's extra / short numbers, worked out from what was billed vs. what arrived. */
@@ -24,8 +32,10 @@ function lineFigures(r) {
   const pcCost = r.landed_per_pcs_lkr || 0;                          // Rs per piece, with the cargo charge
   const shortPcs = r.short_sets * r.pcs_per_set + r.short_pcs;
   const freePcs = r.extra_sets * r.pcs_per_set;                      // older GRNs: free extra sets
-  const shortLkr = shortPcs * pcCost;
-  const extraLkr = r.extra_pcs * pcCost;
+  const rate = r.exchange_rate || 1;
+  const shortLkr = shortPcs * pcPrice * rate;                        // product cost, no cargo charge
+  const extraLkr = r.extra_pcs * pcPrice * rate;
+  const shortCargo = shortPcs * (r.cargo_per_pcs || 0);              // short pieces received later: their cargo charge
   return {
     billedPcs: r.sets * r.pcs_per_set + (r.odd_pcs || 0) + r.extra_pcs,
     receivedPcs: Math.max(0, (r.sets + r.extra_sets - r.short_sets) * r.pcs_per_set + (r.odd_pcs || 0) + r.extra_pcs - r.short_pcs),
@@ -35,11 +45,12 @@ function lineFigures(r) {
     shortInr: shortPcs * pcPrice,
     shortLkr,
     extraLkr,
+    shortCargo,
     // what to resolve, and the profit or loss it makes now
     shortOpen: shortPcs > 0 && !r.short_status,
     extraOpen: r.extra_pcs > 0 && !r.extra_status,
-    loss: shortPcs > 0 && r.short_status !== 'received' ? shortLkr : 0,          // paid for, not (yet) received
-    profit: (r.extra_status === 'free' ? extraLkr : 0) + freePcs * pcCost,        // pieces we got for free
+    loss: shortPcs > 0 && (!r.short_status || r.short_status === 'lost') ? (r.short_status ? r.short_amount ?? shortLkr : shortLkr) : 0,   // paid for, not (yet) received
+    profit: (r.extra_status === 'free' ? r.extra_amount ?? extraLkr : 0) + freePcs * pcCost,        // pieces we got for free
   };
 }
 
@@ -99,6 +110,7 @@ function LineModal({ r, onClose, onResolve, undoKind, onUndone }) {
               <dt>GRN</dt><dd>{r.grn_no}</dd>
               <dt>Date</dt><dd>{niceDate(r.date)}</dd>
               <dt>Supplier</dt><dd>{r.supplier_name}</dd>
+              <dt>Cargo</dt><dd>{r.cargo_name || <span className="text-amber">Not set on the GRN</span>}</dd>
               <dt>Cargo</dt><dd>{r.cargo_name || '—'}</dd>
               <dt>Exchange rate</dt><dd>Rs {Number(r.exchange_rate).toFixed(4)}</dd>
             </dl>
@@ -129,17 +141,26 @@ function ResolveModal({ r, onClose, onDone }) {
   const f = r.f;
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
-    short: { action: r.short_status || '', date: r.short_date || today(), note: r.short_note || '' },
-    extra: { action: r.extra_status || '', date: r.extra_date || today(), note: r.extra_note || '' },
+    short: { action: r.short_status || '', date: r.short_date || today(), note: r.short_note || '', amount: r.short_amount ?? '' },
+    extra: { action: r.extra_status || '', date: r.extra_date || today(), note: r.extra_note || '', amount: r.extra_amount ?? '' },
   });
   const upd = (kind, patch) => setForm((x) => ({ ...x, [kind]: { ...x[kind], ...patch } }));
+  const cur = supMoney(r);   // ₹ for an Indian supplier, Rs for a local one
+  const local = isLocalSup(r);   // a local supplier: no cargo — "received later" just goes into stock
+  // what each choice is worth by itself (filled in when it is picked; it can be changed)
+  const worth = (kind, action) => {
+    const pcs = kind === 'short' ? f.shortPcs : r.extra_pcs;
+    if (kind === 'short' && action === 'received') return local ? 0 : f.shortCargo;
+    return (kind === 'short' ? SHORT : EXTRA)[action]?.on === 'supplier' ? pcs * (r.cost_inr_per_set / (r.pcs_per_set || 1)) : kind === 'short' ? f.shortLkr : f.extraLkr;
+  };
+  const choose = (kind, action) => upd(kind, { action, amount: Math.round(worth(kind, action) * 100) / 100 });
 
   const send = async (kind, action) => {
     const v = form[kind];
     if (!action) return toast('Choose how it was resolved', 'error');
     setBusy(true);
     try {
-      await api.post(`/grns/lines/${r.id}/resolve`, { kind, action, date: v.date, note: v.note });
+      await api.post(`/grns/lines/${r.id}/resolve`, { kind, action, date: v.date, note: v.note, amount: action === 'reopen' ? undefined : v.amount });
       toast(action === 'reopen' ? 'Moved back to "to resolve"' : `${kind === 'short' ? 'Short' : 'Extra'} pieces resolved`);
       onDone();
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
@@ -157,7 +178,11 @@ function ResolveModal({ r, onClose, onDone }) {
         </div>
         {saved ? (
           <div className="row gap-s wrap">
-            <span className="muted small spacer">{opts[saved].text}</span>
+            <span className="muted small spacer">{opts[saved].text}{r[`${kind}_amount`] != null && <b> {({
+              loss: `Loss ${lkr(r.short_amount)}.`, profit: `Profit ${lkr(r.extra_amount)}.`,
+              cargo: `${kind === 'short' && saved === 'cargo' ? '−' : '+'}${lkr(r[`${kind}_amount`])} on ${r.cargo_name || 'the cargo'}'s bill.`,
+              supplier: `${kind === 'short' ? '−' : '+'}${cur(r[`${kind}_amount`])} on ${r.grn_no}'s supplier bill.`,
+            })[opts[saved].on]}</b>}</span>
             <button className="btn btn-ghost btn-sm" disabled={busy}
               onClick={() => confirm(`Undo this? The ${kind} pieces go back to "to resolve"${saved === 'received' ? ` and ${int(pcs)} pcs are taken off stock` : ''}.`) && send(kind, 'reopen')}>
               <Icon name="back" size={14} /> Undo
@@ -168,12 +193,21 @@ function ResolveModal({ r, onClose, onDone }) {
             <div className="es-options">
               {options.map(([key, extra]) => (
                 <label key={key} className={`es-option ${v.action === key ? 'on' : ''}`}>
-                  <input type="radio" name={`${kind}-action`} checked={v.action === key} onChange={() => upd(kind, { action: key })} />
+                  <input type="radio" name={`${kind}-action`} checked={v.action === key} onChange={() => choose(kind, key)} />
                   <span><b>{opts[key].label}</b><small>{opts[key].text}</small>{extra && <em className={`text-${opts[key].tone}`}>{extra}</em>}</span>
                 </label>
               ))}
             </div>
             <div className="grid grid-3">
+              {v.action && !(local && kind === 'short' && v.action === 'received') && (
+                <Field label={{
+                  loss: 'Loss (Rs)', profit: 'Profit (Rs)',
+                  cargo: kind === 'short' && v.action === 'cargo' ? 'Off the cargo bill (Rs)' : 'Onto the cargo bill (Rs)',
+                  supplier: `${kind === 'short' ? 'Off' : 'Onto'} the supplier bill (${isLocalSup(r) ? 'Rs' : '₹'})`,
+                }[opts[v.action].on]} hint={kind === 'short' && v.action === 'received' ? 'Their cargo charge — change it if needed' : 'The product cost of the pieces (no cargo charge) — change it if needed'}>
+                  <NumInput value={v.amount} onChange={(x) => upd(kind, { amount: x })} money />
+                </Field>
+              )}
               <Field label="Date"><DateInput value={v.date} onChange={(e) => upd(kind, { date: e.target.value })} /></Field>
               <Field label="Note" hint="Optional" className="span-2"><input className="input" value={v.note} onChange={(e) => upd(kind, { note: e.target.value })} placeholder={kind === 'short' ? 'e.g. came with GRN-0007' : 'e.g. told by phone, 12 Oct'} /></Field>
             </div>
@@ -185,17 +219,20 @@ function ResolveModal({ r, onClose, onDone }) {
   };
 
   return (
-    <Modal size="lg" title={`Resolve · ${r.name}`} subtitle={`${r.grn_no} · ${r.supplier_name}`} onClose={onClose}
+    <Modal size="lg" title={`Resolve · ${r.name}`} subtitle={`${r.grn_no} · ${r.supplier_name}${r.cargo_name ? ` · cargo: ${r.cargo_name}` : ''}`} onClose={onClose}
       footer={<><span className="spacer" /><button className="btn" onClick={onClose}>Close</button></>}>
       <div className="stack">
+        {!r.cargo_name && !isLocalSup(r) && (f.shortPcs > 0 || r.extra_pcs > 0) && <div className="alert alert-amber small"><Icon name="alert" size={16} /> {r.grn_no} has no cargo company. Choose it on the GRN (Edit GRN) to settle with the cargo.</div>}
         {f.shortPcs > 0 && section('short', 'Short pieces', f.shortPcs, [
-          ['received', `+${int(f.shortPcs)} pcs to stock at ${lkr(r.landed_per_pcs_lkr)} each`],
           ['lost', `Loss of ${lkr(f.shortLkr)}`],
+          ...(local ? [] : [['cargo', `−${lkr(f.shortLkr)} off ${r.cargo_name || 'the cargo'}'s bill`]]),
+          ['supplier', `−${cur(f.shortInr)} off ${r.grn_no}'s supplier bill`],
+          ['received', local ? `+${int(f.shortPcs)} pcs to stock` : `+${int(f.shortPcs)} pcs to stock · +${lkr(f.shortCargo)} cargo charge on ${r.cargo_name || 'the cargo'}'s bill`],
         ], r.short_status)}
         {r.extra_pcs > 0 && section('extra', 'Extra pieces', r.extra_pcs, [
-          ['free', `Profit of ${lkr(f.extraLkr)} · ${supMoney(r)(f.extraInr)} off the bill`],
-          ['billed', `${supMoney(r)(f.extraInr)} stays on the bill`],
-          ['next', `${supMoney(r)(f.extraInr)} off this bill`],
+          ['free', `Profit of ${lkr(f.extraLkr)}`],
+          ...(local ? [] : [['cargo', `+${lkr(f.extraLkr)} on ${r.cargo_name || 'the cargo'}'s bill`]]),
+          ['supplier', `+${cur(f.extraInr)} on ${r.grn_no}'s supplier bill`],
         ], r.extra_status)}
         {!(f.shortPcs > 0) && !(r.extra_pcs > 0) && <p className="muted">These are free sets from an older GRN — nothing to resolve.</p>}
       </div>
@@ -214,7 +251,7 @@ function HistorySection({ version, onHide, onOpen }) {
       const r = { ...raw, f: lineFigures(raw) };
       if (r.short_status && r.f.shortPcs > 0) {
         out.push({ key: `s${r.id}`, r, undo: 'short', kind: 'Short', pcs: -r.f.shortPcs, how: SHORT[r.short_status], date: r.short_date, note: r.short_note,
-          money: r.short_status === 'lost' ? -r.f.shortLkr : 0 });
+          money: r.short_status === 'lost' ? -(r.short_amount ?? r.f.shortLkr) : 0 });
       }
       if (r.extra_sets > 0) {
         out.push({ key: `f${r.id}`, r, undo: null, kind: 'Extra', pcs: r.extra_sets * r.pcs_per_set, how: { label: 'Free sets', tone: 'green' }, date: r.date, note: 'Older GRN: free sets',
@@ -222,7 +259,7 @@ function HistorySection({ version, onHide, onOpen }) {
       }
       if (r.extra_status && r.extra_pcs > 0) {
         out.push({ key: `e${r.id}`, r, undo: 'extra', kind: 'Extra', pcs: r.extra_pcs, how: EXTRA[r.extra_status], date: r.extra_date, note: r.extra_note,
-          money: r.extra_status === 'free' ? r.f.extraLkr : 0 });
+          money: r.extra_status === 'free' ? (r.extra_amount ?? r.f.extraLkr) : 0 });
       }
     }
     return out
@@ -309,7 +346,7 @@ export default function ExtraShort() {
 
   return (
     <div>
-      <PageHeader title="Extra & Short" subtitle="Bales that didn't match the supplier's bill: extra pieces received, or pieces missing. Resolve each one once the supplier has answered." />
+      <PageHeader title="Extra & Short" subtitle="Bales that didn't match the bill: extra pieces received, or pieces missing. Settle each one with the cargo company." />
       <ErrorBox error={error} onRetry={reload} />
 
       {data && rows.length > 0 && (

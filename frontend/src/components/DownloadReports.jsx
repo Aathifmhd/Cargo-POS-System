@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { downloadFile, today, addDays, niceDate } from '../lib.js';
 import { Icon, Segmented, DateInput, useToast } from './ui.jsx';
 
-/** Settings → Download reports: Excel sheets of the shop's records for a chosen period. */
+/** Reports → Download reports: Excel sheets of the shop's records for a chosen period. */
 const REPORTS = [
   { key: 'grns', icon: 'truck', label: 'GRN details', text: 'Every GRN in the period (supplier, bale, cargo, costs, paid and balance), and a sheet of their items.' },
   { key: 'stock', icon: 'box', label: 'Stock details', text: 'Stock on hand today, one line per product and cost, with its value — and the stock movements in the period.' },
   { key: 'invoices', icon: 'receipt', label: 'Invoice details', text: 'Every bill in the period with time, customer, totals, cost, profit and balance — and a sheet of the bill items.' },
   { key: 'customers', icon: 'users', label: 'Customer details', text: 'All customers with contact details, credit limit, what they bought in the period, and what they owe today.' },
   { key: 'suppliers', icon: 'factory', label: 'Supplier details', text: 'All suppliers with contact and bank details, GRNs in the period, and what is to pay today.' },
+  { key: 'cargo', icon: 'truck', label: 'Cargo details', text: 'All cargo companies with contact details, shipments and payments in the period, and what is to pay today — and a sheet of their cargo bills with the Extra & Short settled with them.' },
   { key: 'payments', icon: 'wallet', label: 'Payment details', text: 'Two sheets: cash, bank and card payments (received and paid), and cheques (received and given) — in the period.' },
   { key: 'dues', icon: 'clock', label: 'Payment due details', text: 'Three sheets as on today: to receive from customers, to pay suppliers, and to pay cargo.' },
 ];

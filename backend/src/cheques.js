@@ -1,5 +1,5 @@
 import {
-  find, findOne, insert, setById, deleteMany, tx, fail, num, round2, sum, todayStr, allocate, byDateId, inParallel, stamp,
+  find, findOne, insert, setById, deleteMany, tx, fail, num, round2, sum, todayStr, allocate, byDateId, inParallel, stamp, cargoAdjustsOf, itemShortPcs,
 } from './db.js';
 import { isLocal, costingRate, revalueGrns, markReturned } from './services.js';
 
@@ -178,10 +178,13 @@ export const grnCargoLkr = (g) => round2((g.cargo_charge_inr || 0) * (g.exchange
 const cargoKey = (name) => String(name || '').trim().toLowerCase();
 
 export async function cargoLedgers() {
-  const [grns, pays, cheques] = await inParallel(
-    () => find('grns', {}, { project: { id: 1, grn_no: 1, date: 1, cargo_name: 1, cargo_charge_inr: 1, exchange_rate: 1, expenses_lkr: 1, other_lkr: 1, supplier_id: 1, total_pcs: 1 } }),
+  const [grns, pays, cheques, settled, cargos] = await inParallel(
+    () => find('grns', {}, { project: { id: 1, grn_no: 1, date: 1, currency: 1, cargo_id: 1, cargo_name: 1, cargo_charge_inr: 1, exchange_rate: 1, expenses_lkr: 1, other_lkr: 1, supplier_id: 1, total_pcs: 1 } }),
     () => find('cargo_payments'),
     () => find('cheques', { party: 'cargo' }, { project: { id: 1, party_name: 1, cheque_no: 1, amount: 1, history: 1, status: 1, bank: 1, given_on: 1 } }),
+    // Extra & Short settled with the cargo
+    () => find('grn_items', { $or: [{ short_status: { $in: ['cargo', 'received'] } }, { extra_status: { $in: ['cargo', 'billed', 'next'] } }] }),
+    () => find('cargos', {}, { project: { id: 1, name: 1 } }),
   );
   const returned = cheques.filter((ch) => ch.status === 'returned');
   const chequeOf = Object.fromEntries(cheques.map((ch) => [ch.id, ch]));
@@ -191,17 +194,44 @@ export async function cargoLedgers() {
     if (!companies.has(key)) companies.set(key, { key, cargo_name: String(name || '').trim() || 'Cargo not named', grns: [], payments: [] });
     return companies.get(key);
   };
-  for (const g of grns.sort(byDateId)) {
-    const amount = grnCargoLkr(g);
-    if (amount > 0.009) { const c = of(g.cargo_name); c.cargo_name = String(g.cargo_name || '').trim() || c.cargo_name; c.grns.push({ ...g, amount }); }
+  for (const k of cargos) of(k.name).cargo_id = k.id;   // every cargo company, even before its first shipment
+  // the Extra & Short settlements, on the shipment they belong to: "Paid with next bill" goes onto that cargo's next shipment
+  const sorted = grns.sort(byDateId);
+  const grnById = new Map(sorted.map((g) => [g.id, g]));
+  const adjust = new Map();   // grn id → [{ label, amount }]
+  const pending = [];         // "next bill" with no later shipment yet
+  for (const it of settled) for (const { kind, amount } of cargoAdjustsOf(it)) {
+    const g = grnById.get(it.grn_id);
+    if (!g) continue;
+    const short = kind === 'short' || kind === 'received';
+    const label = kind === 'short' ? `${it.name}: ${itemShortPcs(it)} pcs short — lost by the cargo (${g.grn_no})`
+      : kind === 'received' ? `${it.name}: ${itemShortPcs(it)} short pcs received later — their cargo charge (${g.grn_no})`
+        : `${it.name}: ${it.extra_pcs} extra pcs — paid to the cargo${kind === 'next' ? ' with the next bill' : ''} (${g.grn_no})`;
+    // on the shipment they belong to (older "next bill" extras: onto that cargo's next shipment)
+    if (short || kind === 'billed') { adjust.set(g.id, [...(adjust.get(g.id) || []), { label, amount }]); continue; }
+    const after = sorted.find((x) => cargoKey(x.cargo_name) === cargoKey(g.cargo_name) && byDateId(x, g) > 0);
+    if (after) adjust.set(after.id, [...(adjust.get(after.id) || []), { label, amount }]);
+    else pending.push({ g, it, label, amount });
   }
+  for (const g of sorted) {
+    if (g.currency === 'LKR') continue;   // a local supplier's transport is not owed to a cargo company
+    const adj = adjust.get(g.id) || [];
+    const base = grnCargoLkr(g);
+    const amount = round2(base + sum(adj, (a) => a.amount));
+    if (base > 0.009 || adj.length) { const c = of(g.cargo_name); if (!c.cargo_id) c.cargo_name = String(g.cargo_name || '').trim() || c.cargo_name; c.grns.push({ ...g, amount, cargo_lkr: base, adjustments: adj }); }
+  }
+  // extras to pay with the next bill, before the next shipment has come: a line of its own
+  for (const x of pending) {
+    of(x.g.cargo_name).grns.push({ id: `x${x.it.id}`, grn_no: `${x.g.grn_no} extras`, date: x.it.extra_date || x.g.date, total_pcs: x.it.extra_pcs, amount: x.amount, cargo_lkr: 0, adjustments: [{ label: x.label, amount: x.amount }], pending: true });
+  }
+  for (const c of companies.values()) c.grns.sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1));
   // each payment says how its cheque stands (waiting, holding, passed)
   for (const p of pays.sort(byDateId)) {
     const ch = p.cheque_id ? chequeOf[p.cheque_id] : null;
     of(p.cargo_name).payments.push(ch ? { ...p, cheque_status: ch.status, cheque_bank: ch.bank || null } : p);
   }
   return [...companies.values()].map((c) => {
-    const bills = markReturned(allocate(c.grns.map((g) => ({ id: g.id, grn_no: g.grn_no, date: g.date, pcs: g.total_pcs, amount: g.amount, linkedPaid: 0 })), sum(c.payments, (p) => p.amount)), returned.filter((ch) => cargoKey(ch.party_name) === c.key));
+    const bills = markReturned(allocate(c.grns.map((g) => ({ id: g.id, grn_no: g.grn_no, date: g.date, pcs: g.total_pcs, amount: g.amount, cargo_lkr: g.cargo_lkr, adjustments: g.adjustments, pending: g.pending || false, linkedPaid: 0 })), sum(c.payments, (p) => p.amount)), returned.filter((ch) => cargoKey(ch.party_name) === c.key));
     // which payments paid which shipment (oldest payments to the oldest shipments): "Paid by cheque" and the cheques' status
     let pi = 0; let left = c.payments[0]?.amount || 0;
     for (const b of bills) {
@@ -225,7 +255,7 @@ export async function cargoLedgers() {
       return { id: `r${ch.id}`, date: at ? String(at).slice(0, 10) : ch.given_on, method: 'Cheque', reference: `Cheque ${ch.cheque_no}`, amount: ch.amount, cheque_status: 'returned', cheque_bank: ch.bank || null, returned: true };
     });
     return {
-      key: c.key, cargo_name: c.cargo_name, named: Boolean(c.key), shipments: bills.length, total, paid,
+      key: c.key, cargo_id: c.cargo_id ?? null, cargo_name: c.cargo_name, named: Boolean(c.key), shipments: bills.filter((b) => !b.pending).length, total, paid,
       balance: round2(sum(bills, (b) => b.balance)), credit: round2(Math.max(0, paid - total)),
       last_date: bills.length ? bills[bills.length - 1].date : null, bills,
       cheques_returned: bills.flatMap((b) => b.cheques_returned || []), payments: [...c.payments, ...back].sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? -1 : 1)).reverse(),

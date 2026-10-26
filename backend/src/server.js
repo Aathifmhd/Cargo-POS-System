@@ -17,7 +17,8 @@ import authRoutes from './routes/auth.js';
 import { requireAuth, initAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
 import { setOnRateChange, startFxTimer } from './fx.js';
-import { revalueGrns, upgradeCosting, relabelCustomers, reorderProductNames } from './services.js';
+import { revalueGrns, upgradeCosting, relabelCustomers, reorderProductNames, setupCargos } from './services.js';
+import cargos from './routes/cargos.js';
 import { setupBatches } from './db.js';
 import { autoPassSoon } from './cheques.js';
 import { attentionSoon } from './attention.js';
@@ -47,8 +48,9 @@ app.use('/api/products', products);
 app.use('/api/grns', grns);
 app.use('/api/sales', sales);
 app.use('/api', reports);
+app.use('/api', cargos);          // the Cargo list
 app.use('/api', money);           // cargo payable, cheques
-app.use('/api', exportsRoute);     // Settings → Download reports (Excel)
+app.use('/api', exportsRoute);     // Reports → Download reports (Excel)
 app.use('/api', stocktake);        // Settings → Stock Take
 app.use('/api', held);             // held bills and held GRNs, shared by every user
 
@@ -78,6 +80,7 @@ setOnRateChange((rate) => console.log(`Live INR rate now ${rate}`));
 setupBatches().then(() => upgradeCosting()).then(() => revalueGrns()).catch((e) => console.error('Stock batches / re-costing GRNs failed:', e.message));
 // customers go by their shop name: old bills and cheques written with the person's name are brought in line
 relabelCustomers().catch((e) => console.error('Customer names on bills failed:', e.message));
-reorderProductNames().catch((e) => console.error('Product names failed:', e.message));   // {product name} - {product} - {category}
+reorderProductNames().catch((e) => console.error('Product names failed:', e.message));
+setupCargos().catch((e) => console.error('Cargo list failed:', e.message));   // the cargo names in use → the Cargo list   // {product name} - {product} - {category}
 if (!process.env.VERCEL) startFxTimer();   // on Vercel the rate is refreshed when the dashboard asks for it
 if (!process.env.VERCEL) { setInterval(autoPassSoon, 60_000); setInterval(attentionSoon, 5 * 60_000); }   // on Vercel it runs with the requests

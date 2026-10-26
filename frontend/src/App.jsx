@@ -15,6 +15,7 @@ import ExtraShort from './pages/ExtraShort.jsx';
 import Stock from './pages/Stock.jsx';
 import Suppliers from './pages/Suppliers.jsx';
 import SupplierView from './pages/SupplierView.jsx';
+import Cargo from './pages/Cargo.jsx';
 import Customers from './pages/Customers.jsx';
 import CustomerView from './pages/CustomerView.jsx';
 import Dues from './pages/Dues.jsx';
@@ -114,6 +115,7 @@ export default function App() {
                   {can(user, 'suppliers') && <>
                     <Route path="/suppliers" element={<Suppliers />} />
                     <Route path="/suppliers/:id" element={<SupplierView />} />
+                    <Route path="/cargo" element={<Cargo />} />
                   </>}
                   {can(user, 'reports') && <Route path="/reports" element={<Reports />} />}
                   <Route path="/stock" element={<Stock />} />

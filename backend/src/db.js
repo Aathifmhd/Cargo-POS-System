@@ -80,14 +80,15 @@ const DEFAULTS = {
   products: { category: null, subtype: null, pname: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, supplier_id: null,
     cost_per_pcs: 0, last_cost_per_pcs: 0, mrp_per_set: 0, expected_per_set: 0, stock_pcs: 0, reorder_sets: 0, active: 1,
     opening_pcs: 0, opening_cost_per_pcs: 0, damaged_pcs: 0 },
-  grns: { currency: 'INR', supplier_invoice_no: null, supplier_bill_date: null, cargo_name: null, bale_no: null, lr_no: null, goods_inr: 0, cargo_charge_inr: 0, cargo_in_supplier_bill: 0,
+  grns: { currency: 'INR', supplier_invoice_no: null, supplier_bill_date: null, cargo_id: null, cargo_name: null, bale_no: null, lr_no: null, goods_inr: 0, cargo_charge_inr: 0, cargo_in_supplier_bill: 0,
     payable_inr: 0, expenses_lkr: 0, other_lkr: 0, total_lkr: 0, total_sets: 0, total_pcs: 0, payment_type: 'credit', due_date: null, notes: null,
     effective_rate: null, settled_at: null },
   grn_expenses: { category: null, amount_lkr: 0 },
-  grn_items: { category: null, cargo_lkr: 0, other_lkr: 0, cargo_per_pcs: null, other_per_pcs: null, short_status: null, short_date: null, short_note: null, extra_status: null, extra_date: null, extra_note: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, mrp_per_set: 0, expected_per_set: 0,
+  grn_items: { category: null, cargo_lkr: 0, other_lkr: 0, cargo_per_pcs: null, other_per_pcs: null, short_status: null, short_date: null, short_note: null, short_amount: null, extra_status: null, extra_date: null, extra_note: null, extra_amount: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, mrp_per_set: 0, expected_per_set: 0,
     extra_sets: 0, extra_pcs: 0, short_sets: 0, short_pcs: 0, odd_pcs: 0 },
   supplier_payments: { grn_id: null, exchange_rate: 0, amount_lkr: 0, method: null, reference: null, notes: null, cheque_id: null },
   cargo_payments: { method: null, reference: null, notes: null, cheque_id: null },
+  cargos: { contact: null, phone: null, address: null, notes: null, active: 1 },
   cheques: { party_id: null, bill_id: null, owner: null, bank: null, no_auto: 0, notes: null, payment_id: null, passed_on: null, history: [] },
   sales: { customer_id: null, customer_name: null, discount: 0, paid_at_sale: 0, cost_total: 0, due_date: null, notes: null, status: 'completed' },
   sale_items: { batch_id: null, batches: [], no_stock_pcs: 0, damaged: false, damaged_cost: 0, damaged_takes: [], code: null, mrp_per_unit: 0, expected_per_unit: 0, cost_per_unit: 0, disc: 0, disc_pct: 0 },
@@ -149,7 +150,7 @@ export const bumpCounter = (name, n) => col('counters').updateOne({ _id: name },
 
 export const COLLECTIONS = ['settings', 'suppliers', 'customers', 'products', 'grns', 'grn_expenses', 'grn_items', 'supplier_payments',
   'sales', 'sale_items', 'customer_payments', 'stock_moves', 'users', 'audit_log', 'fx_rates', 'batches',
-  'cargo_payments', 'cheques', 'customer_ids', 'damaged', 'stocktakes', 'bad_debts', 'held'];
+  'cargo_payments', 'cheques', 'customer_ids', 'damaged', 'stocktakes', 'bad_debts', 'held', 'cargos'];
 
 /* ---------------- errors & small helpers ---------------- */
 export class HttpError extends Error {
@@ -308,8 +309,26 @@ export const grnItemPcs = (it) => Math.max(0, ((it.sets || 0) + (it.extra_sets |
   + (it.short_status === 'received' ? itemShortPcs(it) : 0);
 /** Pieces billed but not received on a GRN line. */
 export const itemShortPcs = (it) => Math.max(0, (it.short_sets || 0) * (it.pcs_per_set || 1) + (it.short_pcs || 0));
-/** Extra pieces taken off the supplier bill: kept free, or settled in the next shipment. */
-export const unbilledExtraInr = (it) => (['free', 'next'].includes(it.extra_status) ? round2((it.extra_pcs || 0) * (it.cost_inr_per_set || 0) / (it.pcs_per_set || 1)) : 0);
+/** Extra pieces are never on the supplier's bill: they are settled with the cargo company (Extra & Short). */
+export const unbilledExtraInr = (it) => round2((it.extra_pcs || 0) * (it.cost_inr_per_set || 0) / (it.pcs_per_set || 1));
+/**
+ * Extra & Short — each settlement is worth the PRODUCT COST of the pieces (the supplier's price, no cargo charge);
+ * the amount is saved when it is resolved (and can be typed by hand):
+ *   short: lost → a loss (Rs) · cargo (lost by the cargo) → off that shipment's cargo bill (Rs)
+ *          supplier (supplier's mistake) → off that GRN's supplier bill (₹ / Rs) · received later → their cargo charge onto the cargo bill (Rs)
+ *   extra: free → a profit (Rs) · cargo (paid to the cargo) → onto that shipment's cargo bill (Rs) · supplier → onto that GRN's supplier bill (₹ / Rs)
+ * ("billed" / "next" are the older ways of paying the cargo for extras.)
+ */
+export const productCostPc = (it) => (it.cost_inr_per_set || 0) / (it.pcs_per_set || 1);   // in the supplier's money
+export const cargoAdjustsOf = (it) => {
+  const out = [];   // a line can have both: its short and its extra pieces
+  if (it.short_status === 'cargo') out.push({ kind: 'short', amount: -round2(it.short_amount ?? 0) });
+  if (it.short_status === 'received' && it.short_amount != null) out.push({ kind: 'received', amount: round2(it.short_amount) });
+  if (['cargo', 'billed', 'next'].includes(it.extra_status)) out.push({ kind: it.extra_status === 'next' ? 'next' : 'billed', amount: round2(it.extra_amount ?? 0) });
+  return out.filter((x) => x.amount);
+};
+/** What a line adds to (+) or takes off (−) its GRN's supplier bill, in the supplier's money. */
+export const supplierAdjustOf = (it) => round2((it.extra_status === 'supplier' ? it.extra_amount || 0 : 0) - (it.short_status === 'supplier' ? it.short_amount || 0 : 0));
 
 /* ---------------- stock batches ----------------
  * Stock is kept batch by batch: one product's pieces from one GRN (at that GRN's cost and prices), its opening

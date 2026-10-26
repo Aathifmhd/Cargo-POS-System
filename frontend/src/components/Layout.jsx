@@ -20,6 +20,7 @@ const NAV = [
   { to: '/extra-short', icon: 'adjust', label: 'Extra & Short', perm: 'receive_goods' },
   { to: '/customers', icon: 'users', label: 'Customers' },
   { to: '/suppliers', icon: 'factory', label: 'Suppliers', perm: 'suppliers' },
+  { to: '/cargo', icon: 'truck', label: 'Cargo', perm: 'suppliers' },
   { group: 'Money' },
   { to: '/dues', icon: 'wallet', label: 'Payment Portal', hint: 'F7', perm: 'dues' },
   { to: '/cheques', icon: 'cheque', label: 'Cheque Desk', cheques: true, perm: 'cheques' },

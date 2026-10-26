@@ -6,8 +6,8 @@ import { cargoLedgers, grnCargoLkr } from '../cheques.js';
 import { guard } from '../auth.js';
 
 /*
- * Settings → Download reports: Excel workbooks of the shop's records for a period.
- * GET /api/export?reports=grns,stock,invoices,customers,suppliers,payments,dues&from=YYYY-MM-DD&to=YYYY-MM-DD
+ * Reports → Download reports: Excel workbooks of the shop's records for a period.
+ * GET /api/export?reports=grns,stock,invoices,customers,suppliers,cargo,payments,dues&from=YYYY-MM-DD&to=YYYY-MM-DD
  * Dated records (GRNs, bills, payments, cheques, stock movements) are taken from the period;
  * balances, stock on hand and dues are as they stand today.
  */
@@ -19,6 +19,7 @@ export const REPORTS = {
   invoices: 'Invoice details',
   customers: 'Customer details',
   suppliers: 'Supplier details',
+  cargo: 'Cargo details',
   payments: 'Payment details',
   dues: 'Payment due details',
 };
@@ -227,6 +228,44 @@ async function supplierReport(book, from, to, period) {
   ], rows);
 }
 
+/** Cargo companies (contact details, shipments and payments in the period, what is to pay now) and their cargo bills in the period. */
+async function cargoReport(book, from, to, period) {
+  const [cargos, ledgers, pays] = await Promise.all([
+    find('cargos', {}, { sort: { name: 1 } }),
+    cargoLedgers(),
+    find('cargo_payments', { date: { $gte: from, $lte: to } }, { project: { cargo_name: 1, amount: 1 } }),
+  ]);
+  const key = (name) => String(name || '').trim().toLowerCase();
+  const byKey = new Map(ledgers.map((l) => [l.key, l]));
+  const rows = cargos.map((c) => {
+    const l = byKey.get(key(c.name));
+    const inP = (l?.bills || []).filter((b) => inPeriod(b.date, from, to));
+    return {
+      c, l, shipments: inP.filter((b) => !b.pending).length, billed: round2(sum(inP, (b) => b.amount)),
+      paidIn: round2(sum(pays.filter((p) => key(p.cargo_name) === key(c.name)), (p) => p.amount)),
+    };
+  });
+  sheet(book, 'Cargo', 'Cargo details', `Shipments and payments for ${period.toLowerCase()}; balances as on ${dmy(todayStr())}`, [
+    { h: 'Cargo company', k: (x) => x.c.name, w: 24 }, { h: 'Contact person', k: (x) => x.c.contact, w: 18 }, { h: 'Phone', k: (x) => x.c.phone, w: 14 },
+    { h: 'Address', k: (x) => x.c.address, w: 24 }, { h: 'Notes', k: (x) => x.c.notes, w: 20 },
+    { h: 'Shipments in period', k: 'shipments', w: 11, total: true }, { h: 'Cargo bills in period (Rs)', k: 'billed', money: true, total: true, w: 18 },
+    { h: 'Paid in period (Rs)', k: 'paidIn', money: true, total: true, w: 16 },
+    { h: 'All cargo bills (Rs)', k: (x) => x.l?.total || 0, money: true, total: true, w: 16 }, { h: 'All paid (Rs)', k: (x) => x.l?.paid || 0, money: true, total: true, w: 14 },
+    { h: 'To pay now (Rs)', k: (x) => x.l?.balance || 0, money: true, total: true, w: 15 }, { h: 'Paid in advance (Rs)', k: (x) => x.l?.credit || 0, money: true, w: 15 },
+    { h: 'Last shipment', k: (x) => dmy(x.l?.last_date), w: 13 }, { h: 'Active', k: (x) => (x.c.active ? 'Yes' : 'No'), w: 8 },
+  ], rows);
+  // every cargo bill of the period, with the Extra & Short settled with the cargo
+  const bills = ledgers.flatMap((l) => l.bills.filter((b) => inPeriod(b.date, from, to)).map((b) => ({ ...b, cargo_name: l.cargo_name })))
+    .sort((x, y) => (x.date === y.date ? x.cargo_name.localeCompare(y.cargo_name) : x.date < y.date ? -1 : 1));
+  sheet(book, 'Cargo bills', 'Cargo bills', period, [
+    { h: 'Cargo company', k: 'cargo_name', w: 22 }, { h: 'Shipment', k: (x) => (x.pending ? `${x.grn_no} (with next bill)` : x.grn_no), w: 22 }, { h: 'Date', k: (x) => dmy(x.date), w: 12 },
+    { h: 'Pieces', k: 'pcs', w: 9, total: true }, { h: 'Cargo charge (Rs)', k: (x) => x.cargo_lkr ?? 0, money: true, total: true, w: 15 },
+    { h: 'Extra & Short (Rs)', k: (x) => round2(sum(x.adjustments || [], (j) => j.amount)), money: true, total: true, w: 15 },
+    { h: 'Extra & Short — what', k: (x) => (x.adjustments || []).map((j) => `${j.amount < 0 ? '−' : '+'}${Math.abs(j.amount)} ${j.label}`).join('; '), w: 40 },
+    { h: 'Bill (Rs)', k: 'amount', money: true, total: true, w: 14 }, { h: 'Paid (Rs)', k: 'paid', money: true, total: true, w: 13 }, { h: 'To pay (Rs)', k: 'balance', money: true, total: true, w: 13 },
+  ], bills);
+}
+
 async function paymentReport(book, from, to, period) {
   const inRange = { date: { $gte: from, $lte: to } };
   const [cp, sp, kp, cheques, customers, suppliers, sales, grns] = await Promise.all([
@@ -296,7 +335,7 @@ async function duesReport(book) {
   ], cargo.filter((c) => c.balance > 0.009));
 }
 
-const BUILD = { grns: grnReport, stock: stockReport, invoices: invoiceReport, customers: customerReport, suppliers: supplierReport, payments: paymentReport, dues: duesReport };
+const BUILD = { grns: grnReport, stock: stockReport, invoices: invoiceReport, customers: customerReport, suppliers: supplierReport, cargo: cargoReport, payments: paymentReport, dues: duesReport };
 
 r.get('/export', async (req, res) => {
   const list = String(req.query.reports || '').split(',').map((x) => x.trim()).filter((x) => REPORTS[x]);

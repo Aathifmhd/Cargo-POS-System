@@ -244,12 +244,14 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     // the total pieces changed by hand (one set with fewer pieces than the others): billed and received that many
     const odd_pcs = Math.max(-sets * pcsPerSet, Math.round(n(it.odd_pcs)));
     const line_inr = r2(sets * cost + (odd_pcs + extra_pcs) * (cost / pcsPerSet));
-    // cargo and other expenses are entered per piece, over every piece paid for (arrived + shorts)
+    // other expenses are entered per piece, over every piece paid for (arrived + shorts); the cargo charge over the pieces received
     const paidPcs = Math.max(0, (sets + extra_sets - short_sets) * pcsPerSet + odd_pcs + extra_pcs - short_pcs) + short_sets * pcsPerSet + short_pcs;
+    // the cargo charge is only for the pieces that came (short or extra pieces: the pieces received; none: all of them)
+    const recvPcs = Math.max(0, (sets + extra_sets - short_sets) * pcsPerSet + odd_pcs + extra_pcs - short_pcs);
     const given = (v) => v !== undefined && v !== null && v !== '';
-    const charge = (perPc, total) => (given(perPc) ? r2(Math.max(0, n(perPc)) * paidPcs) : r2(Math.max(0, n(total))));
+    const charge = (perPc, total, over) => (given(perPc) ? r2(Math.max(0, n(perPc)) * over) : r2(Math.max(0, n(total))));
     return {
-      category: it.category || '', cargo_lkr: charge(it.cargo_per_pcs, it.cargo_lkr), other_lkr: charge(it.other_per_pcs, it.other_lkr), paid_pcs: paidPcs, sets, pcs_per_set: pcsPerSet, line_inr, extra_sets, extra_pcs, short_sets, short_pcs, odd_pcs,
+      category: it.category || '', cargo_lkr: charge(it.cargo_per_pcs, it.cargo_lkr, recvPcs), other_lkr: charge(it.other_per_pcs, it.other_lkr, paidPcs), paid_pcs: paidPcs, cargo_pcs: recvPcs, sets, pcs_per_set: pcsPerSet, line_inr, extra_sets, extra_pcs, short_sets, short_pcs, odd_pcs,
       set_pcs: sets * pcsPerSet + odd_pcs,             // pieces in the billed sets (as changed by hand)
       billed_pcs: sets * pcsPerSet + odd_pcs + extra_pcs, // pieces on the supplier's bill
       pcs: Math.max(0, (sets + extra_sets - short_sets) * pcsPerSet + odd_pcs + extra_pcs - short_pcs), // pieces really received

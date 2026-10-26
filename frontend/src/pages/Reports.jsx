@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi, lkr, inr, bothMoney, supMoney, money, niceDate, int, pct, margin, today, addDays, stockText, niceTime } from '../lib.js';
 import { PageHeader, Card, Loading, ErrorBox, Stat, Tabs, Segmented, Icon, DateInput, Badge } from '../components/ui.jsx';
+import DownloadReports from '../components/DownloadReports.jsx';
 
 export const PRESETS = {
   today: () => [today(), today()],
@@ -21,8 +22,8 @@ export default function Reports() {
     <div>
       <PageHeader title="Reports" subtitle="See how the business is doing."
         actions={<button className="btn" onClick={() => window.print()}><Icon name="print" /> Print</button>} />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'stock', label: 'Stock value' }]} />
-      {tab !== 'stock' && (
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'stock', label: 'Stock value' }, { value: 'shipments', label: 'Shipments & cargo' }, { value: 'downloads', label: 'Download reports' }]} />
+      {tab === 'shipments' && (
         <div className="toolbar">
           <Segmented value={preset} onChange={choose} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: '7 days' }, { value: 'month', label: 'This month' }, { value: 'last30', label: '30 days' }, { value: 'year', label: 'This year' }]} />
           <DateInput style={{ width: 160 }} value={from} onChange={(e) => { setPreset(''); setRange([e.target.value, to]); }} />
@@ -31,6 +32,8 @@ export default function Reports() {
         </div>
       )}
       {tab === 'stock' && <StockReport />}
+      {tab === 'shipments' && <ShipmentReport from={from} to={to} />}
+      {tab === 'downloads' && <Card title={<span className="row gap-s"><Icon name="download" size={16} /> Download reports</span>}><p className="muted small mb">Excel sheets of GRNs, stock, invoices, customers, suppliers, payments and dues — for a time period.</p><DownloadReports /></Card>}
     </div>
   );
 }
@@ -100,7 +103,7 @@ export function SalesReport({ from, to, withBills = false, q = '' }) {
   );
 }
 
-/** Shipments & cargo (shown on Payment Portal → To pay cargo). */
+/** Shipments & cargo for a period (Reports → Shipments & cargo). */
 export function ShipmentReport({ from, to }) {
   const { data: d, error, reload } = useApi(`/reports/shipments?from=${from}&to=${to}`);
   if (error) return <ErrorBox error={error} onRetry={reload} />;

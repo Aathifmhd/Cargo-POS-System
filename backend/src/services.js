@@ -1,7 +1,7 @@
 import {
   find, findOne, insert, setById, updateOne, updateMany, deleteMany, tx, fail, round2, num, sum, todayStr, addDays, getSettings,
   nextNo, nextProductCode, allocate, dueStatus, moveStock, recomputeProductCost, grnItemPcs, byDateId, stamp, inParallel,
-  itemShortPcs, unbilledExtraInr, setSetting, syncGrnBatch, insertAll,
+  itemShortPcs, unbilledExtraInr, setSetting, syncGrnBatch, insertAll, productCostPc, supplierAdjustOf,
 } from './db.js';
 
 /* =========================================================
@@ -31,13 +31,15 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const oddPcs = Math.max(-sets * pcsPerSet, Math.round(num(it.odd_pcs)));
     // every piece paid for: what arrived + shorts (the cost per piece is over these)
     const paidPcs = Math.max(0, (sets + extraSets - shortSets) * pcsPerSet + oddPcs + extraPcs - shortPcs) + shortSets * pcsPerSet + shortPcs;
+    // the cargo charge is only for the pieces that came (short or extra pieces: the pieces received; none: all of them)
+    const recvPcs = Math.max(0, (sets + extraSets - shortSets) * pcsPerSet + oddPcs + extraPcs - shortPcs);
     const given = (v) => v !== undefined && v !== null && v !== '';
-    const charge = (perPc, total) => (given(perPc) ? round2(Math.max(0, num(perPc)) * paidPcs) : round2(Math.max(0, num(total))));
-    const cargoLkr = charge(it.cargo_per_pcs, it.cargo_lkr);
-    const otherLkr = charge(it.other_per_pcs, it.other_lkr);
+    const charge = (perPc, total, over) => (given(perPc) ? round2(Math.max(0, num(perPc)) * over) : round2(Math.max(0, num(total))));
+    const cargoLkr = charge(it.cargo_per_pcs, it.cargo_lkr, recvPcs);
+    const otherLkr = charge(it.other_per_pcs, it.other_lkr, paidPcs);
     return {
       ...it, sets, pcs_per_set: pcsPerSet, cost_inr_per_set: cost, cargo_lkr: cargoLkr, other_lkr: otherLkr,
-      cargo_per_pcs: given(it.cargo_per_pcs) ? round2(Math.max(0, num(it.cargo_per_pcs))) : paidPcs ? round2(cargoLkr / paidPcs) : 0,
+      cargo_per_pcs: given(it.cargo_per_pcs) ? round2(Math.max(0, num(it.cargo_per_pcs))) : recvPcs ? round2(cargoLkr / recvPcs) : 0,
       other_per_pcs: given(it.other_per_pcs) ? round2(Math.max(0, num(it.other_per_pcs))) : paidPcs ? round2(otherLkr / paidPcs) : 0,
       line_inr: round2(sets * cost + (oddPcs + extraPcs) * (cost / pcsPerSet)),
       extra_sets: extraSets, extra_pcs: extraPcs, short_sets: shortSets, short_pcs: shortPcs, odd_pcs: oddPcs,
@@ -224,6 +226,43 @@ export const customerPerson = (c) => (String(c?.shop_name || '').trim() ? c.name
  * Names saved the older way round ("{category} - {product} - {product name}") are turned round once — on the
  * product and on the GRN and bill lines that carry its name, so the screens and printed bills agree.
  */
+/** A GRN's supplier bill: its goods (+ cargo if on the supplier's bill), without the extras, ± what was settled with the supplier. */
+export const supplierPayable = (g, lines) => round2(g.goods_inr + (g.cargo_in_supplier_bill ? g.cargo_charge_inr : 0) - sum(lines, unbilledExtraInr) + sum(lines, supplierAdjustOf));
+
+export async function setupCargos() {
+  const [grns, pays, cheques, have] = await Promise.all([
+    find('grns', {}, { project: { id: 1, cargo_id: 1, cargo_name: 1 } }),
+    find('cargo_payments', {}, { project: { cargo_name: 1 } }),
+    find('cheques', { party: 'cargo' }, { project: { party_name: 1 } }),
+    find('cargos', {}, { project: { id: 1, name: 1 } }),
+  ]);
+  const byKey = new Map(have.map((c) => [c.name.trim().toLowerCase(), c]));
+  let added = 0;
+  for (const name of [...grns.map((g) => g.cargo_name), ...pays.map((p) => p.cargo_name), ...cheques.map((c) => c.party_name)]) {
+    const n = String(name || '').trim();
+    if (!n || byKey.has(n.toLowerCase())) continue;
+    byKey.set(n.toLowerCase(), await insert('cargos', { name: n }));
+    added++;
+  }
+  for (const g of grns) {
+    const c = byKey.get(String(g.cargo_name || '').trim().toLowerCase());
+    if (c && g.cargo_id !== c.id) await setById('grns', g.id, { cargo_id: c.id });
+  }
+  // extras are never on the supplier's bill any more: GRNs with extras get their supplier payable worked out again
+  const lines = await find('grn_items', { extra_pcs: { $gt: 0 } }, { project: { grn_id: 1 } });
+  let rebilled = 0;
+  for (const id of new Set(lines.map((l) => l.grn_id))) {
+    const g = await findOne('grns', { id });
+    if (!g) continue;
+    const items = await find('grn_items', { grn_id: id });
+    const payable = supplierPayable(g, items);
+    if (Math.abs(payable - (g.payable_inr || 0)) > 0.009) { await setById('grns', id, { payable_inr: payable }); rebilled++; }
+  }
+  if (rebilled) await revalueGrns();
+  if (added || rebilled) console.log(`Cargo list: ${added} added · supplier bills without extras: ${rebilled}`);
+  return { added, rebilled };
+}
+
 export async function reorderProductNames() {
   const list = await find('products', { pname: { $nin: [null, ''] }, subtype: { $nin: [null, ''] }, category: { $nin: [null, ''] } }, { project: { id: 1, name: 1, category: 1, subtype: 1, pname: 1 } });
   let done = 0;
@@ -431,6 +470,9 @@ async function saveGrn(body, editId = null) {
   if (!rawItems.length) fail('Add at least one item with a quantity');
   const expenses = (body.expenses || []).filter((e) => String(e.label || '').trim() && num(e.amount_lkr) !== 0);
   const date = body.date || (old ? old.date : todayStr());
+  // the cargo company: picked from the Cargo list (its name is kept on the GRN too)
+  const cargo = body.cargo_id && !isLocal(supplier) ? await findOne('cargos', { id: num(body.cargo_id) }) : null;   // local suppliers: no cargo
+  if (body.cargo_id && !isLocal(supplier) && !cargo) fail('That cargo company is not in the Cargo list');
 
   const calc = computeLanding({ items: rawItems, exchange_rate: rate, cargo_charge_inr: body.cargo_charge_inr, expenses });
   const cargoInBill = body.cargo_in_supplier_bill ? 1 : 0;
@@ -441,7 +483,7 @@ async function saveGrn(body, editId = null) {
   const due_date = paymentType === 'credit' ? body.due_date || addDays(billDate || date, 60) : date;
   const head = {
     date, supplier_id: supplier.id, currency: isLocal(supplier) ? 'LKR' : 'INR', supplier_invoice_no: body.supplier_invoice_no || null,
-    supplier_bill_date: /^\d{4}-\d{2}-\d{2}$/.test(String(body.supplier_bill_date || '')) ? body.supplier_bill_date : null, cargo_name: (body.cargo_name || '').trim() || null,
+    supplier_bill_date: /^\d{4}-\d{2}-\d{2}$/.test(String(body.supplier_bill_date || '')) ? body.supplier_bill_date : null, cargo_id: cargo?.id ?? null, cargo_name: isLocal(supplier) ? null : cargo?.name ?? ((body.cargo_name || '').trim() || null),
     exchange_rate: rate, goods_inr: calc.goods_inr, cargo_charge_inr: calc.cargo_inr, cargo_in_supplier_bill: cargoInBill, payable_inr,
     expenses_lkr: calc.expenses_lkr, other_lkr: calc.other_lkr, total_lkr: calc.total_lkr, total_sets: calc.total_sets, total_pcs: calc.total_pcs,
     payment_type: paymentType, due_date, notes: body.notes || null, effective_rate: rate,
@@ -472,11 +514,11 @@ async function saveGrn(body, editId = null) {
       const keep = {};
       if (o.short_status) {
         if (itemShortPcs(o) !== itemShortPcs(it)) fail(`"${o.name}": its short pieces are already resolved on Extra & Short. Undo that there first, then change them.`);
-        Object.assign(keep, { short_status: o.short_status, short_date: o.short_date, short_note: o.short_note });
+        Object.assign(keep, { short_status: o.short_status, short_date: o.short_date, short_note: o.short_note, short_amount: o.short_amount ?? null });
       }
       if (o.extra_status) {
         if ((o.extra_pcs || 0) !== (it.extra_pcs || 0)) fail(`"${o.name}": its extra pieces are already resolved on Extra & Short. Undo that there first, then change them.`);
-        Object.assign(keep, { extra_status: o.extra_status, extra_date: o.extra_date, extra_note: o.extra_note });
+        Object.assign(keep, { extra_status: o.extra_status, extra_date: o.extra_date, extra_note: o.extra_note, extra_amount: o.extra_amount ?? null });
       }
       return keep;
     };
@@ -524,7 +566,7 @@ async function saveGrn(body, editId = null) {
         it.short_sets && `${it.short_sets} sets short`,
         it.short_pcs && `${it.short_pcs} pcs short`,
       ].filter(Boolean);
-      unbilled += unbilledExtraInr(line);
+      unbilled += unbilledExtraInr(line) - supplierAdjustOf(line);
       received.set(product.id, [...(received.get(product.id) || []), `${it.sets} sets${notes.length ? ` (${notes.join(', ')})` : ''}`]);
     }
     // stock: every product of this GRN (before and after an edit) gets its batch brought in line —
@@ -540,7 +582,7 @@ async function saveGrn(body, editId = null) {
       if (resolvedOf(left)) fail(`"${left.name}" can't be removed: its ${resolvedOf(left)} pieces are resolved on Extra & Short. Undo that there first.`);
     }
     // extra pieces kept free, or settled in the next shipment, are not on this bill
-    if (unbilled > 0) {
+    if (Math.abs(unbilled) > 0.009) {
       payable_inr = round2(payable_inr - unbilled);
       await setById('grns', grnId, { payable_inr });
     }
@@ -615,8 +657,15 @@ export async function getGrn(id) {
    extra: free → the supplier lets us keep them (off the bill); billed → paid with this bill; next → settled in the next shipment (off this bill)
    "reopen" undoes a resolution.
    ========================================================= */
-const RESOLVE = { short: ['received', 'lost'], extra: ['free', 'billed', 'next'] };
-export async function resolveLine(itemId, { kind, action, date, note } = {}) {
+const RESOLVE = { short: ['lost', 'cargo', 'supplier', 'received'], extra: ['free', 'cargo', 'supplier'] };
+/** The amount a settlement is worth by itself: the product cost of the pieces (Rs, or the supplier's money for the supplier),
+ *  and for short pieces received later, their cargo charge. */
+const settleAmount = (item, g, kind, to, pcs) => {
+  if (kind === 'short' && to === 'received') return g.currency === 'LKR' ? 0 : round2(pcs * (item.cargo_per_pcs || 0));   // local: no cargo bill
+  const cost = pcs * productCostPc(item);
+  return round2(to === 'supplier' ? cost : cost * (g.exchange_rate || 1));
+};
+export async function resolveLine(itemId, { kind, action, date, note, amount } = {}) {
   if (!RESOLVE[kind]) fail('Choose extra or short');
   const to = action === 'reopen' ? null : action;
   if (to && !RESOLVE[kind].includes(to)) fail('Choose how it was resolved');
@@ -626,12 +675,17 @@ export async function resolveLine(itemId, { kind, action, date, note } = {}) {
   if (!g) fail('GRN not found', 404);
   const day = date || todayStr();
   const text = String(note || '').trim() || null;
+  // settled with the cargo: the GRN has to say which cargo company brought it
+  if (to === 'cargo' && g.currency === 'LKR') fail(`${g.grn_no} is from a local supplier — there is no cargo to settle with`);
+  if ((to === 'cargo' || (kind === 'short' && to === 'received' && g.currency !== 'LKR')) && !String(g.cargo_name || '').trim()) fail(`${g.grn_no} has no cargo company — choose it on the GRN first (Edit GRN)`);
   await tx(async () => {
     if (kind === 'short') {
       const pcs = itemShortPcs(item);
       if (!pcs) fail('This line has no short pieces');
       const was = item.short_status || null;
-      await setById('grn_items', item.id, { short_status: to, short_date: to ? day : null, short_note: to ? text : null });
+      // what it is worth (typed, or the product cost of the pieces — for "received later" their cargo charge)
+      const short_amount = to ? round2(amount != null && amount !== '' ? Math.max(0, num(amount)) : settleAmount(item, g, 'short', to, pcs)) : null;
+      await setById('grn_items', item.id, { short_status: to, short_date: to ? day : null, short_note: to ? text : null, short_amount });
       if ((was === 'received') !== (to === 'received')) {
         await syncGrnBatch(g.id, item.product_id, {
           ref: g.grn_no, date: g.date, type: to === 'received' ? 'short-received' : 'short-undo',
@@ -640,12 +694,13 @@ export async function resolveLine(itemId, { kind, action, date, note } = {}) {
       }
     } else {
       if (!(item.extra_pcs > 0)) fail('This line has no extra pieces');
-      await setById('grn_items', item.id, { extra_status: to, extra_date: to ? day : null, extra_note: to ? text : null });
-      // the supplier bill follows: extras kept free or settled in the next shipment come off it
-      const lines = await find('grn_items', { grn_id: g.id });
-      const payable = round2(g.goods_inr + (g.cargo_in_supplier_bill ? g.cargo_charge_inr : 0) - sum(lines, unbilledExtraInr));
-      await setById('grns', g.id, { payable_inr: payable });
+      // what they are worth (typed, or the product cost of the pieces)
+      const extra_amount = to ? round2(amount != null && amount !== '' ? Math.max(0, num(amount)) : settleAmount(item, g, 'extra', to, item.extra_pcs)) : null;
+      await setById('grn_items', item.id, { extra_status: to, extra_date: to ? day : null, extra_note: to ? text : null, extra_amount });
     }
+    // the supplier bill: never the extras, unless they are to be paid to the supplier; less shorts that were the supplier's mistake
+    const lines = await find('grn_items', { grn_id: g.id });
+    await setById('grns', g.id, { payable_inr: supplierPayable(g, lines) });
   });
   await revalueGrns();   // a bill that is now fully paid gets its settled date
   return findOne('grn_items', { id: itemId });

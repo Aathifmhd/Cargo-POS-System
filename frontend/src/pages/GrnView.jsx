@@ -49,7 +49,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
   const body = <>
       <div className="stats mb">
         <div className="stat"><div className="stat-text"><div className="stat-label">Supplier billed</div><div className="stat-value" style={{ fontSize: 17 }}>{g.supplier_bill_date ? niceDate(g.supplier_bill_date) : '—'}</div>{g.supplier_invoice_no && <div className="stat-sub">Invoice {g.supplier_invoice_no}</div>}</div></div>
-        <div className="stat"><div className="stat-text"><div className="stat-label">Cargo</div><div className="stat-value" style={{ fontSize: 17 }}>{g.cargo_name || '—'}</div></div></div>
+        {!local && <div className="stat"><div className="stat-text"><div className="stat-label">Cargo</div><div className="stat-value" style={{ fontSize: 17 }}>{g.cargo_name || '—'}</div></div></div>}
         <div className="stat"><div className="stat-text"><div className="stat-label">{local ? 'Supplier' : 'Costing rate'}</div><div className="stat-value" style={{ fontSize: 17 }}>{local ? '🇱🇰 Local · bill in Rs' : '1 ₹ = Rs ' + g.exchange_rate.toFixed(4)}</div></div></div>
       </div>
 

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api, n, r2, lkr, inr, isLocalSup, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
 import { PageHeader, Card, Icon, Field, NumInput, DateInput, Combobox, Segmented, Modal, useToast, Loading, useListKeys } from '../components/ui.jsx';
 import { SupplierForm } from '../components/forms.jsx';
+import { CargoForm } from './Cargo.jsx';
 import SizePicker from '../components/SizePicker.jsx';
 import { useSettings, useAuth } from '../App.jsx';
 
@@ -32,10 +33,10 @@ const cargoOntoItems = (items, expenses, rate) => {
 /** Lines kept as totals (older GRNs and drafts) → the same cargo and other expenses per piece. */
 const chargesPerPiece = (items) => items.map((i) => {
   if (i.cargo_per_pcs !== undefined && i.other_per_pcs !== undefined && !n(i.cargo_lkr) && !n(i.other_lkr)) return i;
-  const paid = computeLanding({ items: [{ ...i, cargo_per_pcs: undefined, other_per_pcs: undefined }], exchange_rate: 1 }).items[0].paid_pcs || 1;
-  const per = (given, total) => (given !== undefined && given !== null && given !== '' ? given : n(total) ? r2(n(total) / paid) : '');
+  const c = computeLanding({ items: [{ ...i, cargo_per_pcs: undefined, other_per_pcs: undefined }], exchange_rate: 1 }).items[0];
+  const per = (given, total, over) => (given !== undefined && given !== null && given !== '' ? given : n(total) ? r2(n(total) / (over || 1)) : '');
   const { cargo_lkr, other_lkr, ...rest } = i;
-  return { ...rest, cargo_per_pcs: per(i.cargo_per_pcs, cargo_lkr), other_per_pcs: per(i.other_per_pcs, other_lkr) };
+  return { ...rest, cargo_per_pcs: per(i.cargo_per_pcs, cargo_lkr, c.cargo_pcs), other_per_pcs: per(i.other_per_pcs, other_lkr, c.paid_pcs) };
 });
 // prices are entered per piece; products keep them per set, so convert on the way in and out
 const ppsOf = (it) => Math.max(1, Math.round(n(it.pcs_per_set) || 1));
@@ -82,7 +83,7 @@ export default function GrnForm() {
   const [suppliers, setSuppliers] = useState(null);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [cargoNames, setCargoNames] = useState([]);
+  const [cargoNames, setCargoNames] = useState([]);   // the Cargo list: [{ id, name, phone }]
   const [newSupplier, setNewSupplier] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -103,7 +104,7 @@ export default function GrnForm() {
       }
     } catch { /* ignore */ }
     return {
-      origin: 'india', date: today(), supplier_id: null, supplier_invoice_no: '', supplier_bill_date: '', cargo_name: '',
+      origin: 'india', date: today(), supplier_id: null, supplier_invoice_no: '', supplier_bill_date: '', cargo_id: null, cargo_name: '',
       payment_type: 'credit', due_date: '', payment_method: 'Bank transfer', payment_reference: '', notes: '',
       expenses: [],   // older GRNs only: the cargo is now entered on each item
       items: [], entry: blankItem(), editingKey: null,
@@ -121,7 +122,7 @@ export default function GrnForm() {
     api.get(`/grns/${editId}`).then((d) => {
       const pp = (v, pps) => (n(v) > 0 ? r2(n(v) / Math.max(1, n(pps) || 1)) : '');
       setG({
-        origin: d.currency === 'LKR' ? 'local' : 'india', date: d.date, supplier_id: d.supplier_id, supplier_invoice_no: d.supplier_invoice_no || '', supplier_bill_date: d.supplier_bill_date || '', cargo_name: d.cargo_name || '',
+        origin: d.currency === 'LKR' ? 'local' : 'india', date: d.date, supplier_id: d.supplier_id, supplier_invoice_no: d.supplier_invoice_no || '', supplier_bill_date: d.supplier_bill_date || '', cargo_id: d.cargo_id ?? null, cargo_name: d.cargo_name || '',
         payment_type: d.payment_type, due_date: d.due_date || '', payment_method: d.payments?.[0]?.method || 'Bank transfer', payment_reference: '', notes: d.notes || '',
         expenses: [],
         // an older GRN's shared cargo charges move onto its items (same costs)
@@ -145,7 +146,7 @@ export default function GrnForm() {
     api.get('/suppliers').then((s) => setSuppliers(s.filter((x) => x.active)));
     api.get('/products?active=all').then(setProducts);
     api.get('/products/categories').then(setCategories);
-    api.get('/grns/cargo-names').then(setCargoNames);
+    api.get('/grns/cargo-companies').then(setCargoNames);
     reloadSettings(); // the latest categories, products and sizes from Settings
   }, []);
 
@@ -156,7 +157,8 @@ export default function GrnForm() {
   const supplierList = (suppliers || []).filter((s) => isLocalSup(s) === local);
   const chooseOrigin = (origin) => setG((x) => {
     const keep = (suppliers || []).find((s) => s.id === x.supplier_id);
-    return { ...x, origin, supplier_id: keep && isLocalSup(keep) === (origin === 'local') ? x.supplier_id : null, payment_method: origin === 'local' ? 'Cash' : 'Bank transfer' };
+    return { ...x, origin, supplier_id: keep && isLocalSup(keep) === (origin === 'local') ? x.supplier_id : null, payment_method: origin === 'local' ? 'Cash' : 'Bank transfer',
+      ...(origin === 'local' ? { cargo_id: null, cargo_name: '' } : {}) };   // local suppliers: no cargo
   });
   // the due date is 60 days from the supplier's bill date (or the date received, until the bill date is entered) —
   // a GRN loaded for editing keeps its own due date
@@ -349,6 +351,16 @@ export default function GrnForm() {
       if (editId) backToGrn(saved.id); else navigate(`/grn/${saved.id}`, { state: { askStickers: true } });   // asks to print the set stickers
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   };
+  /* ---------- the cargo company (from the Cargo list) ---------- */
+  const cargoPicked = cargoNames.find((c) => c.id === g.cargo_id) || cargoNames.find((c) => g.cargo_name && c.name.toLowerCase() === g.cargo_name.trim().toLowerCase()) || null;
+  // "Add new cargo": the Add cargo form (like a new supplier), then it is picked
+  const [newCargo, setNewCargo] = useState(null);
+  const cargoAdded = (c) => {
+    setCargoNames((l) => [...l, c].sort((a, b) => a.name.localeCompare(b.name)));
+    setG((x) => ({ ...x, cargo_id: c.id, cargo_name: c.name }));
+    setNewCargo(null);
+  };
+
   /* ---------- hold this GRN and start another; bring a held one back ---------- */
   const me = useAuth().user;
   const [held, setHeld] = useState([]);
@@ -457,10 +469,12 @@ export default function GrnForm() {
                 <DateInput value={g.supplier_bill_date || ''} max={g.date || undefined} onChange={set('supplier_bill_date')} />
               </Field>
               <Field label="Date received"><DateInput value={g.date} onChange={set('date')} /></Field>
-              <Field label="Cargo name" hint="Cargo / courier company">
-                <input className="input" list="cargo-list" value={g.cargo_name} onChange={set('cargo_name')} placeholder="e.g. Lanka Speed Cargo" />
-                <datalist id="cargo-list">{cargoNames.map((c) => <option key={c} value={c} />)}</datalist>
-              </Field>
+              {!local && <Field label="Cargo">
+                <Combobox items={cargoNames} value={cargoPicked?.id ?? null} placeholder="Search cargo company…"
+                  getLabel={(c) => c.name} getSub={(c) => [c.contact, c.phone].filter(Boolean).join(' · ')}
+                  onSelect={(c) => setG((x) => ({ ...x, cargo_id: c.id, cargo_name: c.name }))}
+                  onCreate={(name) => setNewCargo(name)} createLabel={(q) => `Add new cargo “${q}”`} />
+              </Field>}
               <Field label="Supplier invoice no"><input className="input" value={g.supplier_invoice_no} onChange={set('supplier_invoice_no')} /></Field>
               <Field label="Notes"><input className="input" value={g.notes} onChange={set('notes')} /></Field>
             </div>
@@ -674,7 +688,11 @@ export default function GrnForm() {
                   {/* 3 · sizes, then this item's cargo charge and other expenses below them (both go into its cost) */}
                   {(() => {
                     const paidPcs = c.paid_pcs || 0;
-                    const total = (v) => (n(v) > 0 && paidPcs ? `× ${int(paidPcs)} pcs = ${lkr(n(v) * paidPcs)} · added to each piece's cost` : 'For each piece · added to its cost');
+                    const total = (v, over = paidPcs) => (n(v) > 0 && over ? `× ${int(over)} pcs = ${lkr(n(v) * over)} · added to each piece's cost` : 'For each piece · added to its cost');
+                    // the cargo charge: × the pieces received (short or extra pieces change it)
+                    const cargoHint = (v) => (n(v) > 0 && (c.cargo_pcs || 0)
+                      ? `× ${int(c.cargo_pcs)} pcs${c.cargo_pcs !== c.set_pcs ? ' received' : ''} = ${lkr(n(v) * c.cargo_pcs)} · added to each piece's cost`
+                      : 'For each piece received · added to its cost');
                     return (
                       <div className="item-size-row">
                         <div className="field">
@@ -692,7 +710,7 @@ export default function GrnForm() {
                           </Field>
                         </div>
                         <div className="item-charges">
-                          <Field label={local ? 'Transport / piece (Rs)' : 'Cargo charge / piece (Rs)'} hint={total(it.cargo_per_pcs)}>
+                          <Field label={local ? 'Transport charge / piece (Rs)' : 'Cargo charge / piece (Rs)'} hint={local ? total(it.cargo_per_pcs, c.cargo_pcs) : cargoHint(it.cargo_per_pcs)}>
                             <NumInput money value={it.cargo_per_pcs ?? ''} onChange={(v) => updItem(it.key, { cargo_per_pcs: v, cargo_lkr: '' })} placeholder="0.00" />
                           </Field>
                           <Field label="Other expenses / piece (Rs)" hint={total(it.other_per_pcs)}>
@@ -817,6 +835,7 @@ export default function GrnForm() {
         </div>
       </div>
 
+      {newCargo != null && <CargoForm cargo={{ name: newCargo }} url="/grns/cargo-companies" onClose={() => setNewCargo(null)} onSaved={cargoAdded} />}
       {newSupplier != null && (
         <SupplierForm initialName={newSupplier} initialOrigin={g.origin || 'india'} onClose={() => setNewSupplier(null)}
           onSaved={(s) => { setSuppliers((x) => [...x, { ...s, balance_inr: s.opening_balance_inr }]); set('supplier_id')(s.id); setNewSupplier(null); }} />

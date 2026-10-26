@@ -388,8 +388,9 @@ export async function profitLoss(fromDate, toDate, win = {}) {
     const g = grnOf[it.grn_id];
     if (!g) continue;
     const pc = it.landed_per_pcs_lkr || 0;
+    const productPc = ((it.cost_inr_per_set || 0) / (it.pcs_per_set || 1)) * (g.exchange_rate || 1);   // the product cost, no cargo charge
     if (it.extra_status === 'free' && it.extra_pcs > 0 && it.extra_date >= from && it.extra_date <= to) {
-      gains.push({ reason: 'extra', date: it.extra_date, ref: g.grn_no, grn_id: g.id, name: it.name, pcs: it.extra_pcs, amount: round2(it.extra_pcs * pc), note: it.extra_note || 'Extra pieces kept free' });
+      gains.push({ reason: 'extra', date: it.extra_date, ref: g.grn_no, grn_id: g.id, name: it.name, pcs: it.extra_pcs, amount: round2(it.extra_amount ?? it.extra_pcs * productPc), note: it.extra_note || 'Extra pieces kept free' });
     }
     // older GRNs: free extra sets, on the GRN's date
     if (it.extra_sets > 0 && g.date >= from && g.date <= to) {
@@ -402,7 +403,8 @@ export async function profitLoss(fromDate, toDate, win = {}) {
     const g = grnOf[it.grn_id];
     if (!g) continue;
     const pcs = (it.short_sets || 0) * (it.pcs_per_set || 1) + (it.short_pcs || 0);
-    losses.push({ reason: 'short', date: it.short_date, ref: g.grn_no, grn_id: g.id, name: it.name, pcs, amount: round2(pcs * (it.landed_per_pcs_lkr || 0)), note: it.short_note || 'Short pieces lost — paid for, not received' });
+    const productPc = ((it.cost_inr_per_set || 0) / (it.pcs_per_set || 1)) * (g.exchange_rate || 1);   // the product cost, no cargo charge
+    losses.push({ reason: 'short', date: it.short_date, ref: g.grn_no, grn_id: g.id, name: it.name, pcs, amount: round2(it.short_amount ?? pcs * productPc), note: it.short_note || 'Short pieces lost — paid for, not received' });
   }
   // stock corrections: taken off = a loss, found = a gain (at the batch's cost)
   for (const m of moves) {

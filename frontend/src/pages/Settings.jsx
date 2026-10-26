@@ -4,7 +4,6 @@ import { POS_KEYS } from './POS.jsx';
 import { PageHeader, Field, NumInput, Icon, useToast, ThemeSwitch } from '../components/ui.jsx';
 import { useSettings, useAuth } from '../App.jsx';
 import CatalogEditor from '../components/CatalogEditor.jsx';
-import DownloadReports from '../components/DownloadReports.jsx';
 import StockTake from '../components/StockTake.jsx';
 import { Rules as ApprovalRules } from './Users.jsx';
 import { StickerDesign } from '../components/Stickers.jsx';
@@ -36,7 +35,6 @@ const GROUPS = [
     heading: 'System',
     items: [
       { id: 'appearance', icon: 'sun', staff: true, label: 'Appearance', desc: 'Light or dark look for this computer.' },
-      { id: 'reports', icon: 'chart', label: 'Download reports', desc: 'Excel sheets of GRNs, stock, invoices, customers, suppliers, payments and dues — for a time period.' },
       { id: 'backup', icon: 'download', label: 'Backup', desc: 'Download a full copy of all your data.' },
       { id: 'shortcuts', icon: 'keyboard', staff: true, label: 'Keyboard shortcuts', desc: 'Keys that speed up billing and moving around.' },
       { id: 'approvals', icon: 'crown', staff: true, label: 'Super admin approvals', desc: 'What only the Super Admin can open, and what needs the Super Admin\'s (or an Admin\'s) password.' },
@@ -175,7 +173,6 @@ export default function Settings() {
               </div>
             )}
 
-            {section === 'reports' && <DownloadReports />}
             {section === 'stocktake' && superAdmin && <StockTake />}
 
             {section === 'approvals' && <ApprovalRules />}

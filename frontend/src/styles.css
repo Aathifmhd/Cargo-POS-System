@@ -1902,7 +1902,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 
 /* phones: a pop-up fits in the part of the screen above the keyboard, so its buttons (Save, Cancel …) are never under it */
 @media (max-width: 860px) {
-  .modal-backdrop { top: var(--vv-top, 0px); bottom: auto; height: var(--vv-h, 100dvh); }
-  .modal, .modal-sm, .modal-md, .modal-lg, .modal-xl { max-height: calc(var(--vv-h, 100dvh) - 20px - env(safe-area-inset-top)); }
+  .modal-backdrop { top: var(--vv-top, 0px); bottom: auto; height: var(--vv-h, 100%); }
+  .modal, .modal-sm, .modal-md, .modal-lg, .modal-xl { max-height: calc(100% - 20px - env(safe-area-inset-top)); }
   .modal-body { min-height: 0; }
 }

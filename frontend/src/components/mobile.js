@@ -118,6 +118,7 @@ export function useKeyboardOpen() {
     document.addEventListener('focusout', onOut);
     vv?.addEventListener('resize', update);
     vv?.addEventListener('scroll', update);
+    update();
     return () => {
       document.removeEventListener('touchstart', onTouch);
       document.removeEventListener('focusin', onIn);

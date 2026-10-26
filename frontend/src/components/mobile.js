@@ -154,7 +154,8 @@ export function usePullToRefresh(enabled = true) {
     const onEnd = () => {
       if (startY == null) return;
       startY = null;
-      if (dist >= PULL_TRIGGER) { setRefreshing(true); setPull(1); setTimeout(() => window.location.reload(), 150); }
+      // refreshes only once the icon has turned 180° (twice the trigger); a shorter pull springs back
+      if (dist >= PULL_TRIGGER * 2) { setRefreshing(true); setPull(1); setTimeout(() => window.location.reload(), 150); }
       else setPull(0);
       dist = 0;
     };

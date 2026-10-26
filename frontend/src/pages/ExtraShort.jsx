@@ -27,8 +27,8 @@ function lineFigures(r) {
   const shortLkr = shortPcs * pcCost;
   const extraLkr = r.extra_pcs * pcCost;
   return {
-    billedPcs: r.sets * r.pcs_per_set + r.extra_pcs,
-    receivedPcs: Math.max(0, (r.sets + r.extra_sets - r.short_sets) * r.pcs_per_set + r.extra_pcs - r.short_pcs),
+    billedPcs: r.sets * r.pcs_per_set + (r.odd_pcs || 0) + r.extra_pcs,
+    receivedPcs: Math.max(0, (r.sets + r.extra_sets - r.short_sets) * r.pcs_per_set + (r.odd_pcs || 0) + r.extra_pcs - r.short_pcs),
     extraPcs: r.extra_pcs + freePcs,
     shortPcs,
     extraInr: r.extra_pcs * pcPrice,

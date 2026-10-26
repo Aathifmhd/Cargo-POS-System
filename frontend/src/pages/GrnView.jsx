@@ -61,13 +61,14 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
                 <thead><tr><th>Product</th><th className="right">Received</th><th className="right">Bill {g.currency === 'LKR' ? 'Rs' : '₹'}/pc</th><th className="right">Cost / piece</th><th className="right">Expected / piece</th><th className="right">Margin</th></tr></thead>
                 <tbody>
                   {g.items.map((i) => {
-                    const pcs = Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + i.extra_pcs - i.short_pcs);
+                    const pcs = Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + (i.odd_pcs || 0) + i.extra_pcs - i.short_pcs);
                     const per = (v) => v / (i.pcs_per_set || 1);
                     return (
                       <tr key={i.id}>
                         <td><b>{i.name}</b><div className="sub">{i.code} · {i.pcs_per_set} pcs/set{i.colors_count ? ` · ${i.colors_count} colours` : ''}{i.sizes ? ` · ${i.sizes}` : ''}</div></td>
                         <td className="right">{int(pcs)} pcs
                           <div className="sub">{int(i.sets)} sets billed</div>
+                          {i.odd_pcs ? <div className="sub text-amber">{int(i.sets * i.pcs_per_set + i.odd_pcs)} pcs, not {int(i.sets * i.pcs_per_set)}</div> : null}
                           {i.extra_pcs > 0 && <div className="sub text-green">+ {int(i.extra_pcs)} extra pcs (billed)</div>}
                           {i.extra_sets > 0 && <div className="sub text-green">+ {int(i.extra_sets)} free sets</div>}
                           {(i.short_sets > 0 || i.short_pcs > 0) && <div className="sub text-red">− {int(i.short_sets * i.pcs_per_set + i.short_pcs)} pcs short</div>}

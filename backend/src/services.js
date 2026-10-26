@@ -27,8 +27,10 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
     const extraSets = q(it.extra_sets); // older GRNs only: free sets, not billed
     const shortSets = q(it.short_sets);
     const shortPcs = q(it.short_pcs);
+    // the total pieces changed by hand (one set with fewer pieces than the others): billed and received that many
+    const oddPcs = Math.max(-sets * pcsPerSet, Math.round(num(it.odd_pcs)));
     // every piece paid for: what arrived + shorts (the cost per piece is over these)
-    const paidPcs = Math.max(0, (sets + extraSets - shortSets) * pcsPerSet + extraPcs - shortPcs) + shortSets * pcsPerSet + shortPcs;
+    const paidPcs = Math.max(0, (sets + extraSets - shortSets) * pcsPerSet + oddPcs + extraPcs - shortPcs) + shortSets * pcsPerSet + shortPcs;
     const given = (v) => v !== undefined && v !== null && v !== '';
     const charge = (perPc, total) => (given(perPc) ? round2(Math.max(0, num(perPc)) * paidPcs) : round2(Math.max(0, num(total))));
     const cargoLkr = charge(it.cargo_per_pcs, it.cargo_lkr);
@@ -37,10 +39,10 @@ export function computeLanding({ items, exchange_rate, cargo_charge_inr, expense
       ...it, sets, pcs_per_set: pcsPerSet, cost_inr_per_set: cost, cargo_lkr: cargoLkr, other_lkr: otherLkr,
       cargo_per_pcs: given(it.cargo_per_pcs) ? round2(Math.max(0, num(it.cargo_per_pcs))) : paidPcs ? round2(cargoLkr / paidPcs) : 0,
       other_per_pcs: given(it.other_per_pcs) ? round2(Math.max(0, num(it.other_per_pcs))) : paidPcs ? round2(otherLkr / paidPcs) : 0,
-      line_inr: round2(sets * cost + extraPcs * (cost / pcsPerSet)),
-      extra_sets: extraSets, extra_pcs: extraPcs, short_sets: shortSets, short_pcs: shortPcs,
-      billed_pcs: sets * pcsPerSet + extraPcs,
-      pcs: Math.max(0, (sets + extraSets - shortSets) * pcsPerSet + extraPcs - shortPcs),
+      line_inr: round2(sets * cost + (oddPcs + extraPcs) * (cost / pcsPerSet)),
+      extra_sets: extraSets, extra_pcs: extraPcs, short_sets: shortSets, short_pcs: shortPcs, odd_pcs: oddPcs,
+      billed_pcs: sets * pcsPerSet + oddPcs + extraPcs,
+      pcs: Math.max(0, (sets + extraSets - shortSets) * pcsPerSet + oddPcs + extraPcs - shortPcs),
     };
   });
   const goods_inr = round2(lines.reduce((s, l) => s + l.line_inr, 0));
@@ -493,10 +495,11 @@ async function saveGrn(body, editId = null) {
         color_names: it.color_names || null, sizes: it.sizes || null, sets: it.sets, cost_inr_per_set: it.cost_inr_per_set,
         line_inr: it.line_inr, cargo_lkr: it.cargo_lkr, other_lkr: it.other_lkr, cargo_per_pcs: it.cargo_per_pcs, other_per_pcs: it.other_per_pcs, landed_lkr: it.landed_lkr, landed_per_set_lkr: it.landed_per_set_lkr, landed_per_pcs_lkr: it.landed_per_pcs_lkr,
         mrp_per_set: round2(mrp), expected_per_set: round2(expected),
-        extra_sets: it.extra_sets, extra_pcs: it.extra_pcs, short_sets: it.short_sets, short_pcs: it.short_pcs,
+        extra_sets: it.extra_sets, extra_pcs: it.extra_pcs, short_sets: it.short_sets, short_pcs: it.short_pcs, odd_pcs: it.odd_pcs,
       });
 
       const notes = [
+        it.odd_pcs && `${it.sets * it.pcs_per_set + it.odd_pcs} pcs, not ${it.sets * it.pcs_per_set}`,
         it.extra_pcs && `+${it.extra_pcs} extra pcs`,
         it.short_sets && `${it.short_sets} sets short`,
         it.short_pcs && `${it.short_pcs} pcs short`,

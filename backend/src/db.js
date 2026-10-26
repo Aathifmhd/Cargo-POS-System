@@ -85,7 +85,7 @@ const DEFAULTS = {
     effective_rate: null, settled_at: null },
   grn_expenses: { category: null, amount_lkr: 0 },
   grn_items: { category: null, cargo_lkr: 0, other_lkr: 0, cargo_per_pcs: null, other_per_pcs: null, short_status: null, short_date: null, short_note: null, extra_status: null, extra_date: null, extra_note: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, mrp_per_set: 0, expected_per_set: 0,
-    extra_sets: 0, extra_pcs: 0, short_sets: 0, short_pcs: 0 },
+    extra_sets: 0, extra_pcs: 0, short_sets: 0, short_pcs: 0, odd_pcs: 0 },
   supplier_payments: { grn_id: null, exchange_rate: 0, amount_lkr: 0, method: null, reference: null, notes: null, cheque_id: null },
   cargo_payments: { method: null, reference: null, notes: null, cheque_id: null },
   cheques: { party_id: null, bill_id: null, owner: null, bank: null, no_auto: 0, notes: null, payment_id: null, passed_on: null, history: [] },
@@ -294,7 +294,7 @@ export function dueStatus(balance, dueDate, today = todayStr()) {
 
 /* ---------------- stock ---------------- */
 /** Pieces a GRN line put into stock: what arrived, plus short pieces that came later (resolved as "received"). */
-export const grnItemPcs = (it) => Math.max(0, ((it.sets || 0) + (it.extra_sets || 0) - (it.short_sets || 0)) * (it.pcs_per_set || 1) + (it.extra_pcs || 0) - (it.short_pcs || 0))
+export const grnItemPcs = (it) => Math.max(0, ((it.sets || 0) + (it.extra_sets || 0) - (it.short_sets || 0)) * (it.pcs_per_set || 1) + (it.odd_pcs || 0) + (it.extra_pcs || 0) - (it.short_pcs || 0))
   + (it.short_status === 'received' ? itemShortPcs(it) : 0);
 /** Pieces billed but not received on a GRN line. */
 export const itemShortPcs = (it) => Math.max(0, (it.short_sets || 0) * (it.pcs_per_set || 1) + (it.short_pcs || 0));

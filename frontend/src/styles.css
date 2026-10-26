@@ -1361,3 +1361,7 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 /* held bills / held GRNs: the row picked with ↑ ↓ */
 .key-list .held-row.on, .key-list .held-grn.on { background: var(--primary-soft, var(--surface-2)); outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 10px; }
 .key-list .held-grn { padding-left: 10px; padding-right: 10px; }
+
+/* GRN: total pieces changed by hand (a set with fewer pieces) */
+.field-odd .input { border-color: var(--amber, #d97706); font-weight: 600; }
+.field-odd .field-hint { color: var(--amber, #d97706); }

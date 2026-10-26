@@ -58,7 +58,7 @@ r.get('/extra-short', async (req, res) => {
     return {
       id: i.id, grn_id: i.grn_id, grn_no: g.grn_no, date: g.date, bale_no: g.bale_no, lr_no: g.lr_no, cargo_name: g.cargo_name,
       supplier_id: g.supplier_id, supplier_name: names[g.supplier_id], product_id: i.product_id, code: prods[i.product_id].code,
-      name: i.name, sizes: i.sizes, pcs_per_set: i.pcs_per_set, sets: i.sets, extra_sets: i.extra_sets, extra_pcs: i.extra_pcs,
+      name: i.name, sizes: i.sizes, pcs_per_set: i.pcs_per_set, sets: i.sets, odd_pcs: i.odd_pcs || 0, extra_sets: i.extra_sets, extra_pcs: i.extra_pcs,
       short_sets: i.short_sets, short_pcs: i.short_pcs, cost_inr_per_set: i.cost_inr_per_set, landed_per_pcs_lkr: i.landed_per_pcs_lkr,
       short_status: i.short_status, short_date: i.short_date, short_note: i.short_note,
       extra_status: i.extra_status, extra_date: i.extra_date, extra_note: i.extra_note,

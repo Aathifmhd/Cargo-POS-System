@@ -14,7 +14,7 @@ const fetchHeld = () => api.get('/held/grn').then((l) => l.map((h) => ({ id: h.i
 /** A supplier bill is due this many days after the supplier's bill date. */
 const GRN_DUE_DAYS = 60;
 let keySeq = 1;
-const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', cargo_per_pcs: '', other_per_pcs: '', mrp_per_pcs: '', expected_per_pcs: '' });
+const blankItem = () => ({ key: keySeq++, product_id: null, name: '', category: '', subtype: '', pcs_per_set: '', colors_count: '', color_names: '', sizes: '', sets: '', odd_pcs: '', extra_pcs: '', short_sets: '', short_pcs: '', cost_inr_per_pcs: '', cargo_per_pcs: '', other_per_pcs: '', mrp_per_pcs: '', expected_per_pcs: '' });
 /**
  * Older GRNs and drafts kept the cargo as shared charges (per category, or for the whole shipment).
  * Move each item's share onto the item itself, so every cost stays exactly as it was.
@@ -128,7 +128,7 @@ export default function GrnForm() {
         items: cargoOntoItems(d.items.map((i) => ({
           key: keySeq++, product_id: i.product_id, name: i.name, category: i.category || '', subtype: i.subtype || '', pname: i.pname || '',
           catOther: false, isNew: false, pcs_per_set: i.pcs_per_set, colors_count: i.colors_count || '', color_names: i.color_names || '', sizes: i.sizes || '',
-          sets: i.sets, extra_pcs: i.extra_pcs || '', short_sets: i.short_sets || '', short_pcs: i.short_pcs || '', showQty: Boolean(i.extra_pcs || i.short_pcs || i.short_sets),
+          sets: i.sets, odd_pcs: i.odd_pcs || '', extra_pcs: i.extra_pcs || '', short_sets: i.short_sets || '', short_pcs: i.short_pcs || '', showQty: Boolean(i.extra_pcs || i.short_pcs || i.short_sets),
           cost_inr_per_pcs: pp(i.cost_inr_per_set, i.pcs_per_set), cargo_lkr: i.cargo_per_pcs != null ? '' : i.cargo_lkr || '', other_lkr: i.other_per_pcs != null ? '' : i.other_lkr || '',
           cargo_per_pcs: i.cargo_per_pcs ?? undefined, other_per_pcs: i.other_per_pcs ?? undefined, expected_per_pcs: pp(i.expected_per_set, i.pcs_per_set), mrp_per_pcs: pp(i.mrp_per_set, i.pcs_per_set),
           expectedManual: true, mrpManual: true,
@@ -626,11 +626,23 @@ export default function GrnForm() {
                       <NumInput value={it.pcs_per_set} onChange={(v) => updItem(it.key, { pcs_per_set: v, pcsAuto: false })} placeholder="1" />
                     </Field>
                     <Field label="No. of sets" required hint="As on the supplier's bill"><NumInput value={it.sets} onChange={(v) => updItem(it.key, { sets: v })} placeholder="0" /></Field>
-                    <div className="field">
-                      <span className="field-label">Total pieces</span>
-                      <div className="input input-static">{int(c.set_pcs)}</div>
-                      <span className="field-hint">Sets × pieces per set</span>
-                    </div>
+                    {(() => {
+                      // the total can be changed: e.g. 9 sets of 5 and 1 set of 3 → 48, not 50 (as on the supplier's bill)
+                      const full = c.sets * c.pcs_per_set;
+                      const odd = c.odd_pcs || 0;
+                      return (
+                        <div className={`field ${odd ? 'field-odd' : ''}`}>
+                          <span className="field-label">Total pieces</span>
+                          <NumInput value={n(it.sets) > 0 ? full + odd : ''} placeholder="0"
+                            onChange={(v) => updItem(it.key, { odd_pcs: v === '' || v == null ? '' : Math.round(n(v)) - full })} />
+                          <span className="field-hint">
+                            {odd
+                              ? <>{int(c.sets)} × {int(c.pcs_per_set)} = {int(full)} · changed to {int(full + odd)} <button type="button" className="link-btn" style={{ display: 'inline', marginLeft: 4 }} onClick={() => updItem(it.key, { odd_pcs: '' })}>Undo</button></>
+                              : 'Sets × pieces per set (you can change it)'}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* 2 · what really came in the bale — folded away unless needed */}

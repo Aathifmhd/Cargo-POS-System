@@ -117,6 +117,8 @@ export const aggregate = (name, pipeline) => col(name).aggregate(pipeline, opt()
 export const updateOne = (name, filter, update, options = {}) => col(name).updateOne(filter, update, { ...opt(), ...options });
 export const updateMany = (name, filter, update, options = {}) => col(name).updateMany(filter, update, { ...opt(), ...options });
 export const deleteMany = (name, filter) => col(name).deleteMany(filter, opt());
+/** Find one document and remove it in one step (so two people can't both take it). */
+export const takeOne = (name, filter) => col(name).findOneAndDelete(filter, { ...opt(), projection: NO_ID });
 /** set fields on one document by id */
 export const setById = (name, id, fields) => updateOne(name, { id }, { $set: fields });
 
@@ -137,7 +139,7 @@ export const bumpCounter = (name, n) => col('counters').updateOne({ _id: name },
 
 export const COLLECTIONS = ['settings', 'suppliers', 'customers', 'products', 'grns', 'grn_expenses', 'grn_items', 'supplier_payments',
   'sales', 'sale_items', 'customer_payments', 'stock_moves', 'users', 'audit_log', 'fx_rates', 'batches',
-  'cargo_payments', 'cheques', 'customer_ids', 'damaged', 'stocktakes', 'bad_debts'];
+  'cargo_payments', 'cheques', 'customer_ids', 'damaged', 'stocktakes', 'bad_debts', 'held'];
 
 /* ---------------- errors & small helpers ---------------- */
 export class HttpError extends Error {

@@ -12,6 +12,7 @@ import reports from './routes/reports.js';
 import money from './routes/money.js';
 import exportsRoute from './routes/exports.js';
 import stocktake from './routes/stocktake.js';
+import held from './routes/held.js';
 import authRoutes from './routes/auth.js';
 import { requireAuth, initAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
@@ -49,6 +50,7 @@ app.use('/api', reports);
 app.use('/api', money);           // cargo payable, cheques
 app.use('/api', exportsRoute);     // Settings → Download reports (Excel)
 app.use('/api', stocktake);        // Settings → Stock Take
+app.use('/api', held);             // held bills and held GRNs, shared by every user
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 

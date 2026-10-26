@@ -7,7 +7,7 @@ import { useAuth, useSettings } from '../App.jsx';
 import { isAdmin, isSuper, custName, custPerson, niceTime, costCode } from '../lib.js';
 
 const DRAFT_KEY = 'cargo-pos-draft';
-const HELD_KEY = 'cargo-pos-held';
+const HELD_KEY = 'cargo-pos-held';   // older: bills held on this computer only (moved to the shared list once)
 const LAST_KEY = 'cargo-pos-last-sale';
 const readLS = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const writeLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
@@ -87,7 +87,19 @@ export default function POS() {
   const [sel, setSel] = useState(-1);
   const [edit, setEdit] = useState(null);          // { i, qty, price } while a bill line is being edited
   const [showCostPref, setShowCost] = useState(() => readLS('pos-show-cost', true));
-  const [held, setHeld] = useState(() => readLS(HELD_KEY, []));
+  // held bills are shared: every user, on every computer, sees the same list (kept on the server)
+  const [held, setHeld] = useState([]);
+  const loadHeld = () => api.get('/held/bill').then((l) => setHeld(l.map((h) => ({ ...h.data, id: h.id, at: h.at, by: h.by, label: h.label })))).catch(() => {});
+  useEffect(() => {
+    // bills held on this computer before: onto the shared list, once
+    const old = readLS(HELD_KEY, []);
+    const move = Array.isArray(old) && old.length
+      ? Promise.all(old.map((b) => api.post('/held/bill', { label: b.label, summary: { lines: (b.lines || []).length }, data: { lines: b.lines || [], customerId: b.customerId ?? null, billDisc: b.billDisc || '' } }))).then(() => localStorage.removeItem(HELD_KEY)).catch(() => {})
+      : Promise.resolve();
+    move.then(loadHeld);
+    const t = setInterval(loadHeld, 20000);
+    return () => clearInterval(t);
+  }, []); // eslint-disable-line
   const [modal, setModal] = useState(null);        // 'customer' | 'pay' | 'credit' | 'held' | 'keys' | {newCustomer}
   const [askReturn, setAskReturn] = useState(null);   // a return waiting for "normal or damaged?": (damaged) => void
   const [after, setAfter] = useState(null);        // what to open after picking a customer
@@ -106,7 +118,6 @@ export default function POS() {
   useEffect(() => { writeLS('pos-show-cost', showCostPref); }, [showCostPref]);
   const showCost = showCostPref && seeCost;
   useEffect(() => { writeLS(DRAFT_KEY, { lines, customerId, billDisc }); }, [lines, customerId, billDisc]);
-  useEffect(() => { writeLS(HELD_KEY, held); }, [held]);
   useEffect(() => { if (sel >= lines.length) setSel(lines.length - 1); }, [lines.length, sel]);
   useEffect(() => { billRef.current?.querySelector('tr.on')?.scrollIntoView({ block: 'nearest' }); }, [sel]);
 
@@ -310,20 +321,32 @@ export default function POS() {
   const overLimit = customer && customer.credit_limit > 0 && owed + T.net > customer.credit_limit;
 
   /* ---------- held bills ---------- */
-  const snapshot = () => ({ id: Date.now(), at: new Date().toISOString(), label: customer?.name || 'Walk-in customer', lines, customerId, billDisc, by: user.name });
+  const snapshot = () => ({ label: customer?.name || 'Walk-in customer', summary: { lines: lines.length }, data: { lines, customerId, billDisc } });
   const clearBill = () => { setLines([]); setBillDisc(''); setCustomerId(null); setEntry(blankEntry); setSel(-1); setEdit(null); };
-  const hold = () => {
+  const hold = async () => {
     if (!lines.length) return toast('Nothing on the bill to hold', 'error');
-    setHeld((h) => [...h, snapshot()]);
-    toast(`Bill held for ${customer?.name || 'walk-in customer'} — F5 brings it back`);
-    clearBill();
-    toCode();
+    try {
+      await api.post('/held/bill', snapshot());
+      toast(`Bill held for ${customer?.name || 'walk-in customer'} — F5 brings it back (on any computer)`);
+      clearBill();
+      loadHeld();
+      toCode();
+    } catch (e) { toast(e.message, 'error'); }
   };
-  const resume = (b) => {
-    setHeld((h) => [...h.filter((x) => x.id !== b.id), ...(lines.length ? [snapshot()] : [])]);
-    setLines(b.lines); setCustomerId(b.customerId); setBillDisc(b.billDisc || '');
-    setModal(null);
-    toCode();
+  const resume = async (b) => {
+    try {
+      const got = await api.post(`/held/bill/${b.id}/take`, {});   // off the list for everyone
+      if (lines.length) await api.post('/held/bill', snapshot());     // the bill on the screen is held in its place
+      setLines(got.data.lines || []); setCustomerId(got.data.customerId ?? null); setBillDisc(got.data.billDisc || '');
+      setModal(null);
+      toCode();
+    } catch (e) { toast(e.message, 'error'); }
+    loadHeld();
+  };
+  const dropHeld = async (b) => {
+    if (!confirm('Delete this held bill?')) return;
+    try { await api.del(`/held/bill/${b.id}`); } catch (e) { toast(e.message, 'error'); }
+    loadHeld();
   };
 
   /* ---------- finish ---------- */
@@ -387,7 +410,7 @@ export default function POS() {
       if (k === '`' || e.code === 'Backquote') return take(() => setShowCost((s) => !s));
       if (k === 'F1') return take(toCode);
       if (k === 'F4') return take(() => { setAfter(null); setModal('customer'); });
-      if (k === 'F5' || (e.ctrlKey && k.toLowerCase() === 'r')) return take(() => setModal('held'));
+      if (k === 'F5' || (e.ctrlKey && k.toLowerCase() === 'r')) return take(() => { loadHeld(); setModal('held'); });
       if (k === 'F7' || (e.ctrlKey && k.toLowerCase() === 'h')) return take(hold);
       if (k === 'F8') return take(() => focus('tBillDisc'));
       if (k === 'F10') return take(openPay);
@@ -579,7 +602,7 @@ export default function POS() {
             <button className="sum-pay" onClick={openPay} disabled={!lines.length}><b>TAKE PAYMENT</b><span>{lkr(T.net)} · Enter Enter · cash or credit</span></button>
             <div className="sum-more">
               <button onClick={hold} disabled={!lines.length}>Hold bill <i>F7</i></button>
-              <button onClick={() => setModal('held')}>Held bills{held.length > 0 && <b className="count-dot">{held.length}</b>} <i>F5</i></button>
+              <button onClick={() => { loadHeld(); setModal('held'); }}>Held bills{held.length > 0 && <b className="count-dot">{held.length}</b>} <i>F5</i></button>
               <button onClick={() => { if (!lines.length || confirm('Clear this bill?')) clearBill(); }} disabled={!lines.length && !customerId}>Clear bill <i>Ctrl+Del</i></button>
               <button onClick={reprint}>Last bill <i>F12</i></button>
               <button onClick={() => setModal('keys')}>All keys <i>?</i></button>
@@ -614,8 +637,8 @@ export default function POS() {
           onChangeCustomer={() => { setAfter('credit'); setModal('customer-credit'); }} />
       )}
       {modal === 'held' && (
-        <Modal title="Held bills" subtitle="Bills put aside on this computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => { setModal(null); toCode(); }}>
-          <HeldBills held={held} onResume={resume} onDelete={(b) => confirm('Delete this held bill?') && setHeld((h) => h.filter((x) => x.id !== b.id))} />
+        <Modal title="Held bills" subtitle="Bills put aside by anyone, on any computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => { setModal(null); toCode(); }}>
+          <HeldBills held={held} onResume={resume} onDelete={dropHeld} />
         </Modal>
       )}
       {modal === 'keys' && (

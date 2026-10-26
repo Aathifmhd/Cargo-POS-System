@@ -7,9 +7,10 @@ import SizePicker from '../components/SizePicker.jsx';
 import { useSettings, useAuth } from '../App.jsx';
 
 const DRAFT = 'cargo-grn-draft-v2';   // v2: cargo is paid in LKR; each item has its own cargo charge
-const HELD = 'cargo-grn-held';         // GRNs put aside on this computer (F7 / Ctrl+H), brought back with F5 / Ctrl+R
-const readHeld = () => { try { const l = JSON.parse(localStorage.getItem(HELD)); return Array.isArray(l) ? l : []; } catch { return []; } };
-const writeHeld = (l) => { try { localStorage.setItem(HELD, JSON.stringify(l)); } catch { /* storage full or blocked */ } };
+const HELD = 'cargo-grn-held';         // older: GRNs held on this computer only (moved to the shared list once)
+const readLocalHeld = () => { try { const l = JSON.parse(localStorage.getItem(HELD)); return Array.isArray(l) ? l : []; } catch { return []; } };
+/** Held GRNs are shared: every user who receives goods, on every computer, sees the same list (kept on the server). */
+const fetchHeld = () => api.get('/held/grn').then((l) => l.map((h) => ({ id: h.id, at: h.at, by: h.by, supplier: h.label, items: h.summary?.items || 0, invoice: h.summary?.invoice || '', g: h.data })));
 /** A supplier bill is due this many days after the supplier's bill date. */
 const GRN_DUE_DAYS = 60;
 let keySeq = 1;
@@ -350,37 +351,54 @@ export default function GrnForm() {
   };
   /* ---------- hold this GRN and start another; bring a held one back ---------- */
   const me = useAuth().user;
-  const [held, setHeld] = useState(readHeld);
+  const [held, setHeld] = useState([]);
+  const loadHeld = () => fetchHeld().then(setHeld).catch(() => {});
+  useEffect(() => {
+    if (editId) return undefined;
+    const old = readLocalHeld();   // GRNs held on this computer before: onto the shared list, once
+    const move = old.length
+      ? Promise.all(old.map((h) => api.post('/held/grn', { label: h.supplier, summary: { items: h.items, invoice: h.invoice }, data: h.g }))).then(() => localStorage.removeItem(HELD)).catch(() => {})
+      : Promise.resolve();
+    move.then(loadHeld);
+    const t = setInterval(loadHeld, 20000);
+    return () => clearInterval(t);
+  }, [editId]); // eslint-disable-line
   const [showHeld, setShowHeld] = useState(false);
   const hasWork = Boolean(g.supplier_id || g.items.length || entryStarted || g.supplier_invoice_no);
   const snapshot = () => {
     const sup = (suppliers || []).find((s) => s.id === g.supplier_id);
-    return { id: Date.now(), at: new Date().toISOString(), by: me?.name || me?.username || '', supplier: sup?.name || 'No supplier yet', items: g.items.length, invoice: g.supplier_invoice_no || '', g };
+    return { label: sup?.name || 'No supplier yet', summary: { items: g.items.length, invoice: g.supplier_invoice_no || '' }, data: g };
   };
-  const hold = () => {
+  const hold = async () => {
     if (editId) return toast('A GRN being edited can\'t be held — save or cancel it', 'error');
     if (!hasWork) return toast('Nothing to hold yet', 'error');
-    const list = [...readHeld(), snapshot()];
-    writeHeld(list);
-    localStorage.removeItem(DRAFT);   // a clean form for the next GRN
-    toast(`GRN held — F5 or Ctrl + R brings it back`);
-    window.location.reload();
+    try {
+      await api.post('/held/grn', snapshot());
+      localStorage.removeItem(DRAFT);   // a clean form for the next GRN
+      toast('GRN held — F5 or Ctrl + R brings it back (on any computer)');
+      window.location.reload();
+    } catch (e) { toast(e.message, 'error'); }
   };
-  const resume = (h) => {
-    // the GRN on the form now is held in its place
-    const list = readHeld().filter((x) => x.id !== h.id);
-    writeHeld(hasWork ? [...list, snapshot()] : list);
-    localStorage.setItem(DRAFT, JSON.stringify(h.g));
-    window.location.reload();
+  const resume = async (h) => {
+    try {
+      const got = await api.post(`/held/grn/${h.id}/take`, {});   // off the list for everyone
+      if (hasWork) await api.post('/held/grn', snapshot());        // the GRN on the form now is held in its place
+      localStorage.setItem(DRAFT, JSON.stringify(got.data));
+      window.location.reload();
+    } catch (e) { toast(e.message, 'error'); loadHeld(); }
   };
-  const dropHeld = (h) => { if (!confirm(`Delete the held GRN of ${h.supplier}?`)) return; const list = readHeld().filter((x) => x.id !== h.id); writeHeld(list); setHeld(list); };
+  const dropHeld = async (h) => {
+    if (!confirm(`Delete the held GRN of ${h.supplier}?`)) return;
+    try { await api.del(`/held/grn/${h.id}`); } catch (e) { toast(e.message, 'error'); }
+    loadHeld();
+  };
   useEffect(() => {
     if (editId) return undefined;
     const key = (e) => {
       if (document.querySelector('.modal') && !showHeld) return;
       const k = e.key;
       if (k === 'F7' || (e.ctrlKey && k.toLowerCase() === 'h')) { e.preventDefault(); e.stopPropagation(); hold(); }
-      else if (k === 'F5' || (e.ctrlKey && k.toLowerCase() === 'r')) { e.preventDefault(); e.stopPropagation(); setHeld(readHeld()); setShowHeld((x) => !x); }
+      else if (k === 'F5' || (e.ctrlKey && k.toLowerCase() === 'r')) { e.preventDefault(); e.stopPropagation(); loadHeld(); setShowHeld((x) => !x); }
     };
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
@@ -409,7 +427,7 @@ export default function GrnForm() {
         <PageHeader title="Receive Goods (GRN)" subtitle="Enter a shipment from India. The system works out the real cost of every item in LKR."
           actions={<>
             <button className="btn" onClick={hold} disabled={!hasWork} title="Put this GRN aside and start another (F7 / Ctrl + H)"><Icon name="pause" size={16} /> Hold GRN <kbd>F7</kbd></button>
-            <button className="btn" onClick={() => { setHeld(readHeld()); setShowHeld(true); }} title="Held GRNs (F5 / Ctrl + R)"><Icon name="clock" size={16} /> Held GRNs{held.length > 0 && <b className="count-dot">{held.length}</b>} <kbd>F5</kbd></button>
+            <button className="btn" onClick={() => { loadHeld(); setShowHeld(true); }} title="Held GRNs (F5 / Ctrl + R)"><Icon name="clock" size={16} /> Held GRNs{held.length > 0 && <b className="count-dot">{held.length}</b>} <kbd>F5</kbd></button>
             <button className="btn btn-ghost" onClick={reset}><Icon name="trash" size={16} /> Clear form</button>
           </>} />
       )}
@@ -792,7 +810,7 @@ export default function GrnForm() {
           onSaved={(s) => { setSuppliers((x) => [...x, { ...s, balance_inr: s.opening_balance_inr }]); set('supplier_id')(s.id); setNewSupplier(null); }} />
       )}
       {showHeld && (
-        <Modal title="Held GRNs" subtitle="GRNs put aside on this computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => setShowHeld(false)}>
+        <Modal title="Held GRNs" subtitle="GRNs put aside by anyone, on any computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => setShowHeld(false)}>
           <HeldGrns held={held.slice().reverse()} hasWork={hasWork} onResume={resume} onDelete={dropHeld} />
         </Modal>
       )}

@@ -81,11 +81,12 @@ export function useKeyboardOpen() {
 
 /**
  * Phones: pull the page down from the top to refresh it (the browser's own pull-to-refresh is off, so the page
- * doesn't bounce). A round arrow follows the finger; let go past the mark and the page reloads with fresh data
- * (a bill or GRN being made is kept — they are saved as you go). Not while a pop-up or the menu is open, while
- * typing, or once the page is scrolled down. Returns how far it is pulled (0 … 1+) for the arrow.
+ * doesn't bounce). The whole page slides down with the finger and the refresh arrow shows in the space it leaves
+ * at the top; let go and the page reloads with fresh data (a bill or GRN being made is kept — they are saved as
+ * you go). A short tug springs back. Not while a pop-up or the menu is open, while typing, or once the page is
+ * scrolled down. Returns how far it is pulled (0 … 1+, of PULL_TRIGGER) — the page is moved by pull × PULL_TRIGGER px.
  */
-export const PULL_TRIGGER = 70;   // px of pull that refreshes
+export const PULL_TRIGGER = 64;   // px the page has to come down to refresh
 export function usePullToRefresh(enabled = true) {
   const [pull, setPull] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -102,7 +103,7 @@ export function usePullToRefresh(enabled = true) {
       if (startY == null) return;
       const dy = e.touches[0].clientY - startY;
       if (dy <= 0 || window.scrollY > 0) { dist = 0; setPull(0); return; }
-      dist = Math.min(dy * 0.5, PULL_TRIGGER * 1.6);   // resistance: the arrow moves half as far as the finger
+      dist = Math.min(dy * 0.55, PULL_TRIGGER * 1.9);   // resistance: the page moves about half as far as the finger
       setPull(dist / PULL_TRIGGER);
       if (e.cancelable) e.preventDefault();
     };

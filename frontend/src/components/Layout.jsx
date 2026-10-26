@@ -186,18 +186,19 @@ export default function Layout() {
         </div>
       </aside>
       <div className="scrim" onClick={() => setOpen(false)} />
-      <main className={`main ${atPos ? 'on-pos' : ''}`}>
+      <main className={`main ${atPos ? 'on-pos' : ''} ${pull > 0 || refreshing ? 'pulling' : ''} ${refreshing ? 'held' : ''}`}
+        style={pull > 0 || refreshing ? { transform: `translateY(${Math.round(Math.min(pull, 1.9) * PULL_TRIGGER)}px)` } : undefined}>
         <div className="mobile-bar">
           <button className="btn btn-icon btn-ghost" onClick={() => setOpen(true)} aria-label="Menu"><Icon name="menu" /></button>
           <b>{settings.shop_name}</b>
         </div>
         <div key={location.pathname} className="page-in"><Outlet /></div>
       </main>
-      {/* phones: pull to refresh — the arrow follows the finger, turns, and spins while the page reloads */}
+      {/* phones: pull to refresh — the page comes down and the arrow sits in the space above it, turning, then spinning */}
       {(pull > 0 || refreshing) && (
-        <div className={`ptr ${pull >= 1 ? 'ready' : ''} ${refreshing ? 'spin' : ''}`} style={{ transform: `translate(-50%, ${Math.min(pull, 1.6) * PULL_TRIGGER - 46}px)` }} aria-hidden="true">
-          <span className="ptr-ball" style={{ transform: `rotate(${Math.min(pull, 1) * 300}deg)` }}><Icon name="refresh" size={18} /></span>
-          <span className="ptr-text">{refreshing ? 'Refreshing…' : pull >= 1 ? 'Release to refresh' : 'Pull to refresh'}</span>
+        <div className={`ptr ${pull >= 1 ? 'ready' : ''} ${refreshing ? 'spin' : ''}`} style={{ height: `${Math.round(Math.min(pull, 1.9) * PULL_TRIGGER)}px` }} aria-hidden="true">
+          <span className="ptr-ball" style={{ transform: `rotate(${Math.min(pull, 1) * 300}deg)`, opacity: Math.min(1, pull * 1.4) }}><Icon name="refresh" size={18} /></span>
+          {pull >= 0.55 && <span className="ptr-text">{refreshing ? 'Refreshing…' : pull >= 1 ? 'Release to refresh' : 'Pull to refresh'}</span>}
         </div>
       )}
       {/* phones: the daily jobs at the thumb; everything else is under Menu */}

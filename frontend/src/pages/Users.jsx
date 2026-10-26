@@ -179,7 +179,7 @@ function ActivityLog() {
 }
 
 /** Users & Security → Super admin approvals: what only the Super Admin can open, and what needs the Super Admin's password. */
-function Rules() {
+export function Rules() {
   const only = [
     ['Action Center', 'Every activity as it happens, Super Admin approvals, and Attention — Admins only if given the "Action Center" permission'],
     ['Sales & Profit', 'Every sale, the Profit & loss, gross and net profit, losses with their reasons, past periods'],

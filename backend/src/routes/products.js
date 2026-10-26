@@ -3,7 +3,10 @@ import {
   find, findOne, insert, setById, updateMany, deleteMany, distinct, tx, fail, num, round2, sum, contains, todayStr, stamp,
   nextProductCode, moveStock, inParallel, lastGrnCost,
 } from '../db.js';
-import { guard } from '../auth.js';
+import { guard, can } from '../auth.js';
+
+/** Changing products (add, edit, reprice, Stock Count, delete): users who may receive goods — not cashiers. */
+const manageOnly = (req) => { if (!can(req.user, 'receive_goods')) fail('You don\'t have permission to change products or stock. Ask an Admin.', 403); };
 import { addDamaged, takeDamaged, createSale } from '../services.js';
 
 /**
@@ -79,6 +82,7 @@ r.get('/next-code', async (req, res) => res.json({ code: await nextProductCode()
 
 /** A category was renamed in Settings — move its products to the new name. */
 r.post('/rename-category', async (req, res) => {
+  manageOnly(req);
   const from = String(req.body?.from || '').trim();
   const to = String(req.body?.to || '').trim();
   if (!from || !to) fail('Old and new category names are needed');
@@ -135,6 +139,7 @@ function clean(body) {
 }
 
 r.post('/', async (req, res) => {
+  manageOnly(req);
   const d = clean(req.body);
   const code = String(req.body.code || '').trim() || await nextProductCode();
   if (await findOne('products', { code })) fail(`Code "${code}" is already used`);
@@ -152,6 +157,7 @@ r.post('/', async (req, res) => {
 });
 
 r.put('/:id', async (req, res) => {
+  manageOnly(req);
   const id = num(req.params.id);
   const d = clean(req.body);
   const code = String(req.body.code || '').trim();
@@ -170,6 +176,7 @@ r.put('/:id', async (req, res) => {
 
 /* Bulk re-price: apply a markup % on landed cost (expected price) */
 r.post('/reprice', async (req, res) => {
+  manageOnly(req);
   const markup = num(req.body.markup_percent);
   const ids = (req.body.ids || []).map(num);
   if (!ids.length) fail('Select products first');
@@ -194,6 +201,7 @@ export const ADD_REASONS = {
 
 /* Stock adjustment: damaged, missing, found, customer return, stock count */
 r.post('/:id/adjust', async (req, res) => {
+  manageOnly(req);
   const id = num(req.params.id);
   const p = await findOne('products', { id });
   if (!p) fail('Product not found', 404);
@@ -251,6 +259,7 @@ r.post('/:id/adjust', async (req, res) => {
 });
 
 r.delete('/:id', async (req, res) => {
+  manageOnly(req);
   const id = num(req.params.id);
   if (await findOne('grn_items', { product_id: id }) || await findOne('sale_items', { product_id: id })) {
     fail('This product has purchase or sales history. Mark it inactive instead.');

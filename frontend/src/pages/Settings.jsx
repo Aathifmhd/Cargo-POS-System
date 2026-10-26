@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { api, downloadFile, today, lkr, priceRules, autoPrices, niceDateTime, costCode, costDecode, isSuper } from '../lib.js';
+import { api, downloadFile, today, lkr, priceRules, autoPrices, niceDateTime, costCode, costDecode, isSuper, isAdmin } from '../lib.js';
 import { POS_KEYS } from './POS.jsx';
 import { PageHeader, Field, NumInput, Icon, useToast, ThemeSwitch } from '../components/ui.jsx';
 import { useSettings, useAuth } from '../App.jsx';
 import CatalogEditor from '../components/CatalogEditor.jsx';
 import DownloadReports from '../components/DownloadReports.jsx';
 import StockTake from '../components/StockTake.jsx';
+import { Rules as ApprovalRules } from './Users.jsx';
 
 // The settings menu, grouped under headings
 const GROUPS = [
@@ -29,10 +30,11 @@ const GROUPS = [
   {
     heading: 'System',
     items: [
-      { id: 'appearance', icon: 'sun', label: 'Appearance', desc: 'Light or dark look for this computer.' },
+      { id: 'appearance', icon: 'sun', staff: true, label: 'Appearance', desc: 'Light or dark look for this computer.' },
       { id: 'reports', icon: 'chart', label: 'Download reports', desc: 'Excel sheets of GRNs, stock, invoices, customers, suppliers, payments and dues — for a time period.' },
       { id: 'backup', icon: 'download', label: 'Backup', desc: 'Download a full copy of all your data.' },
-      { id: 'shortcuts', icon: 'keyboard', label: 'Keyboard shortcuts', desc: 'Keys that speed up billing and moving around.' },
+      { id: 'shortcuts', icon: 'keyboard', staff: true, label: 'Keyboard shortcuts', desc: 'Keys that speed up billing and moving around.' },
+      { id: 'approvals', icon: 'crown', staff: true, label: 'Super admin approvals', desc: 'What only the Super Admin can open, and what needs the Super Admin\'s (or an Admin\'s) password.' },
     ],
   },
 ];
@@ -48,9 +50,12 @@ export default function Settings() {
   const { settings, reload } = useSettings();
   const toast = useToast();
   const [f, setF] = useState(settings);
-  const superAdmin = isSuper(useAuth().user);   // Stock Take (and Start Fresh): the Super Admin's only
+  const me = useAuth().user;
+  const superAdmin = isSuper(me);   // Stock Take (and Start Fresh): the Super Admin's only
+  // Cashier, KP, Employee: Appearance, Keyboard shortcuts and Super admin approvals only
+  const visible = (i) => (i.super ? superAdmin : isAdmin(me) || i.staff);
   const [sectionPicked, setSection] = useState(readSection);
-  const section = sectionPicked === 'stocktake' && !superAdmin ? 'shop' : sectionPicked;
+  const section = ALL.some((i) => i.id === sectionPicked && visible(i)) ? sectionPicked : ALL.find(visible).id;
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v && v.target ? v.target.value : v }));
 
   const open = (id) => {
@@ -77,10 +82,10 @@ export default function Settings() {
       <PageHeader title="Settings" subtitle="Shop details, products, appearance and backups — arranged by section." />
       <div className="set-layout">
         <nav className="set-nav">
-          {GROUPS.map((g) => (
+          {GROUPS.filter((g) => g.items.some(visible)).map((g) => (
             <div key={g.heading} className="set-group">
               <div className="set-group-title">{g.heading}</div>
-              {g.items.filter((i) => !i.super || superAdmin).map((i) => (
+              {g.items.filter(visible).map((i) => (
                 <button key={i.id} type="button" className={`set-link ${section === i.id ? 'on' : ''}`} onClick={() => open(i.id)}>
                   <Icon name={i.icon} size={16} /> <span>{i.label}</span>
                 </button>
@@ -164,6 +169,8 @@ export default function Settings() {
 
             {section === 'reports' && <DownloadReports />}
             {section === 'stocktake' && superAdmin && <StockTake />}
+
+            {section === 'approvals' && <ApprovalRules />}
 
             {section === 'costcode' && <CostCode f={f} set={set} SaveBar={SaveBar} />}
 

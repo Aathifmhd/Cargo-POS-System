@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, useApi, n, r2, lkr, money, niceDate, int, stockText, margin, pct, parseCatalog, findCategory, costTiers, costGroups, costCode, seesCost, codeOf } from '../lib.js';
+import { api, useApi, n, r2, lkr, money, niceDate, int, stockText, margin, pct, parseCatalog, findCategory, costTiers, costGroups, costCode, seesCost, codeOf, can } from '../lib.js';
 import { useSettings, useAuth } from '../App.jsx';
 import SizePicker from '../components/SizePicker.jsx';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, CostBadge, Modal, Field, NumInput, Segmented, Tabs, Stat, useToast } from '../components/ui.jsx';
@@ -31,6 +31,7 @@ const ADD_REASONS = [
 export default function Stock() {
   const { settings } = useSettings();   // the cost code
   const seeCost = seesCost(useAuth().user);
+  const manage = can(useAuth().user, 'receive_goods');   // add products, receive goods, Stock Count, edit (not cashiers)
   const [params] = useSearchParams();
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('');
@@ -65,8 +66,8 @@ export default function Stock() {
     <div>
       <PageHeader title="Stock" subtitle="Stock goes up when you receive goods and down when you sell. Click a product to see its history or do a stock count."
         actions={<>
-          <button className="btn" onClick={() => setOpen('new')}><Icon name="plus" /> Add product manually</button>
-          <Link to="/grn/new" className="btn btn-primary"><Icon name="truck" /> Receive goods</Link>
+          {manage && <button className="btn" onClick={() => setOpen('new')}><Icon name="plus" /> Add product manually</button>}
+          {manage && <Link to="/grn/new" className="btn btn-primary"><Icon name="truck" /> Receive goods</Link>}
         </>} />
 
       <div className="stats mb">
@@ -159,7 +160,9 @@ export default function Stock() {
 
 function ProductModal({ id, categories, onClose, onChanged }) {
   const toast = useToast();
-  const [tab, setTab] = useState(id ? 'details' : 'edit');
+  const manage = can(useAuth().user, 'receive_goods');   // Stock Count and Edit: not for cashiers (Overview and Stock history only)
+  const [tabPicked, setTab] = useState(id ? 'details' : 'edit');
+  const tab = !manage && (tabPicked === 'adjust' || tabPicked === 'edit') ? 'details' : tabPicked;
   const [p, setP] = useState(null);
   const [f, setF] = useState(null);
   const { settings } = useSettings();
@@ -200,7 +203,7 @@ function ProductModal({ id, categories, onClose, onChanged }) {
     <Modal size="lg" title={id ? p.name : 'Add product manually'} subtitle={id ? `${p.code} · ${stockText(p.stock_pcs, p.pcs_per_set)} in stock` : 'Use this for opening stock. Normally products are added through Receive Goods.'} onClose={onClose}
       footer={tab === 'edit' ? <><button className="btn" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={save}>Save product</button></> :
         tab === 'adjust' ? <><button className="btn" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={adjust}>Update stock</button></> : null}>
-      {id && <Tabs value={tab} onChange={setTab} tabs={[{ value: 'details', label: 'Overview' }, { value: 'history', label: 'Stock history' }, { value: 'adjust', label: 'Stock Count' }, { value: 'edit', label: 'Edit' }]} />}
+      {id && <Tabs value={tab} onChange={setTab} tabs={[{ value: 'details', label: 'Overview' }, { value: 'history', label: 'Stock history' }, ...(manage ? [{ value: 'adjust', label: 'Stock Count' }, { value: 'edit', label: 'Edit' }] : [])]} />}
 
       {tab === 'details' && p && (
         <div className="stack">

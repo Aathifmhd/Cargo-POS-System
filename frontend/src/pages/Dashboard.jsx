@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useApi, lkr, inr, supMoney, int, niceDate, dueText, stockText, pct, niceTime, seesCost } from '../lib.js';
+import { useApi, lkr, inr, supMoney, int, niceDate, dueText, stockText, pct, niceTime, seesCost, can } from '../lib.js';
 import { Card, Icon, Loading, ErrorBox, Stat, StatusBadge, Badge } from '../components/ui.jsx';
 import { useSettings, useAuth } from '../App.jsx';
 import FxBar from '../components/FxBar.jsx';
@@ -7,7 +7,11 @@ import { useState } from 'react';
 import { SaleModal } from './SaleView.jsx';
 
 export default function Dashboard() {
-  const seeCost = seesCost(useAuth().user);   // profit, stock value and supplier dues: Admins only
+  const me = useAuth().user;
+  const seeCost = seesCost(me);                     // profit and stock value
+  const suppliers = can(me, 'suppliers');           // what is owed to suppliers (the server sends it only to them)
+  const goods = can(me, 'receive_goods');           // receiving goods (GRNs)
+  const collect = can(me, 'dues');                  // the Payment Portal
   const { data: d, error, reload } = useApi('/dashboard');
   const [openSale, setOpenSale] = useState(null);
   const { settings } = useSettings();
@@ -31,9 +35,9 @@ export default function Dashboard() {
 
       <div className="quick-actions">
         <Link to="/pos" className="quick main-q"><div className="stat-icon"><Icon name="cart" /></div><div>New Sale<small>Make a bill (F3)</small></div></Link>
-        <Link to="/grn/new" className="quick"><div className="stat-icon"><Icon name="truck" /></div><div>Receive Goods<small>New GRN from India</small></div></Link>
-        <Link to="/dues?tab=receivables" className="quick"><div className="stat-icon stat-green" style={{ background: 'var(--green-soft)', color: 'var(--green)' }}><Icon name="cash" /></div><div>Collect Payment<small>From customers</small></div></Link>
-        <Link to="/dues?tab=payables" className="quick"><div className="stat-icon" style={{ background: 'var(--amber-soft)', color: 'var(--amber)' }}><Icon name="wallet" /></div><div>Pay Supplier<small>Settle India dues</small></div></Link>
+        {goods && <Link to="/grn/new" className="quick"><div className="stat-icon"><Icon name="truck" /></div><div>Receive Goods<small>New GRN from India</small></div></Link>}
+        {collect && <Link to="/dues?tab=receivables" className="quick"><div className="stat-icon stat-green" style={{ background: 'var(--green-soft)', color: 'var(--green)' }}><Icon name="cash" /></div><div>Collect Payment<small>From customers</small></div></Link>}
+        {suppliers && <Link to="/dues?tab=payables" className="quick"><div className="stat-icon" style={{ background: 'var(--amber-soft)', color: 'var(--amber)' }}><Icon name="wallet" /></div><div>Pay Supplier<small>Settle India dues</small></div></Link>}
       </div>
 
       <div className="stats">
@@ -46,7 +50,7 @@ export default function Dashboard() {
       <div className="stats mt">
         <Stat icon="users" tone={d.receivables.overdue > 0 ? 'red' : 'default'} label="To collect" value={lkr(d.receivables.total)}
           sub={d.receivables.overdue > 0 ? `${lkr(d.receivables.overdue)} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=receivables')} />
-        {seeCost && <Stat icon="factory" tone={d.payables.overdue_inr > 0 ? 'red' : 'amber'} label="To pay suppliers" value={[d.payables.total_inr > 0 || !d.payables.total_lkr ? inr(d.payables.total_inr) : null, d.payables.total_lkr > 0 ? lkr(d.payables.total_lkr) : null].filter(Boolean).join(' + ')}
+        {suppliers && d.payables && <Stat icon="factory" tone={d.payables.overdue_inr > 0 ? 'red' : 'amber'} label="To pay suppliers" value={[d.payables.total_inr > 0 || !d.payables.total_lkr ? inr(d.payables.total_inr) : null, d.payables.total_lkr > 0 ? lkr(d.payables.total_lkr) : null].filter(Boolean).join(' + ')}
           sub={d.payables.overdue_inr > 0 || d.payables.overdue_lkr > 0 ? `${[d.payables.overdue_inr > 0 && inr(d.payables.overdue_inr), d.payables.overdue_lkr > 0 && lkr(d.payables.overdue_lkr)].filter(Boolean).join(' + ')} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=payables')} />}
         {seeCost && <Stat icon="box" label="Stock value (cost)" value={lkr(d.stock.cost_value)} sub={`Can sell for ${lkr(d.stock.expected_value)}`} onClick={() => navigate('/stock')} />}
         <Stat icon="alert" tone={d.stock.low_count ? 'amber' : 'green'} label="Low stock items" value={int(d.stock.low_count)}
@@ -88,7 +92,7 @@ export default function Dashboard() {
           ))}
         </Card>
 
-        <Card title="Supplier payments due" actions={<Link to="/dues?tab=payables" className="small">See all</Link>}>
+        {suppliers && d.payables && <Card title="Supplier payments due" actions={<Link to="/dues?tab=payables" className="small">See all</Link>}>
           {d.payables.upcoming.length === 0 ? <p className="muted">No supplier payments due this week.</p> :
             d.payables.upcoming.map((b) => (
               <Link key={`${b.supplier_id}-${b.id}`} to={`/suppliers/${b.supplier_id}`} className="list-row">
@@ -96,7 +100,7 @@ export default function Dashboard() {
                 <div className="right"><div className="t">{supMoney(b)(b.balance)}</div><StatusBadge status={b.status} /></div>
               </Link>
             ))}
-        </Card>
+        </Card>}
 
         <Card title="Best sellers this month">
           {d.topProducts.length === 0 ? <p className="muted">No sales this month yet.</p> : d.topProducts.map((p, i) => (
@@ -107,7 +111,7 @@ export default function Dashboard() {
           ))}
         </Card>
 
-        <Card title={d.lowStock.length ? 'Running low — re-order soon' : 'Latest shipments'}>
+        {(d.lowStock.length > 0 || goods) && <Card title={d.lowStock.length ? 'Running low — re-order soon' : 'Latest shipments'}>
           {d.lowStock.length ? d.lowStock.map((p) => (
             <div key={p.id} className="list-row">
               <div><div className="t">{p.name}</div><div className="s">{p.code} · re-order at {p.reorder_sets} sets</div></div>
@@ -116,10 +120,10 @@ export default function Dashboard() {
           )) : d.recentGrns.length === 0 ? <p className="muted">No shipments received yet.</p> : d.recentGrns.map((g) => (
             <Link key={g.id} to={`/grn/${g.id}`} className="list-row">
               <div><div className="t">{g.supplier_name}</div><div className="s">{g.grn_no} · {g.cargo_name || 'Cargo —'}</div></div>
-              <b className="mono">{lkr(g.total_lkr)}</b>
+              {seeCost && <b className="mono">{lkr(g.total_lkr)}</b>}
             </Link>
           ))}
-        </Card>
+        </Card>}
       </div>
       {openSale && <SaleModal id={openSale} onClose={() => setOpenSale(null)} onChanged={reload} />}
     </div>

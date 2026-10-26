@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { applyTheme, getThemePref } from '../lib.js';
 
@@ -299,7 +300,9 @@ export function Modal({ title, subtitle, onClose, children, footer, size = 'md' 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
-  return (
+  // drawn straight on the page (not inside the screen or pop-up that opened it), so a pop-up opened from another
+  // pop-up — e.g. Edit customer from the customer's details — is never clipped behind it on a phone
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
       <div ref={ref} className={`modal modal-${size}`} role="dialog" aria-modal="true">
         <div className="modal-head">
@@ -312,7 +315,8 @@ export function Modal({ title, subtitle, onClose, children, footer, size = 'md' 
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

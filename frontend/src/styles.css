@@ -652,9 +652,11 @@ button.list-row-btn:hover { background: var(--surface-2); }
 /* =========================================================
    TILL (New Sale) — header band, entry row, match list, bill + summary
    ========================================================= */
-.till {
+.till, .modal-backdrop {
   --t-ink: #14203C; --t-steel: #5b6b80; --t-faint: #94a3b8; --t-line: #dbe3ec; --t-line2: #edf1f6; --t-panel: #f7f9fc;
   --t-sel: #F8EBCF; --t-rust: #1B2A4E; --t-blue: #1B2A4E; --t-green: #1B2A4E; --t-amber: #b45309; --t-r: 9px;
+}
+.till {
   display: flex; flex-direction: column; height: calc(100vh - 44px); background: var(--bg); border-radius: 12px; overflow: hidden;
   box-shadow: var(--shadow); color: var(--t-ink); font-variant-numeric: tabular-nums;
 }
@@ -1034,9 +1036,11 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 /* =========================================================
    DARK THEME — the till and a few details with their own colours
    ========================================================= */
-:root[data-theme="dark"] .till {
+:root[data-theme="dark"] .till, :root[data-theme="dark"] .modal-backdrop {
   --t-ink: #e8ecf4; --t-steel: #9aa6bf; --t-faint: #6c7894; --t-line: #2a3656; --t-line2: #212b45; --t-panel: #161f35;
   --t-sel: #33280f; --t-rust: #E0A73A; --t-blue: #3d5ba8; --t-green: #3d5ba8; --t-amber: #fbbf24;
+}
+:root[data-theme="dark"] .till {
   box-shadow: 0 0 0 1px var(--border);
 }
 :root[data-theme="dark"] .sum-top { background: #070b16; }
@@ -1894,4 +1898,11 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 }
 @media (max-width: 860px) {
   .table tbody tr:not(.whole) > td[data-role="title"] .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* phones: a pop-up fits in the part of the screen above the keyboard, so its buttons (Save, Cancel …) are never under it */
+@media (max-width: 860px) {
+  .modal-backdrop { top: var(--vv-top, 0px); bottom: auto; height: var(--vv-h, 100dvh); }
+  .modal, .modal-sm, .modal-md, .modal-lg, .modal-xl { max-height: calc(var(--vv-h, 100dvh) - 20px - env(safe-area-inset-top)); }
+  .modal-body { min-height: 0; }
 }

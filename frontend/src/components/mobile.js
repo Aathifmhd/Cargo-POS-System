@@ -103,19 +103,27 @@ export function useKeyboardOpen() {
     const update = () => {
       const shrunk = vv ? vv.height < window.innerHeight * 0.78 : false;
       root.classList.toggle('kb-open', (tapped && typingBox(document.activeElement)) || shrunk);
+      // the part of the screen the keyboard leaves free: pop-ups fit in it, so their Save button stays above the keyboard
+      if (vv) { root.style.setProperty('--vv-h', `${Math.round(vv.height)}px`); root.style.setProperty('--vv-top', `${Math.round(vv.offsetTop)}px`); }
     };
     const onTouch = () => { touchedAt = Date.now(); };
-    const onIn = () => { clearTimeout(timer); tapped = Date.now() - touchedAt < 1000; update(); };
+    const onIn = (e) => {
+      clearTimeout(timer); tapped = Date.now() - touchedAt < 1000; update();
+      // a box in a pop-up: once the keyboard is up, bring it into view inside the pop-up
+      if (tapped && typingBox(e.target) && e.target.closest?.('.modal')) setTimeout(() => e.target.scrollIntoView?.({ block: 'nearest' }), 350);
+    };
     const onOut = () => { clearTimeout(timer); timer = setTimeout(() => { if (!typingBox(document.activeElement)) tapped = false; update(); }, 120); };   // the next box may take the focus straight away
     document.addEventListener('touchstart', onTouch, { passive: true });
     document.addEventListener('focusin', onIn);
     document.addEventListener('focusout', onOut);
     vv?.addEventListener('resize', update);
+    vv?.addEventListener('scroll', update);
     return () => {
       document.removeEventListener('touchstart', onTouch);
       document.removeEventListener('focusin', onIn);
       document.removeEventListener('focusout', onOut);
       vv?.removeEventListener('resize', update);
+      vv?.removeEventListener('scroll', update);
       clearTimeout(timer);
       root.classList.remove('kb-open');
     };
@@ -125,8 +133,8 @@ export function useKeyboardOpen() {
 /**
  * Phones: pull the page down from the top to refresh it (the browser's own pull-to-refresh is off, so the page
  * doesn't bounce). The whole page slides down with the finger and the refresh arrow shows in the space it leaves
- * at the top, turning with the pull; at a quarter turn (90°) the pull stops and the page reloads with fresh data (a bill or GRN being made is kept — they are saved as
- * you go). A short tug springs back. Not while a pop-up or the menu is open, while typing, or once the page is
+ * at the top, turning with the pull; let go after a half turn (180°) and the page reloads with fresh data (a bill or GRN being made is
+ * kept — they are saved as you go). A shorter pull springs back. Not while a pop-up or the menu is open, while typing, or once the page is
  * scrolled down. Returns how far it is pulled (0 … 1+, of PULL_TRIGGER) — the page is moved by pull × PULL_TRIGGER px.
  */
 export const PULL_TRIGGER = 64;   // px the page has to come down to refresh

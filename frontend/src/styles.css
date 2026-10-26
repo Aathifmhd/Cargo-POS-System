@@ -1357,3 +1357,7 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .perm.on { border-color: var(--green); background: var(--green-soft); }
 .perm.locked { cursor: default; opacity: .85; }
 @media (max-width: 620px) { .perm-list { grid-template-columns: 1fr; } }
+
+/* held bills / held GRNs: the row picked with ↑ ↓ */
+.key-list .held-row.on, .key-list .held-grn.on { background: var(--primary-soft, var(--surface-2)); outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 10px; }
+.key-list .held-grn { padding-left: 10px; padding-right: 10px; }

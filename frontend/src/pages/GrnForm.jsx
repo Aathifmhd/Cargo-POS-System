@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, n, r2, lkr, inr, isLocalSup, money, today, addDays, computeLanding, margin, pct, int, PAY_METHODS_SUPPLIER, parseCatalog, findCategory, priceRules, autoPrices } from '../lib.js';
-import { PageHeader, Card, Icon, Field, NumInput, DateInput, Combobox, Segmented, Modal, useToast, Loading } from '../components/ui.jsx';
+import { PageHeader, Card, Icon, Field, NumInput, DateInput, Combobox, Segmented, Modal, useToast, Loading, useListKeys } from '../components/ui.jsx';
 import { SupplierForm } from '../components/forms.jsx';
 import SizePicker from '../components/SizePicker.jsx';
 import { useSettings, useAuth } from '../App.jsx';
@@ -45,6 +45,28 @@ const withPcsPrices = (it) => {
   return x;
 };
 const forSaving = (it) => ({ ...it, cost_inr_per_set: r2(n(it.cost_inr_per_pcs) * ppsOf(it)), expected_per_set: r2(n(it.expected_per_pcs) * ppsOf(it)), mrp_per_set: r2(n(it.mrp_per_pcs) * ppsOf(it)) });
+
+/** Held GRNs: ↑ ↓ to pick, Enter to carry on, Delete to remove. */
+function HeldGrns({ held, hasWork, onResume, onDelete }) {
+  const [hi, setHi] = useListKeys(held.length, { onEnter: (i) => onResume(held[i]), onDelete: (i) => onDelete(held[i]) });
+  if (!held.length) return <p className="muted">No GRN held. Press <kbd>F7</kbd> or <kbd>Ctrl + H</kbd> to put the one on the form aside.</p>;
+  return (
+    <div className="stack-s key-list">
+      {held.map((h, idx) => (
+        <div key={h.id} className={`list-row held-grn ${idx === hi ? 'on' : ''}`} onMouseEnter={() => setHi(idx)} onDoubleClick={() => onResume(h)}>
+          <div><div className="t">{h.supplier}{h.invoice ? ` · invoice ${h.invoice}` : ''}</div>
+            <div className="s">{h.items} item{h.items === 1 ? '' : 's'} · held {new Date(h.at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{h.by ? ` by ${h.by}` : ''}</div></div>
+          <div className="row gap-s">
+            <button className="btn btn-sm btn-primary" tabIndex={-1} onClick={() => onResume(h)}><Icon name="arrowRight" size={14} /> Carry on</button>
+            <button className="btn btn-sm btn-icon btn-ghost" tabIndex={-1} title="Delete" onClick={() => onDelete(h)}><Icon name="trash" size={15} /></button>
+          </div>
+        </div>
+      ))}
+      {hasWork && <p className="muted small">The GRN on the form now is held in its place.</p>}
+      <p className="muted small"><kbd>↑</kbd> <kbd>↓</kbd> to pick · <kbd>Enter</kbd> to carry on · <kbd>Delete</kbd> to remove · <kbd>Esc</kbd> to close</p>
+    </div>
+  );
+}
 
 export default function GrnForm() {
   const { settings, reload: reloadSettings } = useSettings();
@@ -771,21 +793,7 @@ export default function GrnForm() {
       )}
       {showHeld && (
         <Modal title="Held GRNs" subtitle="GRNs put aside on this computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => setShowHeld(false)}>
-          {!held.length ? <p className="muted">No GRN held. Press <kbd>F7</kbd> or <kbd>Ctrl + H</kbd> to put the one on the form aside.</p> : (
-            <div className="stack-s">
-              {held.slice().reverse().map((h) => (
-                <div key={h.id} className="list-row">
-                  <div><div className="t">{h.supplier}{h.invoice ? ` · invoice ${h.invoice}` : ''}</div>
-                    <div className="s">{h.items} item{h.items === 1 ? '' : 's'} · held {new Date(h.at).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}{h.by ? ` by ${h.by}` : ''}</div></div>
-                  <div className="row gap-s">
-                    <button className="btn btn-sm btn-primary" onClick={() => resume(h)}><Icon name="arrowRight" size={14} /> Carry on</button>
-                    <button className="btn btn-sm btn-icon btn-ghost" title="Delete" onClick={() => dropHeld(h)}><Icon name="trash" size={15} /></button>
-                  </div>
-                </div>
-              ))}
-              {hasWork && <p className="muted small">The GRN on the form now is held in its place.</p>}
-            </div>
-          )}
+          <HeldGrns held={held.slice().reverse()} hasWork={hasWork} onResume={resume} onDelete={dropHeld} />
         </Modal>
       )}
     </div>

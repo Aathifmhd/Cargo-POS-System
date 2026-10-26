@@ -423,3 +423,29 @@ export function Tabs({ tabs, value, onChange }) {
     </div>
   );
 }
+
+/**
+ * Keys for a list in a pop-up: ↑ ↓ move the highlight, Enter picks it, Delete removes it (when onDelete is given).
+ * Returns [highlighted index, set it] — set it on mouse-over too, so the mouse and the keys agree.
+ */
+export function useListKeys(count, { onEnter, onDelete } = {}) {
+  const [hi, setHi] = useState(0);
+  const ref = useRef({ hi: 0, count, onEnter, onDelete });
+  ref.current = { hi: Math.min(hi, Math.max(0, count - 1)), count, onEnter, onDelete };
+  useEffect(() => {
+    const key = (e) => {
+      const { hi: h, count: n, onEnter: enter, onDelete: del } = ref.current;
+      if (!n) return;
+      const stop = () => { e.preventDefault(); e.stopPropagation(); };
+      if (e.key === 'ArrowDown') { stop(); setHi(Math.min(h + 1, n - 1)); }
+      else if (e.key === 'ArrowUp') { stop(); setHi(Math.max(h - 1, 0)); }
+      else if (e.key === 'Enter') { stop(); enter?.(h); }
+      else if (e.key === 'Delete' && del) { stop(); del(h); }
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, []);
+  // keep the highlighted row in view
+  useEffect(() => { document.querySelector('.key-list .on')?.scrollIntoView({ block: 'nearest' }); }, [hi]);
+  return [ref.current.hi, setHi];
+}

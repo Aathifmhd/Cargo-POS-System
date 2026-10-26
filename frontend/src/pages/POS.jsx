@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers, costGroups, seesCost, codeOf } from '../lib.js';
-import { Icon, Modal, Field, NumInput, DateInput, CostBadge, useToast, Loading } from '../components/ui.jsx';
+import { Icon, Modal, Field, NumInput, DateInput, CostBadge, useToast, Loading, useListKeys } from '../components/ui.jsx';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 import { isAdmin, isSuper, custName, custPerson, niceTime, costCode } from '../lib.js';
@@ -615,18 +615,7 @@ export default function POS() {
       )}
       {modal === 'held' && (
         <Modal title="Held bills" subtitle="Bills put aside on this computer (F7 / Ctrl + H). Pick one to carry on with it." onClose={() => { setModal(null); toCode(); }}>
-          {held.length === 0 ? <p className="muted">No bills on hold.</p> : (
-            <div className="stack-s">{held.map((b, idx) => (
-              <div key={b.id} className="held-row">
-                <span className="held-no">{idx + 1}</span>
-                <div className="spacer"><div className="strong">{b.label}</div>
-                  <div className="muted small">{b.lines.length} lines · {new Date(b.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · by {b.by}</div></div>
-                <b className="mono">{lkr(b.lines.reduce((s, l) => s + lineCalc(l).amount, 0))}</b>
-                <button className="btn btn-sm btn-primary" autoFocus={idx === 0} onClick={() => resume(b)}>Continue</button>
-                <button className="btn btn-sm btn-icon btn-ghost" title="Delete" onClick={() => confirm('Delete this held bill?') && setHeld((h) => h.filter((x) => x.id !== b.id))}><Icon name="trash" size={15} /></button>
-              </div>))}
-            </div>
-          )}
+          <HeldBills held={held} onResume={resume} onDelete={(b) => confirm('Delete this held bill?') && setHeld((h) => h.filter((x) => x.id !== b.id))} />
         </Modal>
       )}
       {modal === 'keys' && (
@@ -640,6 +629,27 @@ export default function POS() {
           onView={() => navigate(`/sales/${done.sale.id}`)} footer={settings.invoice_footer} />
       )}
     </div>
+  );
+}
+
+/* ---------------- held bills: ↑ ↓ to pick, Enter to carry on, Delete to remove ---------------- */
+function HeldBills({ held, onResume, onDelete }) {
+  const [hi, setHi] = useListKeys(held.length, { onEnter: (i) => onResume(held[i]), onDelete: (i) => onDelete(held[i]) });
+  if (!held.length) return <p className="muted">No bills on hold.</p>;
+  return (
+    <>
+      <div className="stack-s key-list">{held.map((b, idx) => (
+        <div key={b.id} className={`held-row ${idx === hi ? 'on' : ''}`} onMouseEnter={() => setHi(idx)} onDoubleClick={() => onResume(b)}>
+          <span className="held-no">{idx + 1}</span>
+          <div className="spacer"><div className="strong">{b.label}</div>
+            <div className="muted small">{b.lines.length} lines · {new Date(b.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · by {b.by}</div></div>
+          <b className="mono">{lkr(b.lines.reduce((s, l) => s + lineCalc(l).amount, 0))}</b>
+          <button className="btn btn-sm btn-primary" tabIndex={-1} onClick={() => onResume(b)}>Continue</button>
+          <button className="btn btn-sm btn-icon btn-ghost" tabIndex={-1} title="Delete" onClick={() => onDelete(b)}><Icon name="trash" size={15} /></button>
+        </div>))}
+      </div>
+      <p className="muted small mt-s"><kbd>↑</kbd> <kbd>↓</kbd> to pick · <kbd>Enter</kbd> to carry on · <kbd>Delete</kbd> to remove · <kbd>Esc</kbd> to close</p>
+    </>
   );
 }
 

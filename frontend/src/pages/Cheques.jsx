@@ -20,7 +20,7 @@ const PARTY = { customer: 'Customer', supplier: 'Supplier', cargo: 'Cargo' };
 const open = (c) => c.status === 'pending' || c.status === 'holding';
 
 /** "⋯" next to Passed: the other things you can do with a cheque. */
-function MoreMenu({ items, disabled }) {
+export function MoreMenu({ items, disabled }) {
   const [show, setShow] = useState(null);   // where the list opens (it floats above the table, so it is never cut off)
   const ref = useRef();
   useEffect(() => {

@@ -34,6 +34,7 @@ const ICONS = {
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
   tag: <><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z" /><circle cx="7" cy="7" r="1.5" /></>,
   download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5M12 15V3" /></>,
+  upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5M12 3v12" /></>,
   layers: <><path d="m12 2 10 5-10 5L2 7z" /><path d="m2 17 10 5 10-5M2 12l10 5 10-5" /></>,
   menu: <path d="M3 6h18M3 12h18M3 18h18" />,
   arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
@@ -156,7 +157,7 @@ const STATUS = {
 /** A user's role as a badge: Super Admin (with a crown), Admin or Cashier. */
 export function RoleBadge({ role }) {
   if (!role) return null;
-  const label = { superadmin: 'Super Admin', admin: 'Admin', cashier: 'Cashier' }[role] || role;
+  const label = { superadmin: 'Super Admin', admin: 'Admin', cashier: 'Cashier', kp: 'KP', employee: 'Employee' }[role] || role;
   return (
     <span className={`role-badge role-${role}`}>
       <Icon name={role === 'superadmin' ? 'crown' : role === 'admin' ? 'shield' : 'users'} size={13} /> {label}

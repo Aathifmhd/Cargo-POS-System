@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, useApi, lkr, niceDate, dueText, custName, custPerson, niceTime } from '../lib.js';
+import { api, useApi, lkr, niceDate, dueText, custName, custPerson, niceTime, seesCost } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, StatusBadge, Stat, Tabs, Badge, Modal, useToast } from '../components/ui.jsx';
 import { CustomerForm, CustomerPaymentModal } from '../components/forms.jsx';
 import { SaleModal } from './SaleView.jsx';
-import { useSettings } from '../App.jsx';
+import { useSettings, useAuth } from '../App.jsx';
 
 /** A small picture of one side of the NIC; click to see it large. */
 function NicThumb({ id, side, stamp, onOpen }) {
@@ -30,6 +30,7 @@ export function whatsappReminder(c, amount, shop) {
  */
 function CustomerScreen({ id, modal, onClose, onChanged }) {
   const toast = useToast();
+  const seeCost = seesCost(useAuth().user);   // profit: Admins only
   const navigate = useNavigate();
   const [openSale, setOpenSale] = useState(null);
   const [photo, setPhoto] = useState(null);   // { side, src } shown large
@@ -73,7 +74,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
       <Stat icon="wallet" tone={c.overdue > 0 ? 'red' : 'blue'} label="To collect" value={lkr(c.balance_after_cheques ?? c.balance)}
         sub={c.cheques_pending > 0 ? `after ${lkr(c.cheques_pending)} in cheques waiting · ${lkr(c.balance)} until passed` : c.overdue > 0 ? `${lkr(c.overdue)} overdue` : 'Nothing overdue'} />
       <Stat icon="receipt" label="Total bought" value={lkr(c.total_bought)} sub={`${c.bill_count} bills`} />
-      <Stat icon="chart" tone="green" label="Profit from customer" value={lkr(c.profit)} />
+      {seeCost && <Stat icon="chart" tone="green" label="Profit from customer" value={lkr(c.profit)} />}
       <Stat icon="clock" tone="violet" label="Credit limit" value={c.credit_limit > 0 ? lkr(c.credit_limit) : 'No limit'} sub={c.credit_limit > 0 ? `${limitUsed.toFixed(0)}% used · ${c.credit_days} days` : `${c.credit_days} days credit`} />
     </div>
 

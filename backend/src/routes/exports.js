@@ -42,7 +42,7 @@ const money = '#,##0.00';
  * One sheet: a title row, the period / "as on" line, then a bold header row and the rows.
  * cols: [{ h: 'Header', k: 'key' | (row) => value, w: width, money: true, total: true }]
  */
-function sheet(book, name, title, note, cols, rows) {
+export function sheet(book, name, title, note, cols, rows) {
   const ws = book.addWorksheet(name.slice(0, 31), { views: [{ state: 'frozen', ySplit: 3 }] });
   ws.columns = cols.map((c) => ({ width: c.w || 14 }));
   ws.addRow([title]).font = { bold: true, size: 14 };

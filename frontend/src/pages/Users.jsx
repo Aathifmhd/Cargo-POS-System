@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { api, useApi, isSuper } from '../lib.js';
+import { api, useApi, isSuper, PERMS, ROLE_PERMS } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Badge, RoleBadge, Modal, Field, Segmented, Tabs, useToast } from '../components/ui.jsx';
 import { useAuth } from '../App.jsx';
 
@@ -10,7 +10,7 @@ export default function Users() {
   return (
     <div>
       <PageHeader title="Users & Security" subtitle="Who can log in, and a record of every important change and who approved it." />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'users', label: 'Users' }, { value: 'log', label: 'Activity log' }, { value: 'rules', label: 'What needs admin approval' }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'users', label: 'Users' }, { value: 'log', label: 'Activity log' }, { value: 'rules', label: 'Super admin approvals' }]} />
       {tab === 'users' && <UserList />}
       {tab === 'log' && <ActivityLog />}
       {tab === 'rules' && <Rules />}
@@ -40,7 +40,7 @@ function UserList() {
             <tr key={u.id}>
               <td className="strong">{u.name} {u.id === me.id && <Badge tone="teal">You</Badge>}</td>
               <td>{u.username}</td>
-              <td><RoleBadge role={u.role} /></td>
+              <td><RoleBadge role={u.role} />{u.custom_perms && u.role !== 'superadmin' && <div className="sub" title={PERMS.filter((p) => u.perms?.[p.key]).map((p) => p.label).join(', ')}>custom permissions</div>}</td>
               <td>{when(u.last_login)}</td>
               <td>{u.active ? <Badge tone="green">Active</Badge> : <Badge>Switched off</Badge>}</td>
               <td className="right nowrap">
@@ -51,20 +51,40 @@ function UserList() {
           ))}</tbody>
         </table>
       </div>
-      {edit && <UserForm user={edit === 'new' ? null : edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
+      {edit && <UserForm users={data || []} user={edit === 'new' ? null : edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
     </Card>
   );
 }
 
-function UserForm({ user, onClose, onSaved }) {
+/** The roles, and what each can do. The system has one Super Admin only. */
+const ROLES = [
+  { value: 'cashier', label: 'Cashier', text: 'Bills and takes payments. Doesn\'t see what products cost — the cost code only. Important changes need an admin\'s password.' },
+  { value: 'kp', label: 'KP', text: 'Like a cashier: doesn\'t see what products cost — the cost code only. Important changes need an admin\'s password.' },
+  { value: 'employee', label: 'Employee', text: 'Like a cashier: doesn\'t see what products cost — the cost code only. Important changes need an admin\'s password.' },
+  { value: 'admin', label: 'Admin', text: 'Sees costs and profit, enters the GRNs (receive goods), and approves changes for the others. Can\'t change credit limits.' },
+  { value: 'superadmin', label: 'Super Admin', text: 'Can do everything. There is only one Super Admin in the system.' },
+];
+
+function UserForm({ users = [], user, onClose, onSaved }) {
   const toast = useToast();
   const { user: me } = useAuth();
-  const [f, setF] = useState(user ? { ...user, password: '' } : { name: '', username: '', password: '', role: 'cashier', active: 1 });
+  const superUser = users.find((u) => u.role === 'superadmin');   // the one Super Admin
+  const [f, setF] = useState(user ? { ...user, password: '', perms: { ...ROLE_PERMS[user.role], ...(user.perms || {}) } } : { name: '', username: '', password: '', role: 'cashier', active: 1, perms: { ...ROLE_PERMS.cashier } });
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v && v.target ? (v.target.type === 'checkbox' ? v.target.checked : v.target.value) : v }));
+  // a new role starts from that role's permissions (they can be changed below)
+  const setRole = (e) => { const role = e.target.value; setF((x) => ({ ...x, role, perms: { ...ROLE_PERMS[role] } })); };
+  const togglePerm = (k) => setF((x) => {
+    const perms = { ...x.perms, [k]: !x.perms[k] };
+    if (perms.receive_goods || perms.reports) perms.see_cost = true;   // these show costs
+    return { ...x, perms };
+  });
+  const isSuperUser = f.role === 'superadmin';
+  const changedFromRole = !isSuperUser && PERMS.some((p) => Boolean(f.perms?.[p.key]) !== Boolean(ROLE_PERMS[f.role]?.[p.key]));
   const save = async (e) => {
     e.preventDefault();
     try {
-      if (user) await api.put(`/users/${user.id}`, f); else await api.post('/users', f);
+      const body = { ...f, perms: changedFromRole ? f.perms : {} };   // the role default is saved as "no changes"
+      if (user) await api.put(`/users/${user.id}`, body); else await api.post('/users', body);
       toast(user ? 'User updated' : 'User added');
       onSaved();
     } catch (err) { toast(err.message, 'error'); }
@@ -79,16 +99,39 @@ function UserForm({ user, onClose, onSaved }) {
         <Field label={user ? 'New password' : 'Password'} hint={user ? 'Leave empty to keep the current password' : 'At least 6 characters'} required={!user}>
           <input className="input" type="password" value={f.password} onChange={set('password')} name="staff-new-password" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
         </Field>
-        <Field label="Role">
-          <Segmented value={f.role} onChange={set('role')} options={[
-            { value: 'cashier', label: 'Cashier' }, { value: 'admin', label: 'Admin' },
-            ...(isSuper(me) || user?.role === 'superadmin' ? [{ value: 'superadmin', label: 'Super Admin' }] : []),
-          ]} />
+        <Field label="Role" hint={superUser && superUser.id !== user?.id ? `Only one Super Admin — "${superUser.username}" is the Super Admin` : ''}>
+          {user?.role === 'superadmin'
+            ? <div className="input input-static strong">Super Admin (the only one)</div>
+            : (
+              <select className="input" value={f.role} onChange={setRole}>
+                {ROLES.map((r) => (
+                  <option key={r.value} value={r.value} disabled={r.value === 'superadmin' && (Boolean(superUser) || !isSuper(me))}>
+                    {r.label}{r.value === 'superadmin' ? (superUser ? ' — only one, already set' : ' — only one') : ''}
+                  </option>
+                ))}
+              </select>
+            )}
         </Field>
-        <div className="span-2 muted small">
-          {f.role === 'superadmin' ? 'The Super Admin can do everything, and is the only one who can change credit limits.'
-            : f.role === 'admin' ? 'Admins can do everything except change credit limits, and can approve changes for cashiers.'
-            : 'Cashiers can bill, receive goods and take payments. Important changes need an admin\'s password.'}
+        <div className="span-2 muted small">{ROLES.find((r) => r.value === f.role)?.text}</div>
+        <div className="span-2 perm-box">
+          <div className="perm-head">
+            <b>What this user can see and do</b>
+            {isSuperUser ? <span className="muted small">The Super Admin has everything</span>
+              : changedFromRole ? <button type="button" className="link-btn" onClick={() => setF((x) => ({ ...x, perms: { ...ROLE_PERMS[x.role] } }))}>Back to the {ROLES.find((r) => r.value === f.role)?.label} default</button>
+              : <span className="muted small">The {ROLES.find((r) => r.value === f.role)?.label} default</span>}
+          </div>
+          <div className="perm-list">
+            {PERMS.map((p) => {
+              const on = isSuperUser || Boolean(f.perms?.[p.key]);
+              const locked = isSuperUser || (p.key === 'see_cost' && (f.perms?.receive_goods || f.perms?.reports));
+              return (
+                <label key={p.key} className={`perm ${on ? 'on' : ''} ${locked ? 'locked' : ''}`}>
+                  <input type="checkbox" checked={on} disabled={locked} onChange={() => togglePerm(p.key)} />
+                  <span><b>{p.label}</b><small>{p.text}</small></span>
+                </label>
+              );
+            })}
+          </div>
         </div>
         {user && <label className="check"><input type="checkbox" checked={!!f.active} onChange={set('active')} /> Can log in</label>}
       </form>
@@ -135,26 +178,44 @@ function ActivityLog() {
   );
 }
 
+/** Users & Security → Super admin approvals: what only the Super Admin can open, and what needs the Super Admin's password. */
 function Rules() {
-  const list = [
-    ['Customers', 'Changing credit days or old balance · making inactive · deleting · deleting a payment'],
+  const only = [
+    ['Action Center', 'Every activity as it happens, Super Admin approvals, and Attention — Admins only if given the "Action Center" permission'],
+    ['Sales & Profit', 'Every sale, the Profit & loss, gross and net profit, losses with their reasons, past periods'],
+    ['Stock Take', 'Starting, counting, uploading the count sheet, finishing the count, the P&L + stock Excel'],
+    ['Start Fresh', 'After a finished stock take, once — the sales and the profit & loss start again'],
+  ];
+  const superPw = [
+    ['Users', 'Adding, editing or deleting a user — their role and permissions too. Only one Super Admin; it can never be deleted'],
+    ['Customers', 'Adding, editing or deleting a customer (NIC included) · setting or changing a credit limit — also on New Sale when a credit bill would go over it'],
+    ['Suppliers', 'Adding, editing or deleting a supplier'],
+    ['Bills & goods', 'Deleting a bill · editing a GRN'],
+    ['Money', 'Undoing a payment (Payment Portal → History) · editing or deleting a cheque · marking a due as uncollectable, or undoing it'],
+    ['Stock Take', 'Finishing the stock count · Start Fresh'],
+  ];
+  const adminPw = [
     ['Billing', 'Selling below cost price · cancelling a bill'],
-    ['Stock & prices', 'Changing expected price or pieces per set · stock corrections · adding a product manually · deleting a product'],
-    ['Suppliers', 'Changing credit days, old balance or bank details · deleting · deleting a payment'],
-    ['Shipments', 'Deleting a GRN'],
-    ['System', 'Changing settings · downloading a full backup'],
+    ['Stock & prices', 'Changing expected price or pieces per set · Stock Count (remove / add stock) · adding a product manually · deleting a product'],
+    ['Customers & suppliers', 'Deleting a customer\'s or a supplier\'s payment · supplier bank details and credit days'],
+    ['Cheques & GRNs', 'Passing, returning or holding a cheque · Extra & Short decisions · deleting a GRN'],
+    ['System', 'Changing settings · downloading reports or a full backup'],
   ];
   return (
-    <Card>
-      <p className="mb">When a <b>cashier</b> does one of these, the system asks for an <b>admin username and password</b> on the same screen. The approval works once, for that change only, and is written to the activity log. Admins are not asked.</p>
-      <dl className="info-list">{list.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}</dl>
-      <div className="alert alert-amber mt"><Icon name="shield" />
-        <span><b>Super Admin only:</b> setting or changing a customer's <b>credit limit</b> — including raising it on the till when a credit bill would go over the limit. Admins are asked for the Super Admin password too.</span>
-      </div>
-      <div className="alert alert-amber mt"><Icon name="crown" />
-        <span><b>Users:</b> adding, editing or deleting any user — even by the Super Admin — always asks for the <b>Super Admin password</b>. The Super Admin account can never be deleted.</span>
-      </div>
-      <p className="muted small mt-s">Credit bills are only for registered customers — never for walk-in customers.</p>
-    </Card>
+    <div className="stack">
+      <Card title={<span className="row gap-s"><Icon name="crown" size={16} /> Only the Super Admin can open</span>}>
+        <p className="muted small mb">Nobody else sees these in the menu, and the system refuses them.</p>
+        <dl className="info-list">{only.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}</dl>
+      </Card>
+      <Card title={<span className="row gap-s"><Icon name="shield" size={16} /> Needs the Super Admin password</span>}>
+        <p className="muted small mb">Whoever does these must type the <b>Super Admin password</b> — the Super Admin too, as a check. The approval works once, for that change only, and is written to the activity log.</p>
+        <dl className="info-list">{superPw.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}</dl>
+      </Card>
+      <Card title={<span className="row gap-s"><Icon name="lock" size={16} /> Needs an Admin's password</span>}>
+        <p className="muted small mb">When a <b>Cashier, KP or Employee</b> does one of these, the system asks for an <b>Admin's username and password</b> on the same screen. Admins and the Super Admin are not asked.</p>
+        <dl className="info-list">{adminPw.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}</dl>
+      </Card>
+      <p className="muted small">What each user can see — costs, GRNs, suppliers, reports, the Payment Portal, the Cheque Desk, Settings, the Action Center — is set per user in <b>Users → Edit</b>. Credit bills are only for registered customers — never for walk-in customers.</p>
+    </div>
   );
 }

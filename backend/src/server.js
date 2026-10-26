@@ -11,6 +11,7 @@ import sales from './routes/sales.js';
 import reports from './routes/reports.js';
 import money from './routes/money.js';
 import exportsRoute from './routes/exports.js';
+import stocktake from './routes/stocktake.js';
 import authRoutes from './routes/auth.js';
 import { requireAuth, initAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
@@ -19,6 +20,7 @@ import { revalueGrns, upgradeCosting, relabelCustomers } from './services.js';
 import { setupBatches } from './db.js';
 import { autoPassSoon } from './cheques.js';
 import { attentionSoon } from './attention.js';
+import { hideCosts, checkPaths } from './costcode.js';
 
 // Connect to MongoDB, create indexes / default settings / default logins (safe on every start).
 await setup();
@@ -31,6 +33,8 @@ app.use(express.json({ limit: '5mb' }));
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api', authRoutes);        // login is public; the rest of its routes check the session themselves
 app.use('/api', requireAuth);       // everything below needs a logged-in user
+app.use('/api', hideCosts);         // without "see costs": no costs or profit in any answer (the cost code instead)
+app.use('/api', checkPaths);        // GRNs, suppliers, reports, Payment Portal, Cheque Desk: by the user's permissions
 // cheques whose date has reached 3:00 PM pass by themselves (checked at most once a minute)
 app.use('/api', (req, res, next) => { autoPassSoon().then(() => next(), next); });
 // Action Center → Attention: overdue bills, cheques on hold, supplier bills due, GRN shorts (checked every half hour)
@@ -44,6 +48,7 @@ app.use('/api/sales', sales);
 app.use('/api', reports);
 app.use('/api', money);           // cargo payable, cheques
 app.use('/api', exportsRoute);     // Settings → Download reports (Excel)
+app.use('/api', stocktake);        // Settings → Stock Take
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 

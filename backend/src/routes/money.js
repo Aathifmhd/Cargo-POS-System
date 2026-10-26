@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { find, findOne, deleteMany, fail, num } from '../db.js';
+import { find, findOne, deleteMany, fail, num, getSettings } from '../db.js';
 import { revalueGrns, customerLabel } from '../services.js';
 import { guard } from '../auth.js';
 import { cargoLedgers, payCargo, setChequeStatus, updateCheque, deleteCheque } from '../cheques.js';
@@ -96,6 +96,27 @@ r.delete('/payments/:kind/:id', async (req, res) => {
     if (req.params.kind === 'payables') await revalueGrns();
   }
   res.json({ ok: true, cheque_removed: Boolean(p.cheque_id) });
+});
+
+/* ---------- bad debts (Payment Portal → Uncollectable) ---------- */
+r.get('/bad-debts', async (req, res) => {
+  // Start Fresh clears the list: only what was marked since then (the older ones stay written off, in their closed period)
+  const since = (await getSettings()).fresh_start_at;
+  const list = await find('bad_debts', since ? { created_at: { $gte: since } } : {}, { sort: { date: -1, id: -1 } });
+  const customers = list.length ? await find('customers', { id: { $in: [...new Set(list.map((d) => d.customer_id))] } }) : [];
+  const c = Object.fromEntries(customers.map((x) => [x.id, x]));
+  res.json(list.map((d) => ({ ...d, customer_name: customerLabel(c[d.customer_id]) || '—', customer_person: c[d.customer_id] && c[d.customer_id].shop_name ? c[d.customer_id].name : null, customer_phone: c[d.customer_id]?.phone || null })));
+});
+/** Undo a bad debt (the customer paid after all, or it was a mistake): the due is back. Super Admin password. */
+r.delete('/bad-debts/:id', async (req, res) => {
+  const d = await findOne('bad_debts', { id: num(req.params.id) });
+  if (!d) fail('Not found', 404);
+  const since = (await getSettings()).fresh_start_at;
+  if (since && String(d.created_at) < since) fail('This one belongs to a closed period (before the last Start Fresh) — it can no longer be undone');
+  const c = await findOne('customers', { id: d.customer_id });
+  await guard(req, `Undo uncollectable: ${d.invoice_no} of ${customerLabel(c)} — Rs ${d.amount} is to collect again`, 'superadmin', { always: true });
+  await deleteMany('bad_debts', { id: d.id });
+  res.json({ ok: true });
 });
 
 export default r;

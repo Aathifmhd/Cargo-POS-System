@@ -36,8 +36,8 @@ export default function Reports() {
 }
 
 /** Sales of a period (Sales & Profit → Sales). withBills: every bill of the period listed too. */
-export function SalesReport({ from, to, withBills = false }) {
-  const { data: d, error, reload } = useApi(`/reports/sales?from=${from}&to=${to}`);
+export function SalesReport({ from, to, withBills = false, q = '' }) {
+  const { data: d, error, reload } = useApi(`/reports/sales?from=${from}&to=${to}${q}`);
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!d) return <Loading />;
   const s = d.summary;

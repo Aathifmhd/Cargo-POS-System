@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers, costGroups } from '../lib.js';
+import { api, n, r2, lkr, money, today, addDays, int, margin, pct, niceDate, costTiers, costGroups, seesCost, codeOf } from '../lib.js';
 import { Icon, Modal, Field, NumInput, DateInput, CostBadge, useToast, Loading } from '../components/ui.jsx';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
-import { isAdmin, isSuper, custName, custPerson, niceTime } from '../lib.js';
+import { isAdmin, isSuper, custName, custPerson, niceTime, costCode } from '../lib.js';
 
 const DRAFT_KEY = 'cargo-pos-draft';
 const HELD_KEY = 'cargo-pos-held';
@@ -74,6 +74,7 @@ export default function POS() {
   const toast = useToast();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const seeCost = seesCost(user);   // Cashier, KP, Employee: no cost or profit — the cost code only
   const { settings } = useSettings();
   const [products, setProducts] = useState(null);
   const [customers, setCustomers] = useState([]);
@@ -85,7 +86,7 @@ export default function POS() {
   const [hi, setHi] = useState(0);
   const [sel, setSel] = useState(-1);
   const [edit, setEdit] = useState(null);          // { i, qty, price } while a bill line is being edited
-  const [showCost, setShowCost] = useState(() => readLS('pos-show-cost', true));
+  const [showCostPref, setShowCost] = useState(() => readLS('pos-show-cost', true));
   const [held, setHeld] = useState(() => readLS(HELD_KEY, []));
   const [modal, setModal] = useState(null);        // 'customer' | 'pay' | 'credit' | 'held' | 'keys' | {newCustomer}
   const [askReturn, setAskReturn] = useState(null);   // a return waiting for "normal or damaged?": (damaged) => void
@@ -102,7 +103,8 @@ export default function POS() {
   const loadNo = () => api.get('/sales/next-no').then((d) => setNextNo(d.invoice_no)).catch(() => {});
   useEffect(() => { loadProducts(); loadCustomers(); loadNo(); }, []); // eslint-disable-line
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
-  useEffect(() => { writeLS('pos-show-cost', showCost); }, [showCost]);
+  useEffect(() => { writeLS('pos-show-cost', showCostPref); }, [showCostPref]);
+  const showCost = showCostPref && seeCost;
   useEffect(() => { writeLS(DRAFT_KEY, { lines, customerId, billDisc }); }, [lines, customerId, billDisc]);
   useEffect(() => { writeLS(HELD_KEY, held); }, [held]);
   useEffect(() => { if (sel >= lines.length) setSel(lines.length - 1); }, [lines.length, sel]);
@@ -436,9 +438,9 @@ export default function POS() {
         <div className="till-no">
           <span>BILL NO</span>
           <b>{nextNo || '—'}</b>
-          <button className={`till-gp ${showCost ? 'on' : ''}`} onClick={() => setShowCost((s) => !s)} title="Show / hide cost and profit ( ` key )">
+          {seeCost && <button className={`till-gp ${showCost ? 'on' : ''}`} onClick={() => setShowCost((s) => !s)} title="Show / hide cost and profit ( ` key )">
             <Icon name={showCost ? 'eye' : 'eyeOff'} size={12} /> {showCost ? 'COST SHOWN' : 'COST HIDDEN'} <kbd>`</kbd>
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -480,18 +482,18 @@ export default function POS() {
         {hitRows.length > 0 && (
           <div className="till-hits">
             <table>
-              <thead><tr><th>CODE</th><th>ITEM</th><th>STOCK FROM</th><th>SIZES</th><th className="n">IN STOCK</th><th className="n">COST / PC</th><th className="n">EXPECTED / PC</th></tr></thead>
+              <thead><tr><th>CODE</th><th>ITEM</th><th>STOCK FROM</th><th>SIZES</th><th className="n">IN STOCK</th>{showCost && <th className="n">COST / PC</th>}<th className="n">EXPECTED / PC</th></tr></thead>
               <tbody>
                 {hitRows.map(({ p, b, tier, damaged }, i) => {
                   if (damaged) {
                     return (
                       <tr key={`${p.id}-dmg`} className={`${i === hi ? 'on' : ''} batch dmg`} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p, null, true); }}>
                         <td className="c">{p.code}</td>
-                        <td className="d">{p.name} <span className="dmg-badge">Damaged</span></td>
+                        <td className="d">{p.name} <span className="cost-code hit-code">{codeOf(p.damaged, p.damaged.cost_per_pcs, settings)}</span> <span className="dmg-badge">Damaged</span></td>
                         <td className="s">Damaged returns</td>
                         <td className="s">{p.sizes || '—'}</td>
                         <td className="n">{pcsText(p.damaged.pcs)}</td>
-                        <td className="n cost">{money(p.damaged.cost_per_pcs)}</td>
+                        {showCost && <td className="n cost">{money(p.damaged.cost_per_pcs)}</td>}
                         <td className="p">sell under cost</td>
                       </tr>
                     );
@@ -502,11 +504,11 @@ export default function POS() {
                   return (
                     <tr key={`${p.id}-${b?.id ?? 0}`} className={`${i === hi ? 'on' : ''} ${many ? 'batch' : ''}`} onMouseEnter={() => setHi(i)} onMouseDown={(e) => { e.preventDefault(); pick(p, b); }}>
                       <td className="c">{p.code}</td>
-                      <td className="d">{p.name}{tier && <> <CostBadge tier={tier} /></>}</td>
+                      <td className="d">{p.name} <span className="cost-code hit-code">{codeOf(b || p, u.costPc, settings)}</span>{tier && <> <CostBadge tier={tier} /></>}</td>
                       <td className="s">{many ? batchText(b) : p.category || '—'}</td>
                       <td className="s">{p.sizes || '—'}</td>
                       <td className={`n ${stock <= 0 ? 'neg' : !many && stock < p.reorder_sets * p.pcs_per_set ? 'low' : ''}`}>{stock < 0 ? `−${pcsText(-stock)}` : stock === 0 ? 'none' : pcsText(stock)}</td>
-                      <td className="n cost">{money(u.costPc)}</td>
+                      {showCost && <td className="n cost">{money(u.costPc)}</td>}
                       <td className="p">{money(u.expectedPc)}</td>
                     </tr>
                   );
@@ -530,7 +532,7 @@ export default function POS() {
                   <td className="c">{r.p.code}</td>
                   <td className="d">
                     <b>{r.p.name.toUpperCase()}</b>
-                    <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{r.b && groupsOf(r.p).length > 1 ? `${batchText(r.b)} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}expected {money(r.u.expectedPc)}</em>
+                    <em>{r.p.sizes ? `${r.p.sizes} · ` : ''}{r.b && groupsOf(r.p).length > 1 ? `${batchText(r.b)} · ` : ''}{showCost ? `cost ${money(r.u.costPc)} · ` : ''}code <span className="cost-code">{r.damaged ? codeOf(r.p.damaged, r.u.dmgCost / r.u.per, settings) : codeOf(r.b || r.p, r.u.costPc, settings)}</span> · expected {money(r.u.expectedPc)}</em>
                     {r.back && !r.damaged && <span className="tag return">RETURN · back to stock</span>}
                     {r.back && r.damaged && <span className="tag damaged">RETURN · DAMAGED — not to stock</span>}
                     {!r.back && r.damaged && <span className="tag damaged">DAMAGED · cost written off</span>}

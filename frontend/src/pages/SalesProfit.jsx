@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useApi, lkr, money, niceDate, niceTime, int, pct, margin } from '../lib.js';
+import { useApi, lkr, money, niceDate, niceTime, int, pct, margin, today } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Stat, Tabs, Segmented, DateInput, Badge } from '../components/ui.jsx';
 import { SalesReport, PRESETS } from './Reports.jsx';
 
@@ -19,6 +19,8 @@ const REASON = {
   shopuse: { label: 'Used by the shop', tone: 'violet', text: 'Stock Count' },
   counting: { label: 'Counting mistake', tone: 'grey', text: 'Stock Count' },
   other: { label: 'Other', tone: 'grey', text: 'Stock Count' },
+  stocktake: { label: 'Stock take — short', tone: 'red', text: 'counted less than the system' },
+  baddebt: { label: 'Uncollectable', tone: 'red', text: 'a customer\'s due written off' },
 };
 const GAIN = {
   extra: { label: 'Extra kept free', tone: 'green' },
@@ -28,6 +30,7 @@ const GAIN = {
   add_supplierfree: { label: 'Free goods from supplier', tone: 'green' },
   add_other: { label: 'Other', tone: 'blue' },
   repaired: { label: 'Damaged piece repaired', tone: 'violet' },
+  stocktake_over: { label: 'Stock take — more', tone: 'blue' },
 };
 
 export default function SalesProfit() {
@@ -35,24 +38,45 @@ export default function SalesProfit() {
   const [preset, setPreset] = useState('month');
   const [[from, to], setRange] = useState(PRESETS.month());
   const choose = (p) => { setPreset(p); setRange(PRESETS[p]()); };
+  // the period: since the last Start Fresh (current), or a closed one (after a stock take)
+  const { data: takes } = useApi('/stocktakes');
+  const periods = (takes || []).filter((s) => s.period);
+  const [period, setPeriod] = useState('');
+  const current = periods.slice().sort((a, b) => b.id - a.id)[0];
+  const pickPeriod = (id) => {
+    setPeriod(id);
+    const p = periods.find((x) => String(x.id) === String(id))?.period;
+    if (p) { setPreset(''); setRange([p.from || '2000-01-01', p.to]); } else choose('month');
+  };
+  const q = period ? `&period=${period}` : '';
   return (
     <div>
       <PageHeader title="Sales & Profit" subtitle="Every sale, the profit on each bill, and every loss with its reason — for the period you choose."
         actions={<button className="btn" onClick={() => window.print()}><Icon name="print" /> Print</button>} />
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'sales', label: 'Sales' }, { value: 'pl', label: 'Profit & loss' }]} />
+      {periods.length > 0 && (
+        <div className="fresh-banner">
+          <Icon name="back" size={15} />
+          <span>{period ? <>Looking at a <b>closed period</b>.</> : <>Counting from the fresh start on <b>{niceDate(current.period.to)}</b> (after {current.no}).</>}</span>
+          <select className="input" value={period} onChange={(e) => pickPeriod(e.target.value)}>
+            <option value="">Current period — since {niceDate(current.period.to)}</option>
+            {periods.slice().sort((a, b) => b.id - a.id).map((s) => <option key={s.id} value={s.id}>{s.no}: {s.period.from ? niceDate(s.period.from) : 'the start'} → {niceDate(s.period.to)}</option>)}
+          </select>
+        </div>
+      )}
       <div className="toolbar">
         <Segmented value={preset} onChange={choose} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: '7 days' }, { value: 'month', label: 'This month' }, { value: 'last30', label: '30 days' }, { value: 'year', label: 'This year' }]} />
         <DateInput style={{ width: 160 }} value={from} onChange={(e) => { setPreset(''); setRange([e.target.value, to]); }} />
         <span className="muted">to</span>
         <DateInput style={{ width: 160 }} value={to} onChange={(e) => { setPreset(''); setRange([from, e.target.value]); }} />
       </div>
-      {tab === 'sales' ? <SalesReport from={from} to={to} withBills /> : <ProfitLoss from={from} to={to} />}
+      {tab === 'sales' ? <SalesReport from={from} to={to} withBills q={q} /> : <ProfitLoss from={from} to={to} q={q} />}
     </div>
   );
 }
 
-function ProfitLoss({ from, to }) {
-  const { data: d, error, reload } = useApi(`/reports/profit?from=${from}&to=${to}`);
+function ProfitLoss({ from, to, q = '' }) {
+  const { data: d, error, reload } = useApi(`/reports/profit?from=${from}&to=${to}${q}`);
   const [show, setShow] = useState('');   // a loss reason to show alone
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!d) return <Loading />;

@@ -18,19 +18,19 @@ export function parseCatalog(settings) {
 export function costGroups(batches) {
   const byCost = new Map();
   for (const b of [...(batches || [])].sort((a, c) => (a.date === c.date ? a.id - c.id : a.date < c.date ? -1 : 1))) {
-    const k = Math.round((Number(b.cost_per_pcs) || 0) * 100);
+    const k = b.cost_per_pcs != null ? Math.round((Number(b.cost_per_pcs) || 0) * 100) : String(b.cost_code || '');
     if (!byCost.has(k)) byCost.set(k, []);
     byCost.get(k).push(b);
   }
   return [...byCost.values()].map((list) => {
     const newest = list[list.length - 1];
     return {
-      id: list[0].id, ids: list.map((b) => b.id), cost_per_pcs: list[0].cost_per_pcs,
+      id: list[0].id, ids: list.map((b) => b.id), cost_per_pcs: list[0].cost_per_pcs, cost_code: list[0].cost_code,
       expected_per_pcs: newest.expected_per_pcs || list.find((b) => b.expected_per_pcs)?.expected_per_pcs || 0,
       left_pcs: list.reduce((t, b) => t + b.left_pcs, 0),
       ref: list.map((b) => b.ref || 'Stock').join(' + '), date: newest.date, count: list.length,
     };
-  }).sort((a, b) => a.cost_per_pcs - b.cost_per_pcs);
+  }).sort((a, b) => (a.cost_per_pcs ?? 0) - (b.cost_per_pcs ?? 0) || String(a.cost_code || '').localeCompare(String(b.cost_code || '')));
 }
 /**
  * Low / medium / high cost for one product's stock batches. The badge goes by the cost itself, so batches that cost
@@ -76,10 +76,30 @@ export function applyTheme(pref = getThemePref()) {
 }
 
 /* ---------------- roles ---------------- */
-export const ROLE_NAME = { cashier: 'Cashier', admin: 'Admin', superadmin: 'Super Admin' };
-const RANK = { cashier: 0, admin: 1, superadmin: 2 };
+export const ROLE_NAME = { cashier: 'Cashier', kp: 'KP', employee: 'Employee', admin: 'Admin', superadmin: 'Super Admin' };
+const RANK = { cashier: 0, kp: 0, employee: 0, admin: 1, superadmin: 2 };
 export const isAdmin = (u) => (RANK[u?.role] ?? 0) >= 1;
 export const isSuper = (u) => u?.role === 'superadmin';
+/**
+ * What a user may see and do (the server sends each user's permissions; they start from the role and can be changed
+ * per user in Users & Security). The Super Admin has them all.
+ */
+export const PERMS = [
+  { key: 'see_cost', label: 'See product costs & profit', text: 'Without it: the cost code only' },
+  { key: 'receive_goods', label: 'Receive goods (GRNs)', text: 'GRNs, shipments, Extra & Short — comes with seeing costs' },
+  { key: 'suppliers', label: 'Suppliers & paying them', text: 'Suppliers, what they are owed, paying suppliers and cargo' },
+  { key: 'reports', label: 'Reports', text: 'Stock value report — comes with seeing costs' },
+  { key: 'dues', label: 'Payment Portal', text: 'Collecting from customers' },
+  { key: 'cheques', label: 'Cheque Desk', text: 'Cheques received and given' },
+  { key: 'settings', label: 'Settings', text: 'Shop details, products, cost code, backups…' },
+  { key: 'action_center', label: 'Action Center', text: 'Every activity, approvals and Attention — off unless given' },
+];
+const STAFF = { see_cost: false, receive_goods: false, suppliers: false, reports: false, dues: true, cheques: true, settings: true, action_center: false };
+const ALL = Object.fromEntries(PERMS.map((p) => [p.key, true]));
+export const ROLE_PERMS = { superadmin: ALL, admin: { ...ALL, action_center: false }, cashier: STAFF, kp: STAFF, employee: STAFF };
+export const can = (u, perm) => (u?.role === 'superadmin' ? true : Boolean((u?.perms || ROLE_PERMS[u?.role] || STAFF)[perm]));
+/** Product costs and profit: users with the "see costs" permission; the others see the cost code. */
+export const seesCost = (u) => can(u, 'see_cost');
 
 /* ---------------- session ---------------- */
 const TOKEN_KEY = 'cargo-pos-token';
@@ -345,3 +365,41 @@ export function shrinkPhoto(file, max = 1600, quality = 0.82) {
     img.src = url;
   });
 }
+
+/**
+ * The shop's cost code. The ten letters of the code word stand for 1 to 9 and then 0 — with KNIGHTCLUB, K is 1, N is 2 …
+ * U is 9, B is 0. A digit that repeats the one before it is written as the repeat letter instead (and the run starts
+ * again), so 1000 reads KBSB. The code is of the cost per piece + the amount set to add (Rs 300) — staff can read it,
+ * a customer can't; the real cost shown elsewhere doesn't change.
+ */
+export function costCode(cost, settings = {}, { add = true } = {}) {
+  const word = String(settings.cost_code_word || 'KNIGHTCLUB').toUpperCase();
+  const rep = String(settings.cost_code_repeat || 'S').toUpperCase();
+  const value = Math.round(Math.abs(Number(cost) || 0) + (add ? Number(settings.cost_code_add ?? 300) || 0 : 0));
+  let out = '';
+  let prev = null;
+  for (const d of String(value)) {
+    if (d === prev) { out += rep; prev = null; continue; }
+    out += word[(Number(d) + 9) % 10] || '?';
+    prev = d;
+  }
+  return out;
+}
+/** A code read back to the number it stands for (null when it isn't a code). */
+export function costDecode(code, settings = {}) {
+  const word = String(settings.cost_code_word || 'KNIGHTCLUB').toUpperCase();
+  const rep = String(settings.cost_code_repeat || 'S').toUpperCase();
+  let out = '';
+  let prev = null;
+  for (const ch of String(code || '').toUpperCase().replace(/[^A-Z]/g, '')) {
+    if (ch === rep) { if (prev === null) return null; out += prev; prev = null; continue; }
+    const i = word.indexOf(ch);
+    if (i < 0) return null;
+    prev = String((i + 1) % 10);
+    out += prev;
+  }
+  return out ? Number(out) : null;
+}
+
+/** The cost code to show for something: the one the server sent (Cashier, KP, Employee), or worked out from its cost. */
+export const codeOf = (obj, cost, settings) => obj?.cost_code ?? costCode(cost, settings);

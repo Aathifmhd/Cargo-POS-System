@@ -2,17 +2,21 @@ import { Router } from 'express';
 import { find, findOne, insert, setById, updateOne, deleteMany, count, fail, num } from '../db.js';
 import {
   checkCredentials, checkSuperPassword, createSession, createApproval, requireAuth, adminOnly, audit, endSession,
-  hashPassword, verifyPassword, publicUser, userByName, nameTaken, guard, RANK, rankOf, ROLE_NAME,
+  hashPassword, verifyPassword, publicUser, userByName, nameTaken, guard, RANK, rankOf, ROLE_NAME, permsOf, cleanPerms, PERMS,
 } from '../auth.js';
+
+/** What changed in a user's permissions, for the activity log. */
+const PERM_NAME = { see_cost: 'see costs', receive_goods: 'receive goods', suppliers: 'suppliers', reports: 'reports', dues: 'Payment Portal', cheques: 'Cheque Desk', settings: 'Settings', action_center: 'Action Center' };
+const permChanges = (before, after) => PERMS.filter((k) => Boolean(before[k]) !== Boolean(after[k])).map((k) => `${after[k] ? '+' : '−'}${PERM_NAME[k]}`);
 import { wrongPassword } from '../attention.js';
 
 // Only a super admin may create, change or promote someone to super admin (`by` is who allowed the change).
 const roleFor = (by, wanted, current = 'cashier') => {
-  const role = ['cashier', 'admin', 'superadmin'].includes(wanted) ? wanted : current;
+  const role = ['cashier', 'kp', 'employee', 'admin', 'superadmin'].includes(wanted) ? wanted : current;
   if (role === 'superadmin' && rankOf(by) < RANK.superadmin) fail('Only the Super Admin can make a Super Admin');
   return role;
 };
-const USER_FIELDS = { id: 1, username: 1, name: 1, role: 1, active: 1, last_login: 1, created_at: 1 };
+const USER_FIELDS = { id: 1, username: 1, name: 1, role: 1, active: 1, last_login: 1, created_at: 1, perms: 1 };
 const shortUser = async (id) => findOne('users', { id }, { project: { id: 1, username: 1, name: 1, role: 1, active: 1 } });
 
 const r = Router();
@@ -67,10 +71,17 @@ r.post('/auth/password', requireAuth, async (req, res) => {
 });
 
 /* ---------------- users (admin only; every add, edit or delete needs the Super Admin's password) ---------------- */
-const ROLE_ORDER = { admin: 0, cashier: 1, superadmin: 2 };   // same order as sorting the role names
+const ROLE_ORDER = { superadmin: 0, admin: 1, cashier: 2, kp: 3, employee: 4 };
+/** The system has one Super Admin only. */
+async function oneSuperAdmin(role, userId = null) {
+  if (role !== 'superadmin') return;
+  const other = await findOne('users', { role: 'superadmin', ...(userId ? { id: { $ne: userId } } : {}) }, { project: { username: 1 } });
+  if (other) fail(`There can be only one Super Admin — "${other.username}" is the Super Admin`);
+}
 r.get('/users', requireAuth, adminOnly, async (req, res) => {
   const users = await find('users', {}, { project: USER_FIELDS });
-  res.json(users.sort((a, b) => (ROLE_ORDER[a.role] - ROLE_ORDER[b.role]) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)));
+  res.json(users.map((u) => ({ ...u, custom_perms: Boolean(u.perms && Object.keys(u.perms).length), perms: permsOf(u) }))
+    .sort((a, b) => (ROLE_ORDER[a.role] - ROLE_ORDER[b.role]) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)));
 });
 
 r.post('/users', requireAuth, adminOnly, async (req, res) => {
@@ -80,8 +91,10 @@ r.post('/users', requireAuth, adminOnly, async (req, res) => {
   if (await nameTaken(username)) fail('That username is already taken');
   const by = await guard(req, `Add user ${String(username).trim()} (${ROLE_NAME[role] || 'Cashier'})`, 'superadmin', { always: true });
   const newRole = roleFor(by, role);
-  const u = await insert('users', { username: username.trim(), name: name.trim(), password_hash: hashPassword(password), role: newRole });
-  await audit(req.user, `Created user ${username.trim()} (${ROLE_NAME[newRole]})`);
+  await oneSuperAdmin(newRole);
+  const perms = newRole === 'superadmin' ? {} : cleanPerms(req.body.perms);
+  const u = await insert('users', { username: username.trim(), name: name.trim(), password_hash: hashPassword(password), role: newRole, perms });
+  await audit(req.user, `Created user ${username.trim()} (${ROLE_NAME[newRole]})${Object.keys(perms).length ? ` — permissions: ${PERMS.filter((k) => permsOf({ role: newRole, perms })[k]).map((k) => PERM_NAME[k]).join(', ')}` : ''}`);
   res.json(await shortUser(u.id));
 });
 
@@ -97,12 +110,16 @@ r.put('/users/:id', requireAuth, adminOnly, async (req, res) => {
   }
   const by = await guard(req, `Edit user ${u.username}`, 'superadmin', { always: true });
   const role = roleFor(by, req.body.role, u.role);
+  await oneSuperAdmin(role, u.id);
   const active = req.body.active === undefined ? u.active : req.body.active ? 1 : 0;
   const supers = await count('users', { role: 'superadmin', active: 1 });
   if (u.role === 'superadmin' && u.active && (role !== 'superadmin' || !active) && supers <= 1) fail('You need at least one active Super Admin');
   if (id === req.user.id && !active) fail('You cannot switch off your own account');
   if (req.body.password && String(req.body.password).length < 6) fail('Password must be at least 6 characters');
-  await setById('users', id, { name: String(req.body.name || u.name).trim(), username: newName, role, active });
+  const perms = role === 'superadmin' ? {} : req.body.perms !== undefined ? cleanPerms(req.body.perms) : (role === u.role ? u.perms || {} : {});
+  const changed = permChanges(permsOf(u), permsOf({ role, perms }));
+  await setById('users', id, { name: String(req.body.name || u.name).trim(), username: newName, role, active, perms });
+  if (changed.length) await audit(req.user, `Permissions of ${newName}: ${changed.join(', ')}`);
   if (req.body.password) {
     // a new password ends their logins
     await updateOne('users', { id }, { $set: { password_hash: hashPassword(req.body.password) }, $inc: { token_version: 1 } });
@@ -129,7 +146,7 @@ r.delete('/users/:id', requireAuth, adminOnly, async (req, res) => {
  * `super` marks what the Super Admin approved, or a Super Admin-level change.
  */
 r.get('/action-center', requireAuth, async (req, res) => {
-  if (rankOf(req.user) < RANK.superadmin) fail('Only the Super Admin can open the Action Center', 403);
+  if (!permsOf(req.user).action_center) fail('You don\'t have permission for the Action Center. Ask the Super Admin.', 403);
   const after = num(req.query.after);
   const [rows, users] = await Promise.all([
     find('audit_log', { ...(after ? { id: { $gt: after } } : {}), ...(req.query.level ? { level: String(req.query.level) } : {}) }, { sort: { id: -1 }, limit: after ? 200 : 1000 }),

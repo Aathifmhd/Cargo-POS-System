@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, useApi, lkr, inr, supMoney, bothMoney, niceDate, dueText, niceTime } from '../lib.js';
-import { PageHeader, Card, Loading, ErrorBox, Empty, Stat, Tabs, Icon, Segmented, DateInput, Badge, Modal, useToast } from '../components/ui.jsx';
+import { api, useApi, lkr, inr, supMoney, bothMoney, niceDate, dueText, niceTime, seesCost, can } from '../lib.js';
+import { PageHeader, Card, Loading, ErrorBox, Empty, Stat, Tabs, Icon, Segmented, DateInput, Badge, Modal, Field, useToast } from '../components/ui.jsx';
 import { SupplierPaymentModal, CustomerPaymentModal, CargoPaymentModal, ChequeReturned } from '../components/forms.jsx';
 import { ShipmentReport, PRESETS } from './Reports.jsx';
+import { MoreMenu } from './Cheques.jsx';
 import { whatsappReminder } from './CustomerView.jsx';
-import { useSettings } from '../App.jsx';
+import { useSettings, useAuth } from '../App.jsx';
 
 const GROUPS = [
   { key: 'overdue', title: 'Overdue — act now', tone: 'red' },
@@ -180,13 +181,100 @@ function CargoTab({ version, onPaid }) {
   );
 }
 
+/* ---------- bad debts: dues a customer will never pay — written off as a loss ---------- */
+const BAD_REASONS = ['Not paying', "Can't be found", 'Cheated us', 'Business closed', 'Other'];
+
+/** Mark what is left on a bill as a bad debt (Super Admin password). */
+function BadDebtModal({ b, onClose, onDone }) {
+  const toast = useToast();
+  const [reason, setReason] = useState(BAD_REASONS[0]);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const left = b.balance;
+  const go = async () => {
+    if (reason === 'Other' && !note.trim()) return toast('Type the reason', 'error');
+    setBusy(true);
+    try {
+      await api.post(`/customers/${b.customer_id}/bad-debts`, { sale_id: b.id ?? null, reason, note });
+      toast(`${b.invoice_no} — ${lkr(left)} marked as uncollectable`);
+      onDone();
+    } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <Modal size="sm" title="Mark as uncollectable?" subtitle={`${b.customer_name} · ${b.invoice_no}`} onClose={onClose}
+      footer={<><button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
+        <button className="btn btn-danger-solid" onClick={go} disabled={busy}><Icon name="alert" size={15} /> {busy ? 'Saving…' : 'Yes, mark as uncollectable'}</button></>}>
+      <div className="stack">
+        <div className="pay-total"><span>Can't be collected</span><b>{lkr(left)}</b></div>
+        {b.cheque_pending > 0 && <div className="alert alert-amber small"><Icon name="clock" size={16} /><span>A cheque of {lkr(b.cheque_pending)} is still waiting on this bill — pass it or mark it returned first.</span></div>}
+        <Field label="Why can't it be collected?">
+          <select className="input" value={reason} onChange={(e) => setReason(e.target.value)}>{BAD_REASONS.map((r) => <option key={r}>{r}</option>)}</select>
+        </Field>
+        <Field label={reason === 'Other' ? 'The reason' : 'Details'} required={reason === 'Other'}>
+          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. shop closed, phone off since March" />
+        </Field>
+        <p className="small">The bill leaves <b>To collect</b> and goes to the <b>Uncollectable</b> list. {lkr(left)} is counted as a <b>loss</b> in Sales &amp; Profit → Profit &amp; loss. If they pay later, undo it from the Uncollectable list.</p>
+        <p className="muted small">Needs the Super Admin password.</p>
+      </div>
+    </Modal>
+  );
+}
+
+/** Payment Portal → Uncollectable: every due written off, with Undo (Super Admin password). */
+function BadDebts({ data, error, reload, onUndone }) {
+  const toast = useToast();
+  const [undoing, setUndoing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const undo = async () => {
+    setBusy(true);
+    try { await api.del(`/bad-debts/${undoing.id}`); toast(`${undoing.invoice_no} — ${lkr(undoing.amount)} is to collect again`); setUndoing(null); onUndone(); } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  const list = data || [];
+  const total = list.reduce((t, d) => t + d.amount, 0);
+  return (
+    <>
+      <div className="stats mb">
+        <Stat icon="alert" tone="red" label="Uncollectable" value={lkr(total)} sub={`${list.length} bill${list.length === 1 ? '' : 's'} written off — counted as a loss`} />
+      </div>
+      <ErrorBox error={error} onRetry={reload} />
+      <Card pad={false}>
+        {!data ? <Loading /> : !list.length ? <Empty icon="check" title="Nothing uncollectable" text="When a customer will never pay a bill, mark it with ⋯ → Mark as uncollectable on To collect." /> : (
+          <div className="table-wrap"><table className="table">
+            <thead><tr><th>Date</th><th>Customer</th><th>Bill</th><th>Why</th><th className="right">Written off</th><th /></tr></thead>
+            <tbody>{list.map((d) => (
+              <tr key={d.id} className="hover">
+                <td className="nowrap">{niceDate(d.date)}<div className="sub">by {d.by}</div></td>
+                <td><Link to={`/customers/${d.customer_id}`} className="strong">{d.customer_name}</Link>{(d.customer_person || d.customer_phone) && <div className="sub">{[d.customer_person, d.customer_phone].filter(Boolean).join(' · ')}</div>}</td>
+                <td>{d.sale_id ? <Link to={`/sales/${d.sale_id}`}>{d.invoice_no}</Link> : d.invoice_no}</td>
+                <td><span className="badge-damaged">{d.reason}</span>{d.note && <div className="sub">{d.note}</div>}</td>
+                <td className="right strong text-red">{lkr(d.amount)}</td>
+                <td className="right"><button className="btn btn-sm btn-ghost" onClick={() => setUndoing(d)} title="They paid after all — the due is back (Super Admin)"><Icon name="back" size={13} /> Undo</button></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </Card>
+      {undoing && (
+        <Modal size="sm" title="Undo uncollectable?" subtitle={`${undoing.customer_name} · ${undoing.invoice_no}`} onClose={() => setUndoing(null)}
+          footer={<><button className="btn" onClick={() => setUndoing(null)} disabled={busy}>Cancel</button><button className="btn btn-primary" onClick={undo} disabled={busy}><Icon name="back" size={15} /> {busy ? 'Undoing…' : 'Yes, to collect again'}</button></>}>
+          <p>{lkr(undoing.amount)} goes back to <b>To collect</b> (for example, the customer has come to pay), and comes off the losses. Needs the Super Admin password.</p>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 export default function Dues() {
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') || 'receivables';
+  const seeCost = can(useAuth().user, 'suppliers');   // the supplier and cargo tabs: the "suppliers" permission
+  const asked = params.get('tab') || 'receivables';
+  const tab = asked === 'baddebts' || seeCost ? asked : 'receivables';
   const { settings } = useSettings();
-  const pay = useApi('/dues/payables');
+  const pay = useApi(seeCost ? '/dues/payables' : null);
   const rec = useApi('/dues/receivables');
   const [modal, setModal] = useState(null);
+  const [badFor, setBadFor] = useState(null);   // the bill being marked as uncollectable
+  const bad = useApi('/bad-debts');
   const [history, setHistory] = useState(false);
   const [version, setVersion] = useState(0);   // bumped after a payment, so the history reloads too
   const showHistory = () => {
@@ -220,10 +308,10 @@ export default function Dues() {
       <PageHeader title="Payment Portal" subtitle="Money to collect from customers, money to pay suppliers, and cargo charges to pay." />
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[
         { value: 'receivables', label: 'To collect from customers', count: rec.data?.length },
-        { value: 'payables', label: 'To pay suppliers', count: pay.data?.length },
-        { value: 'cargo', label: 'To pay cargo' },
+        ...(seeCost ? [{ value: 'payables', label: 'To pay suppliers', count: pay.data?.length }, { value: 'cargo', label: 'To pay cargo' }] : []),
+        { value: 'baddebts', label: 'Uncollectable', count: bad.data?.length || undefined },
       ]} />
-      {tab === 'cargo' ? <CargoTab version={version} onPaid={() => setVersion((v) => v + 1)} /> : <>
+      {tab === 'baddebts' ? <BadDebts data={bad.data} error={bad.error} reload={bad.reload} onUndone={() => { rec.reload(); bad.reload(); }} /> : tab === 'cargo' ? <CargoTab version={version} onPaid={() => setVersion((v) => v + 1)} /> : <>
 
       <div className="stats mb">
         <Stat icon="wallet" tone="blue" label={isPay ? 'Total to pay' : 'Total to collect'} value={sumText()} sub={chequesWaiting > 0 ? `after ${lkr(chequesWaiting)} in cheques waiting` : ''} />
@@ -269,6 +357,7 @@ export default function Dues() {
                                 href={whatsappReminder({ name: b.customer_person || b.customer_name, phone: b.customer_phone }, b.balance, settings.shop_name)}><Icon name="phone" size={15} /></a>
                             )}
                             <button className={`btn btn-sm ${isPay ? 'btn-pay' : 'btn-receive'}`} onClick={() => openPay(b)}><Icon name={isPay ? 'wallet' : 'cash'} size={14} /> {isPay ? 'Pay' : 'Receive'}</button>
+                            {!isPay && <MoreMenu items={[{ label: 'Mark as uncollectable', icon: 'alert', danger: true, onClick: () => setBadFor(b) }]} />}
                           </td>
                         </tr>
                       ))}
@@ -290,6 +379,7 @@ export default function Dues() {
       {history && <PaymentHistory isPay={isPay} cargo={tab === 'cargo'} version={version} onHide={() => setHistory(false)} onUndone={() => { pay.reload(); rec.reload(); setVersion((v) => v + 1); }} />}
 
       {modal?.type === 'sup' && <SupplierPaymentModal supplier={modal.who} bills={modal.who.bills} defaultGrnId={modal.id} onClose={() => setModal(null)} onSaved={done} />}
+      {badFor && <BadDebtModal b={badFor} onClose={() => setBadFor(null)} onDone={() => { setBadFor(null); rec.reload(); bad.reload(); setVersion((v) => v + 1); }} />}
       {modal?.type === 'cus' && <CustomerPaymentModal customer={modal.who} bills={modal.who.bills} defaultSaleId={modal.id} onClose={() => setModal(null)} onSaved={done} />}
     </div>
   );

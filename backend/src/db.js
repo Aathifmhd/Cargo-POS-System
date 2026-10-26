@@ -93,6 +93,7 @@ const DEFAULTS = {
   sale_items: { batch_id: null, batches: [], no_stock_pcs: 0, damaged: false, damaged_cost: 0, damaged_takes: [], code: null, mrp_per_unit: 0, expected_per_unit: 0, cost_per_unit: 0, disc: 0, disc_pct: 0 },
   customer_payments: { sale_id: null, method: null, reference: null, notes: null, cheque_id: null },
   stock_moves: { ref: null, note: null, batch_id: null, reason_code: null },
+  bad_debts: { sale_id: null, reason: null, note: null },
   damaged: { sale_id: null, ref: null, cost_per_pcs: 0, in_pcs: 0, left_pcs: 0 },
   batches: { grn_id: null, kind: 'grn', ref: null, cost_per_pcs: 0, expected_per_pcs: 0, mrp_per_pcs: 0, in_pcs: 0, left_pcs: 0 },
   users: { role: 'cashier', active: 1, last_login: null, token_version: 0 },
@@ -136,7 +137,7 @@ export const bumpCounter = (name, n) => col('counters').updateOne({ _id: name },
 
 export const COLLECTIONS = ['settings', 'suppliers', 'customers', 'products', 'grns', 'grn_expenses', 'grn_items', 'supplier_payments',
   'sales', 'sale_items', 'customer_payments', 'stock_moves', 'users', 'audit_log', 'fx_rates', 'batches',
-  'cargo_payments', 'cheques', 'customer_ids', 'damaged'];
+  'cargo_payments', 'cheques', 'customer_ids', 'damaged', 'stocktakes', 'bad_debts'];
 
 /* ---------------- errors & small helpers ---------------- */
 export class HttpError extends Error {
@@ -199,6 +200,9 @@ const DEFAULT_SETTINGS = {
   grn_prefix: 'GRN-',
   invoice_prefix: 'INV-',
   catalog: JSON.stringify(DEFAULT_CATALOG),
+  cost_code_word: 'KNIGHTCLUB',        // the cost code: these ten letters are 1 2 3 4 5 6 7 8 9 0
+  cost_code_repeat: 'S',               // written for a digit that repeats the one before it
+  cost_code_add: '300',                // the code is of the cost per piece + this (the real cost shown stays as it is)
 };
 
 export async function getSettings() {

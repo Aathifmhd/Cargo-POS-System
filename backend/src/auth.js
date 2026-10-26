@@ -19,12 +19,35 @@ export function verifyPassword(password, stored) {
   return real.length === test.length && crypto.timingSafeEqual(real, test);
 }
 
-export const publicUser = (u) => u && { id: u.id, username: u.username, name: u.name, role: u.role };
+export const publicUser = (u) => u && { id: u.id, username: u.username, name: u.name, role: u.role, perms: permsOf(u) };
+
+/**
+ * What a user may see and do. Each role starts with its own set (ROLE_PERMS); the Super Admin (or an admin with the
+ * Super Admin's password) can switch any of them on or off for one user (users.perms). The Super Admin has them all.
+ *  see_cost: product costs and profit (everyone else gets the cost code) · receive_goods: GRNs, shipments, Extra & Short
+ *  suppliers: suppliers, and paying suppliers and cargo · reports: Reports · dues: Payment Portal (customers)
+ *  cheques: Cheque Desk · settings: Settings · action_center: the Action Center (off unless given — the Super Admin's)
+ */
+export const PERMS = ['see_cost', 'receive_goods', 'suppliers', 'reports', 'dues', 'cheques', 'settings', 'action_center'];
+const STAFF = { see_cost: false, receive_goods: false, suppliers: false, reports: false, dues: true, cheques: true, settings: true, action_center: false };
+const ALL = Object.fromEntries(PERMS.map((p) => [p, true]));
+export const ROLE_PERMS = { superadmin: ALL, admin: { ...ALL, action_center: false }, cashier: STAFF, kp: STAFF, employee: STAFF };
+export function permsOf(u) {
+  if (!u) return {};
+  if (u.role === 'superadmin') return { ...ALL };
+  const p = { ...(ROLE_PERMS[u.role] || STAFF), ...(u.perms || {}) };
+  // receiving goods and the reports show costs: they come with seeing costs
+  if (p.receive_goods || p.reports) p.see_cost = true;
+  return p;
+}
+export const can = (u, perm) => Boolean(permsOf(u)[perm]);
+/** From the user form: only the known permissions, as true / false. */
+export const cleanPerms = (raw) => Object.fromEntries(PERMS.filter((k) => raw && k in raw).map((k) => [k, Boolean(raw[k])]));
 
 /** cashier < admin < superadmin */
-export const RANK = { cashier: 0, admin: 1, superadmin: 2 };
+export const RANK = { cashier: 0, kp: 0, employee: 0, admin: 1, superadmin: 2 };
 export const rankOf = (u) => RANK[u?.role] ?? 0;
-export const ROLE_NAME = { cashier: 'Cashier', admin: 'Admin', superadmin: 'Super Admin' };
+export const ROLE_NAME = { cashier: 'Cashier', kp: 'KP', employee: 'Employee', admin: 'Admin', superadmin: 'Super Admin' };
 
 const NOCASE = { locale: 'en', strength: 2 };
 /** The user with exactly this username — logging in is case-sensitive ("Superadmin" is not "superadmin"). */

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, useApi, n, r2, lkr, money, niceDate, int, stockText, margin, pct, parseCatalog, findCategory, costTiers, costGroups } from '../lib.js';
-import { useSettings } from '../App.jsx';
+import { api, useApi, n, r2, lkr, money, niceDate, int, stockText, margin, pct, parseCatalog, findCategory, costTiers, costGroups, costCode, seesCost, codeOf } from '../lib.js';
+import { useSettings, useAuth } from '../App.jsx';
 import SizePicker from '../components/SizePicker.jsx';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, CostBadge, Modal, Field, NumInput, Segmented, Tabs, Stat, useToast } from '../components/ui.jsx';
 
@@ -29,6 +29,8 @@ const ADD_REASONS = [
 ];
 
 export default function Stock() {
+  const { settings } = useSettings();   // the cost code
+  const seeCost = seesCost(useAuth().user);
   const [params] = useSearchParams();
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('');
@@ -69,9 +71,9 @@ export default function Stock() {
 
       <div className="stats mb">
         <Stat icon="box" label="Products in stock" value={int(active.filter((p) => p.stock_pcs > 0).length)} sub={`${int(active.reduce((s, p) => s + Math.max(0, p.stock_pcs), 0))} pieces${active.some((p) => p.stock_pcs < 0) ? ` · ${active.filter((p) => p.stock_pcs < 0).length} sold without stock` : ''}`} />
-        <Stat icon="cash" tone="blue" label="Stock value at cost" value={lkr(costValue)} />
-        <Stat icon="tag" tone="green" label="Value at expected price" value={lkr(sellValue)} sub={`Potential profit ${lkr(sellValue - costValue)}`} />
-        {damagedPcs > 0 && <Stat icon="alert" tone="red" label="Damaged stock" value={`${int(damagedPcs)} pcs`} sub={`Cost written off ${lkr(damagedValue)}`} onClick={() => setFilter('damaged')} />}
+        {seeCost && <Stat icon="cash" tone="blue" label="Stock value at cost" value={lkr(costValue)} />}
+        {seeCost && <Stat icon="tag" tone="green" label="Value at expected price" value={lkr(sellValue)} sub={`Potential profit ${lkr(sellValue - costValue)}`} />}
+        {damagedPcs > 0 && <Stat icon="alert" tone="red" label="Damaged stock" value={`${int(damagedPcs)} pcs`} sub={seeCost ? `Cost written off ${lkr(damagedValue)}` : 'Kept apart from the stock'} onClick={() => setFilter('damaged')} />}
         <Stat icon="alert" tone="amber" label="Low / out of stock" value={`${active.filter((p) => p.stock_pcs < p.reorder_sets * p.pcs_per_set).length} / ${active.filter((p) => p.stock_pcs <= 0).length}`} />
       </div>
 
@@ -94,7 +96,7 @@ export default function Stock() {
         {loading && !data ? <Loading /> : rows.length === 0 ? <Empty title="No products here" text="Products are created automatically when you receive goods." /> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Code</th><th>Product</th><th>Pack</th><th>In stock</th><th className="right">Cost/pc</th><th className="right">Expected/pc</th><th className="right">Margin</th><th className="right">Stock value</th></tr></thead>
+              <thead><tr><th>Code</th><th>Product</th><th>Pack</th><th>In stock</th>{seeCost && <th className="right">Cost/pc</th>}<th>Cost code</th><th className="right">Expected/pc</th>{seeCost && <><th className="right">Margin</th><th className="right">Stock value</th></>}</tr></thead>
               <tbody>
                 {rows.flatMap((p) => {
                   const low = p.stock_pcs < p.reorder_sets * p.pcs_per_set;
@@ -122,10 +124,11 @@ export default function Stock() {
                           {b && k === 0 && <div className="sub">{int(p.stock_pcs)} pcs in all</div>}
                           {!b && p.stock_pcs < 0 && <div className="sub text-amber">{int(-p.stock_pcs)} pcs sold without stock</div>}
                         </td>
-                        <td className="right">{money(cost)}</td>
+                        {seeCost && <td className="right">{money(cost)}</td>}
+                        <td><span className="cost-code">{codeOf(src || p, cost, settings)}</span></td>
                         <td className="right strong">{money(exp)}</td>
-                        <td className={`right ${margin(exp, cost) < 0 ? 'text-red' : ''}`}>{pct(margin(exp, cost))}</td>
-                        <td className="right">{money(Math.max(0, pcs) * cost)}</td>
+                        {seeCost && <td className={`right ${margin(exp, cost) < 0 ? 'text-red' : ''}`}>{pct(margin(exp, cost))}</td>}
+                        {seeCost && <td className="right">{money(Math.max(0, pcs) * cost)}</td>}
                       </tr>
                     );
                   }).concat(p.damaged?.pcs > 0 ? [
@@ -135,10 +138,11 @@ export default function Stock() {
                         <div className="sub">Damaged returns{p.damaged.refs?.length ? ` · ${p.damaged.refs.slice(0, 3).join(', ')}${p.damaged.refs.length > 3 ? '…' : ''}` : ''}</div></td>
                       <td className="nowrap">{p.pcs_per_set} pcs/set</td>
                       <td><Badge tone="red">{stockText(p.damaged.pcs, p.pcs_per_set)}</Badge></td>
-                      <td className="right">{money(p.damaged.cost_per_pcs)}</td>
+                      {seeCost && <td className="right">{money(p.damaged.cost_per_pcs)}</td>}
+                      <td><span className="cost-code">{codeOf(p.damaged, p.damaged.cost_per_pcs, settings)}</span></td>
                       <td className="right muted">sell under cost</td>
-                      <td className="right muted">—</td>
-                      <td className="right"><span className="muted">written off</span><div className="sub">{money(p.damaged.value)} at cost</div></td>
+                      {seeCost && <td className="right muted">—</td>}
+                      {seeCost && <td className="right"><span className="muted">written off</span><div className="sub">{money(p.damaged.value)} at cost</div></td>}
                     </tr>,
                   ] : []);
                 })}
@@ -190,7 +194,7 @@ function ProductModal({ id, categories, onClose, onChanged }) {
 
   if (!f) return <Modal title="Loading…" onClose={onClose}><Loading /></Modal>;
   const cat = findCategory(catalog, f.category);
-  const moveLabel = { grn: 'Received', 'grn-edit': 'GRN edited', 'grn-delete': 'GRN deleted', sale: 'Sold', return: 'Customer return', void: 'Bill cancelled', adjust: 'Adjustment', damaged: 'To damaged stock', repaired: 'Repaired (from damaged)', 'short-received': 'Short pieces received', 'short-undo': 'Short pieces taken back' };
+  const moveLabel = { grn: 'Received', 'grn-edit': 'GRN edited', 'grn-delete': 'GRN deleted', sale: 'Sold', return: 'Customer return', void: 'Bill cancelled', adjust: 'Adjustment', damaged: 'To damaged stock', repaired: 'Repaired (from damaged)', stocktake: 'Stock take', 'short-received': 'Short pieces received', 'short-undo': 'Short pieces taken back' };
 
   return (
     <Modal size="lg" title={id ? p.name : 'Add product manually'} subtitle={id ? `${p.code} · ${stockText(p.stock_pcs, p.pcs_per_set)} in stock` : 'Use this for opening stock. Normally products are added through Receive Goods.'} onClose={onClose}

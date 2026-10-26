@@ -322,7 +322,7 @@ export const supplierSummary = async (supplierId) => summarizeSupplier(await sup
 /** Map of customer id → its unpaid-able bills (credit balances and old balance) with paid / balance / status. */
 export async function customerLedgers(ids = null) {
   const of = ids ? { customer_id: { $in: ids } } : { customer_id: { $ne: null } };
-  const [customers, saleList, pays, cheques, returned] = await inParallel(
+  const [customers, saleList, pays, cheques, returned, bad] = await inParallel(
     () => find('customers', ids ? { id: { $in: ids } } : {}),
     () => find('sales', { ...of, status: 'completed', $expr: { $gt: [{ $abs: { $subtract: ['$total', '$paid_at_sale'] } }, 0.009] } },
       { project: { id: 1, invoice_no: 1, date: 1, due_date: 1, total: 1, paid_at_sale: 1, payment_type: 1, customer_id: 1 } }),
@@ -331,6 +331,8 @@ export async function customerLedgers(ids = null) {
     () => find('cheques', { direction: 'in', party: 'customer', status: { $in: ['pending', 'holding'] }, ...(ids ? { party_id: { $in: ids } } : {}) },
       { project: { party_id: 1, bill_id: 1, amount: 1 } }),
     () => find('cheques', { direction: 'in', party: 'customer', status: 'returned', ...(ids ? { party_id: { $in: ids } } : {}) }, RETURNED_PROJ),
+    // bad debts: dues the customer will never pay, written off (a loss)
+    () => find('bad_debts', of, { project: { customer_id: 1, sale_id: 1, amount: 1 } }),
   );
   const sales = saleList.sort(byDateId);
   const today = todayStr();
@@ -342,16 +344,18 @@ export async function customerLedgers(ids = null) {
       if (p.sale_id != null) linked[p.sale_id] = (linked[p.sale_id] || 0) + p.amount;
       else unlinked += p.amount;
     }
+    const badOf = {};   // sale id (or 'opening') → written off as a bad debt
+    for (const b of bad.filter((x) => x.customer_id === c.id)) { const k = b.sale_id ?? 'opening'; badOf[k] = (badOf[k] || 0) + b.amount; }
     const docs = [];
     if (c.opening_balance > 0) {
-      docs.push({ id: null, invoice_no: 'Opening balance', date: String(c.created_at).slice(0, 10), due_date: null, amount: c.opening_balance, linkedPaid: 0 });
+      docs.push({ id: null, invoice_no: 'Opening balance', date: String(c.created_at).slice(0, 10), due_date: null, amount: c.opening_balance, linkedPaid: badOf.opening || 0, bad_debt: badOf.opening || 0 });
     }
     for (const s of sales.filter((x) => x.customer_id === c.id)) {
       // a return on account: what the customer is owed comes off their other bills (oldest first)
       if (s.total - s.paid_at_sale < 0) { unlinked += round2(s.paid_at_sale - s.total); continue; }
       docs.push({
         id: s.id, invoice_no: s.invoice_no, date: s.date, due_date: s.due_date, total: s.total, paid_at_sale: s.paid_at_sale,
-        amount: round2(s.total - s.paid_at_sale), payment_type: s.payment_type, linkedPaid: linked[s.id] || 0,
+        amount: round2(s.total - s.paid_at_sale), payment_type: s.payment_type, linkedPaid: (linked[s.id] || 0) + (badOf[s.id] || 0), bad_debt: badOf[s.id] || 0,
       });
     }
     // the same bills again with the waiting cheques counted as paid: what is left after the cheques
@@ -720,7 +724,7 @@ export async function createSale(body, approve) {
 
     const reasons = [];
     const below = lines.filter((l) => l.qty > 0 && l.cost > 0 && l.net < l.cost);
-    if (below.length) reasons.push(`Sell below cost: ${below.map((l) => `${l.p.name} at Rs ${l.net} (cost Rs ${l.cost})`).join('; ')}`);
+    if (below.length) reasons.push(`Sell below cost: ${below.map((l) => `${l.p.name} at Rs ${l.net}`).join('; ')}`);   // no cost in the message: the cashier sees it too
     if (paymentType === 'credit' && customer.credit_limit > 0) {
       const after = round2((await customerSummary(customer.id)).balance + total - paid);
       // not approvable here: the Super Admin has to raise the limit first, then the bill goes through

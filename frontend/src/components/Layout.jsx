@@ -2,30 +2,30 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon, ThemeSwitch, Modal, useToast } from './ui.jsx';
 import { ChangePasswordModal } from './auth.jsx';
-import { api, isAdmin, isSuper, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime } from '../lib.js';
+import { api, isAdmin, isSuper, can, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime } from '../lib.js';
 import { useAuth, useFx, useSettings } from '../App.jsx';
 
 const BACKUP_SNOOZE = 'cargo-backup-snooze';   // the day "Remind me tomorrow" was pressed
 
 const NAV = [
-  { to: '/action-center', icon: 'bell', label: 'Action Center', super: true },
+  { to: '/action-center', icon: 'bell', label: 'Action Center', perm: 'action_center' },
   { group: 'Daily work' },
   { to: '/', icon: 'dashboard', label: 'Dashboard', end: true, hint: 'F2' },
   { to: '/pos', icon: 'cart', label: 'New Sale', hint: 'F3', primary: true },
   { to: '/sales', icon: 'receipt', label: 'Sales & Bills', hint: 'F9' },
-  { to: '/grn/new', icon: 'truck', label: 'Receive Goods', hint: 'GRN' },
+  { to: '/grn/new', icon: 'truck', label: 'Receive Goods', hint: 'GRN', perm: 'receive_goods' },
   { group: 'Records' },
   { to: '/stock', icon: 'box', label: 'Stock' },
-  { to: '/grn', icon: 'layers', label: 'Shipments (GRN)', end: true },
-  { to: '/extra-short', icon: 'adjust', label: 'Extra & Short' },
+  { to: '/grn', icon: 'layers', label: 'Shipments (GRN)', end: true, perm: 'receive_goods' },
+  { to: '/extra-short', icon: 'adjust', label: 'Extra & Short', perm: 'receive_goods' },
   { to: '/customers', icon: 'users', label: 'Customers' },
-  { to: '/suppliers', icon: 'factory', label: 'Suppliers' },
+  { to: '/suppliers', icon: 'factory', label: 'Suppliers', perm: 'suppliers' },
   { group: 'Money' },
-  { to: '/dues', icon: 'wallet', label: 'Payment Portal', hint: 'F7' },
-  { to: '/cheques', icon: 'cheque', label: 'Cheque Desk', cheques: true },
-  { to: '/reports', icon: 'chart', label: 'Reports' },
+  { to: '/dues', icon: 'wallet', label: 'Payment Portal', hint: 'F7', perm: 'dues' },
+  { to: '/cheques', icon: 'cheque', label: 'Cheque Desk', cheques: true, perm: 'cheques' },
+  { to: '/reports', icon: 'chart', label: 'Reports', perm: 'reports' },
   { to: '/sales-profit', icon: 'cash', label: 'Sales & Profit', super: true },
-  { to: '/settings', icon: 'settings', label: 'Settings' },
+  { to: '/settings', icon: 'settings', label: 'Settings', perm: 'settings' },
   { to: '/users', icon: 'shield', label: 'Users & Security', admin: true },
 ];
 
@@ -76,7 +76,7 @@ export default function Layout() {
   const [unseen, setUnseen] = useState(0);
   const [attn, setAttn] = useState(0);
   useEffect(() => {
-    if (!isSuper(user)) return undefined;
+    if (!can(user, 'action_center')) return undefined;
     const read = () => { try { return Number(localStorage.getItem('cargo-attention-seen')) || 0; } catch { return 0; } };
     const check = () => api.get(`/action-center?after=${read()}&level=attention`).then((l) => setAttn(l.length)).catch(() => {});
     check();
@@ -86,7 +86,7 @@ export default function Layout() {
     return () => { clearInterval(t); window.removeEventListener('cargo-attention-seen', reset); };
   }, [user]);
   useEffect(() => {
-    if (!isSuper(user)) return undefined;
+    if (!can(user, 'action_center')) return undefined;
     const seen = () => { try { return Number(localStorage.getItem('cargo-action-center-seen')) || 0; } catch { return 0; } };
     const check = () => {
       if (location.pathname === '/action-center') return setUnseen(0);
@@ -133,7 +133,7 @@ export default function Layout() {
           </div>
         </div>
         <nav>
-          {NAV.filter((i) => (!i.admin || isAdmin(user)) && (!i.super || isSuper(user))).map((item, i) =>
+          {NAV.filter((i) => (!i.admin || isAdmin(user)) && (!i.super || isSuper(user)) && (!i.perm || can(user, i.perm))).map((item, i) =>
             item.group ? (
               <div key={i} className="nav-group">{item.group}</div>
             ) : (

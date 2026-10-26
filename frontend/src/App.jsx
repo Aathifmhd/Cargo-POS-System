@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
-import { api, getToken, setToken, isAdmin, isSuper } from './lib.js';
+import { api, getToken, setToken, isAdmin, isSuper, can } from './lib.js';
 import { ToastProvider, Loading } from './components/ui.jsx';
 import { Login, ApprovalProvider } from './components/auth.jsx';
 import Layout from './components/Layout.jsx';
@@ -103,22 +103,26 @@ export default function App() {
                   <Route path="/pos" element={<POS />} />
                   <Route path="/sales" element={<Sales />} />
                   <Route path="/sales/:id" element={<SaleView />} />
-                  <Route path="/grn" element={<GrnList />} />
-                  <Route path="/grn/new" element={<GrnForm />} />
-                  <Route path="/grn/:id/edit" element={<GrnForm key="edit" />} />
-                  <Route path="/grn/:id" element={<GrnView />} />
-                  <Route path="/extra-short" element={<ExtraShort />} />
+                  {can(user, 'receive_goods') && <>
+                    <Route path="/grn" element={<GrnList />} />
+                    <Route path="/grn/new" element={<GrnForm />} />
+                    <Route path="/grn/:id/edit" element={<GrnForm key="edit" />} />
+                    <Route path="/grn/:id" element={<GrnView />} />
+                    <Route path="/extra-short" element={<ExtraShort />} />
+                  </>}
+                  {can(user, 'suppliers') && <>
+                    <Route path="/suppliers" element={<Suppliers />} />
+                    <Route path="/suppliers/:id" element={<SupplierView />} />
+                  </>}
+                  {can(user, 'reports') && <Route path="/reports" element={<Reports />} />}
                   <Route path="/stock" element={<Stock />} />
-                  <Route path="/suppliers" element={<Suppliers />} />
-                  <Route path="/suppliers/:id" element={<SupplierView />} />
                   <Route path="/customers" element={<Customers />} />
                   <Route path="/customers/:id" element={<CustomerView />} />
-                  <Route path="/dues" element={<Dues />} />
-                  <Route path="/cheques" element={<Cheques />} />
-                  <Route path="/reports" element={<Reports />} />
-                  <Route path="/settings" element={<Settings />} />
+                  {can(user, 'dues') && <Route path="/dues" element={<Dues />} />}
+                  {can(user, 'cheques') && <Route path="/cheques" element={<Cheques />} />}
+                  {can(user, 'settings') && <Route path="/settings" element={<Settings />} />}
                   {isAdmin(user) && <Route path="/users" element={<Users />} />}
-                  {isSuper(user) && <Route path="/action-center" element={<ActionCenter />} />}
+                  {can(user, 'action_center') && <Route path="/action-center" element={<ActionCenter />} />}
                   {isSuper(user) && <Route path="/sales-profit" element={<SalesProfit />} />}
                   <Route path="*" element={<Dashboard />} />
                 </Route>

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, useApi, lkr, niceDate, today, addDays, niceTime } from '../lib.js';
+import { api, useApi, lkr, niceDate, today, addDays, niceTime, seesCost } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Empty, Badge, StatusBadge, Segmented, Stat, useToast } from '../components/ui.jsx';
 import { SaleModal } from './SaleView.jsx';
+import { useAuth } from '../App.jsx';
 
 const RANGES = {
   today: () => [today(), today()],
@@ -12,6 +13,7 @@ const RANGES = {
 };
 
 export default function Sales() {
+  const seeCost = seesCost(useAuth().user);   // profit: Admins only
   const [openId, setOpenId] = useState(null);   // the bill shown in the pop-up
   const toast = useToast();
   // deleting a bill always asks for the Super Admin's password (the approval box appears by itself)
@@ -54,7 +56,7 @@ The stock goes back. This cannot be undone. The Super Admin's password is needed
       <div className="stats mb">
         <Stat icon="receipt" label="Bills" value={done.length} />
         <Stat icon="cash" tone="blue" label="Sales total" value={lkr(total)} />
-        <Stat icon="chart" tone="green" label="Profit" value={lkr(profit)} />
+        {seeCost && <Stat icon="chart" tone="green" label="Profit" value={lkr(profit)} />}
         <Stat icon="clock" tone={unpaid > 0 ? 'amber' : 'green'} label="Still unpaid" value={lkr(unpaid)} />
       </div>
 
@@ -65,7 +67,7 @@ The stock goes back. This cannot be undone. The Super Admin's password is needed
         ) : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Bill no</th><th>Date</th><th>Customer</th><th>Type</th><th className="right">Total</th><th className="right">Profit</th><th className="right">Balance</th><th>Status</th><th className="x" /></tr></thead>
+              <thead><tr><th>Bill no</th><th>Date</th><th>Customer</th><th>Type</th><th className="right">Total</th>{seeCost && <th className="right">Profit</th>}<th className="right">Balance</th><th>Status</th><th className="x" /></tr></thead>
               <tbody>
                 {rows.map((s) => (
                   <tr key={s.id} className={`click ${s.status === 'void' ? 'void' : ''}`} onClick={() => setOpenId(s.id)}>
@@ -74,7 +76,7 @@ The stock goes back. This cannot be undone. The Super Admin's password is needed
                     <td>{s.customer_name}<div className="sub">{s.item_count} item{s.item_count === 1 ? '' : 's'}</div></td>
                     <td><Badge tone={s.payment_type === 'cash' ? 'green' : 'amber'}>{s.payment_type === 'cash' ? 'Cash' : 'Credit'}</Badge></td>
                     <td className="right strong">{lkr(s.total)}</td>
-                    <td className={`right ${s.profit < 0 ? 'text-red' : ''}`}>{lkr(s.profit)}</td>
+                    {seeCost && <td className={`right ${s.profit < 0 ? 'text-red' : ''}`}>{lkr(s.profit)}</td>}
                     <td className="right">{s.balance > 0 ? lkr(s.balance) : '—'}</td>
                     <td><StatusBadge status={s.pay_status} /></td>
                     <td className="right">

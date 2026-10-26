@@ -1,12 +1,13 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useApi, lkr, inr, supMoney, int, niceDate, dueText, stockText, pct, niceTime } from '../lib.js';
+import { useApi, lkr, inr, supMoney, int, niceDate, dueText, stockText, pct, niceTime, seesCost } from '../lib.js';
 import { Card, Icon, Loading, ErrorBox, Stat, StatusBadge, Badge } from '../components/ui.jsx';
-import { useSettings } from '../App.jsx';
+import { useSettings, useAuth } from '../App.jsx';
 import FxBar from '../components/FxBar.jsx';
 import { useState } from 'react';
 import { SaleModal } from './SaleView.jsx';
 
 export default function Dashboard() {
+  const seeCost = seesCost(useAuth().user);   // profit, stock value and supplier dues: Admins only
   const { data: d, error, reload } = useApi('/dashboard');
   const [openSale, setOpenSale] = useState(null);
   const { settings } = useSettings();
@@ -37,17 +38,17 @@ export default function Dashboard() {
 
       <div className="stats">
         <Stat icon="receipt" label="Today's sales" value={lkr(d.today.sales)} sub={`${d.today.bills} bills · Cash ${lkr(d.today.cash)}`} />
-        <Stat icon="chart" tone="green" label="Today's profit" value={lkr(d.today.profit)} sub={`Margin ${pct(d.today.sales ? (d.today.profit / d.today.sales) * 100 : 0)}`} />
+        {seeCost && <Stat icon="chart" tone="green" label="Today's profit" value={lkr(d.today.profit)} sub={`Margin ${pct(d.today.sales ? (d.today.profit / d.today.sales) * 100 : 0)}`} />}
         <Stat icon="cash" tone="blue" label="Cash received today" value={lkr(d.collectedToday)} sub="Cash bills + collections" />
-        <Stat icon="layers" tone="violet" label="This month" value={lkr(d.month.sales)} sub={`Profit ${lkr(d.month.profit)}`} />
+        <Stat icon="layers" tone="violet" label="This month" value={lkr(d.month.sales)} sub={seeCost ? `Profit ${lkr(d.month.profit)}` : `${int(d.month.bills)} bills`} />
       </div>
 
       <div className="stats mt">
         <Stat icon="users" tone={d.receivables.overdue > 0 ? 'red' : 'default'} label="To collect" value={lkr(d.receivables.total)}
           sub={d.receivables.overdue > 0 ? `${lkr(d.receivables.overdue)} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=receivables')} />
-        <Stat icon="factory" tone={d.payables.overdue_inr > 0 ? 'red' : 'amber'} label="To pay suppliers" value={[d.payables.total_inr > 0 || !d.payables.total_lkr ? inr(d.payables.total_inr) : null, d.payables.total_lkr > 0 ? lkr(d.payables.total_lkr) : null].filter(Boolean).join(' + ')}
-          sub={d.payables.overdue_inr > 0 || d.payables.overdue_lkr > 0 ? `${[d.payables.overdue_inr > 0 && inr(d.payables.overdue_inr), d.payables.overdue_lkr > 0 && lkr(d.payables.overdue_lkr)].filter(Boolean).join(' + ')} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=payables')} />
-        <Stat icon="box" label="Stock value (cost)" value={lkr(d.stock.cost_value)} sub={`Can sell for ${lkr(d.stock.expected_value)}`} onClick={() => navigate('/stock')} />
+        {seeCost && <Stat icon="factory" tone={d.payables.overdue_inr > 0 ? 'red' : 'amber'} label="To pay suppliers" value={[d.payables.total_inr > 0 || !d.payables.total_lkr ? inr(d.payables.total_inr) : null, d.payables.total_lkr > 0 ? lkr(d.payables.total_lkr) : null].filter(Boolean).join(' + ')}
+          sub={d.payables.overdue_inr > 0 || d.payables.overdue_lkr > 0 ? `${[d.payables.overdue_inr > 0 && inr(d.payables.overdue_inr), d.payables.overdue_lkr > 0 && lkr(d.payables.overdue_lkr)].filter(Boolean).join(' + ')} overdue` : 'Nothing overdue'} onClick={() => navigate('/dues?tab=payables')} />}
+        {seeCost && <Stat icon="box" label="Stock value (cost)" value={lkr(d.stock.cost_value)} sub={`Can sell for ${lkr(d.stock.expected_value)}`} onClick={() => navigate('/stock')} />}
         <Stat icon="alert" tone={d.stock.low_count ? 'amber' : 'green'} label="Low stock items" value={int(d.stock.low_count)}
           sub={d.stock.low_count ? 'Need to re-order' : 'All good'} onClick={() => navigate('/stock?low=1')} />
       </div>
@@ -56,7 +57,7 @@ export default function Dashboard() {
         <Card title="Sales — last 7 days">
           <div className="bars">
             {d.last7.map((x, i) => (
-              <div key={x.date} className={`bar-col ${i === 6 ? 'today' : ''}`} title={`${niceDate(x.date)}: ${lkr(x.sales)} (profit ${lkr(x.profit)})`}>
+              <div key={x.date} className={`bar-col ${i === 6 ? 'today' : ''}`} title={`${niceDate(x.date)}: ${lkr(x.sales)}${seeCost ? ` (profit ${lkr(x.profit)})` : ''}`}>
                 <div className="bar-val">{x.sales ? (x.sales >= 1000 ? `${Math.round(x.sales / 1000)}k` : int(x.sales)) : ''}</div>
                 <div className="bar" style={{ height: `${(x.sales / max) * 100}%` }} />
                 <div className="bar-day">{i === 6 ? 'Today' : new Date(x.date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short' })}</div>

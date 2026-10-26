@@ -1,9 +1,30 @@
 import { Router } from 'express';
 import {
-  find, updateMany, fail, round2, sum, todayStr, addDays, getSettings, setSetting, DB_LABEL, COLLECTIONS, inParallel, stamp,
+  find, findOne, updateMany, fail, num, round2, sum, todayStr, addDays, getSettings, setSetting, DB_LABEL, COLLECTIONS, inParallel, stamp,
 } from '../db.js';
 import { supplierLedgers, customerLedgers, revalueGrns, customerLabel, customerPerson } from '../services.js';
-import { guard, audit, rankOf, RANK } from '../auth.js';
+import { guard, audit, rankOf, RANK, can } from '../auth.js';
+import { lankaNow } from '../cheques.js';
+
+/*
+ * The money window. "Start Fresh" (after a stock take) saves the moment the new period starts (settings.fresh_start_at):
+ * Sales & Profit and the Dashboard only count what happened after it. Nothing is deleted — a past period can still be
+ * looked at (?period=<stock take id>), between its own start and end.
+ * win: { after, before } — saved times ("YYYY-MM-DD HH:MM:SS", UTC); either can be empty.
+ */
+export const stampDate = (s) => (s ? lankaNow(new Date(String(s).replace(' ', 'T') + 'Z')).date : null);
+export const inWin = (stampValue, win) => (!win.after || String(stampValue || '') >= win.after) && (!win.before || String(stampValue || '') < win.before);
+/** The dates to read: the period asked for, inside the window. */
+const datesIn = (from, to, win) => [[from, stampDate(win.after)].filter(Boolean).sort().pop(), [to, stampDate(win.before)].filter(Boolean).sort()[0]];
+export async function windowFor(req) {
+  if (req.query.period) {
+    const st = await findOne('stocktakes', { id: num(req.query.period) }, { project: { period: 1, no: 1 } });
+    if (!st?.period) fail('That period was not found', 404);
+    return { after: st.period.from_stamp || null, before: st.period.to_stamp || null, no: st.no };
+  }
+  const s = await getSettings();
+  return { after: s.fresh_start_at || null, before: null, no: s.fresh_start_no || null };
+}
 
 /** Sales & Profit is the Super Admin's only. */
 const superOnly = (req) => { if (rankOf(req.user) < RANK.superadmin) fail('Only the Super Admin can see Sales & Profit', 403); };
@@ -63,6 +84,16 @@ r.put('/settings', async (req, res) => {
   for (const k of Object.keys(body)) if (k === 'default_exchange_rate' || k.startsWith('fx_') || k === 'session_secret') delete body[k];
   if ('catalog' in body) body.catalog = cleanCatalog(body.catalog);
   if ('costing_rate' in body && !(Number(body.costing_rate) > 0)) fail('The costing rate must be more than 0');
+  // the cost code: ten different letters, a repeat letter that is not one of them, and an amount added
+  if ('cost_code_word' in body || 'cost_code_repeat' in body) {
+    const w = String(body.cost_code_word ?? old.cost_code_word ?? '').toUpperCase().replace(/[^A-Z]/g, '');
+    const rep = String(body.cost_code_repeat ?? old.cost_code_repeat ?? '').toUpperCase().replace(/[^A-Z]/g, '');
+    if (w.length !== 10 || new Set(w).size !== 10) fail('The code word needs ten different letters (e.g. KNIGHTCLUB)');
+    if (rep.length !== 1) fail('The repeat letter is one letter (e.g. S)');
+    if (w.includes(rep)) fail(`The repeat letter "${rep}" can't be one of the code word's letters`);
+    body.cost_code_word = w; body.cost_code_repeat = rep;
+  }
+  if ('cost_code_add' in body && !(Number(body.cost_code_add) >= 0)) fail('The amount added for the code must be 0 or more');
   const changed = Object.keys(body).filter((k) => String(body[k] ?? '') !== String(old[k] ?? ''));
   if (!changed.length) return res.json(await publicSettings());
   await guard(req, `Settings changed: ${changed.join(', ')}`);
@@ -156,6 +187,7 @@ const lowStock = (p) => p.stock_pcs < p.reorder_sets * p.pcs_per_set;
 
 /* ---------------- dashboard ---------------- */
 r.get('/dashboard', async (req, res) => {
+  const win = await windowFor({ query: {} });
   const today = todayStr();
   const monthStart = today.slice(0, 8) + '01';
   const first = [monthStart, addDays(today, -6)].sort()[0];
@@ -169,7 +201,7 @@ r.get('/dashboard', async (req, res) => {
     () => find('sales', {}, { sort: { id: -1 }, limit: 6, project: { id: 1, invoice_no: 1, date: 1, created_at: 1, customer_name: 1, payment_type: 1, total: 1, status: 1 } }),
     () => find('grns', {}, { sort: { id: -1 }, limit: 4, project: { id: 1, grn_no: 1, date: 1, bale_no: 1, cargo_name: 1, total_lkr: 1, supplier_id: 1 } }),
   );
-  const between = (from, to) => sales.filter((s) => s.date >= from && s.date <= to);
+  const between = (from, to) => sales.filter((s) => s.date >= from && s.date <= to && inWin(s.created_at, win));
 
   const collectedToday = sum(paysToday, (p) => p.amount) + sum(between(today, today), (s) => s.paid_at_sale);
 
@@ -230,18 +262,22 @@ r.get('/dashboard', async (req, res) => {
     topProducts: Object.values(top).sort(desc('amount')).slice(0, 5),
     recentSales,
     recentGrns: recent.filter((g) => sNames[g.supplier_id] !== undefined).map(({ supplier_id, ...g }) => ({ ...g, supplier_name: sNames[supplier_id] })),
+    fresh: win.after ? { at: win.after, no: win.no } : null,
+    ...(can(req.user, 'suppliers') ? {} : { payables: null, recentGrns: [] }),
   });
 });
 
 /* ---------------- reports ---------------- */
 r.get('/reports/sales', async (req, res) => {
   superOnly(req);
-  const from = req.query.from || todayStr();
-  const to = req.query.to || todayStr();
-  const [all, payments] = await inParallel(
+  const win = await windowFor(req);
+  const [from, to] = datesIn(req.query.from || todayStr(), req.query.to || todayStr(), win);
+  const [allRaw, paymentsRaw] = await inParallel(
     () => find('sales', { date: inRange(from, to) }),
-    () => find('customer_payments', { date: inRange(from, to) }, { project: { amount: 1 } }),
+    () => find('customer_payments', { date: inRange(from, to) }, { project: { amount: 1, created_at: 1 } }),
   );
+  const all = allRaw.filter((s) => inWin(s.created_at, win));
+  const payments = paymentsRaw.filter((p) => inWin(p.created_at, win));
   const sales = all.filter((s) => s.status === 'completed');
   const t = billTotals(sales);
   const summary = {
@@ -280,7 +316,7 @@ r.get('/reports/sales', async (req, res) => {
     payment_type: s.payment_type, total: s.total, paid_at_sale: s.paid_at_sale, discount: s.discount, status: s.status,
     items: lines.filter((l) => l.sale_id === s.id).length,
   }));
-  res.json({ from, to, summary, daily, bills, products: Object.values(prods).sort(desc('amount')), customers: Object.values(custs).sort(desc('amount')) });
+  res.json({ from, to, fresh: win.after ? { at: win.after, before: win.before, no: win.no } : null, summary, daily, bills, products: Object.values(prods).sort(desc('amount')), customers: Object.values(custs).sort(desc('amount')) });
 });
 
 /**
@@ -293,14 +329,20 @@ r.get('/reports/sales', async (req, res) => {
  */
 r.get('/reports/profit', async (req, res) => {
   superOnly(req);
-  const from = req.query.from || todayStr();
-  const to = req.query.to || todayStr();
-  const sales = (await find('sales', { date: inRange(from, to), status: 'completed' })).sort((a, b) => (a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1));
-  const [lines, extraLines, shortLines, moves] = await inParallel(
+  const win = await windowFor(req);
+  res.json(await profitLoss(req.query.from || todayStr(), req.query.to || todayStr(), win));
+});
+
+/** Profit & loss between two dates, inside the window (see /reports/profit). */
+export async function profitLoss(fromDate, toDate, win = {}) {
+  const [from, to] = datesIn(fromDate, toDate, win);
+  const sales = (await find('sales', { date: inRange(from, to), status: 'completed' })).filter((s) => inWin(s.created_at, win)).sort((a, b) => (a.date === b.date ? a.id - b.id : a.date < b.date ? -1 : 1));
+  const [lines, extraLines, shortLines, moves, bads] = await inParallel(
     () => (sales.length ? find('sale_items', { sale_id: { $in: sales.map((s) => s.id) } }) : []),
     () => find('grn_items', { $or: [{ extra_status: 'free', extra_date: inRange(from, to) }, { extra_sets: { $gt: 0 } }] }),
     () => find('grn_items', { short_status: 'lost', short_date: inRange(from, to) }),
-    () => find('stock_moves', { type: { $in: ['adjust', 'damaged', 'repaired'] }, date: inRange(from, to), note: { $ne: 'Opening stock' } }),
+    () => find('stock_moves', { type: { $in: ['adjust', 'damaged', 'repaired', 'stocktake'] }, date: inRange(from, to), note: { $ne: 'Opening stock' } }).then((l) => l.filter((m) => inWin(m.created_at, win))),
+    () => find('bad_debts', { date: inRange(from, to) }).then((l) => l.filter((d) => inWin(d.created_at, win))),
   );
   const grnIds = [...new Set([...extraLines, ...shortLines].map((i) => i.grn_id))];
   const [grns, batches, products] = await inParallel(
@@ -367,20 +409,33 @@ r.get('/reports/profit', async (req, res) => {
     const p = prodOf[m.product_id];
     const amount = round2(Math.abs(m.pcs) * (batchOf[m.batch_id]?.cost_per_pcs ?? p?.cost_per_pcs ?? 0));
     const row = { date: m.date, ref: 'Stock correction', code: p?.code, name: p?.name || `#${m.product_id}`, pcs: Math.abs(m.pcs), amount, note: m.note || '' };
+    if (m.type === 'stocktake') {
+      if (m.pcs < 0) losses.push({ ...row, reason: 'stocktake', ref: m.ref || 'Stock take', note: 'Short on the stock take' });
+      else gains.push({ ...row, reason: 'stocktake_over', ref: m.ref || 'Stock take', note: 'More than the system on the stock take' });
+      continue;
+    }
     if (m.type === 'damaged') losses.push({ ...row, reason: 'damaged', ref: 'Stock Count', note: `${m.note || 'Damaged'} — moved to damaged stock` });
     else if (m.pcs < 0) losses.push({ reason: m.reason_code && m.reason_code !== 'nobill' ? m.reason_code : 'stock', ...row });
     else if (m.type === 'repaired') gains.push({ ...row, reason: 'repaired', note: `${m.note || 'Repaired'} — back from the damaged stock` });
     else gains.push({ reason: m.reason_code ? `add_${m.reason_code}` : 'stockfound', ...row });
   }
 
+  // bad debts: dues written off — what the customer never paid
+  if (bads.length) {
+    const cs = Object.fromEntries((await find('customers', { id: { $in: [...new Set(bads.map((d) => d.customer_id))] } })).map((c) => [c.id, c]));
+    for (const d of bads) {
+      losses.push({ reason: 'baddebt', date: d.date, ref: d.invoice_no, sale_id: d.sale_id, name: customerLabel(cs[d.customer_id]) || '—', pcs: 0, amount: round2(d.amount),
+        note: `Uncollectable — ${d.reason}${d.note ? `: ${d.note}` : ''} (by ${d.by})` });
+    }
+  }
   const invoiceProfit = round2(sum(invoices, (i) => i.profit));
   const extraProfit = round2(sum(gains.filter((g) => g.reason === 'extra'), (g) => g.amount));
   const stockGain = round2(sum(gains.filter((g) => g.reason !== 'extra'), (g) => g.amount));
   const lossTotal = round2(sum(losses, (l) => l.amount));
   const gross = round2(invoiceProfit + extraProfit + stockGain);
   const byReason = Object.entries(losses.reduce((m, l) => ({ ...m, [l.reason]: (m[l.reason] || 0) + l.amount }), {})).map(([reason, amount]) => ({ reason, amount: round2(amount), count: losses.filter((l) => l.reason === reason).length }));
-  res.json({
-    from, to,
+  return {
+    from, to, fresh: win.after || win.before ? { at: win.after, before: win.before, no: win.no } : null,
     summary: {
       bills: invoices.length, sales: round2(sum(invoices, (i) => i.total)), cost: round2(sum(invoices, (i) => i.cost)),
       invoice_profit: invoiceProfit, extra_profit: extraProfit, stock_gain: stockGain, gross_profit: gross, losses: lossTotal, net_profit: round2(gross - lossTotal),
@@ -389,8 +444,8 @@ r.get('/reports/profit', async (req, res) => {
     gains: gains.sort((a, b) => (a.date < b.date ? 1 : -1)),
     losses: losses.sort((a, b) => (a.date < b.date ? 1 : -1)),
     by_reason: byReason.sort((a, b) => b.amount - a.amount),
-  });
-});
+  };
+}
 
 /** Damaged stock: damaged returns kept apart (their cost is written off as a loss). */
 r.get('/reports/damaged', async (req, res) => {

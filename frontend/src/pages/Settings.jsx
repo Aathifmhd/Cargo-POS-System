@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { api, downloadFile, today, lkr, priceRules, autoPrices, niceDateTime } from '../lib.js';
+import { api, downloadFile, today, lkr, priceRules, autoPrices, niceDateTime, costCode, costDecode, isSuper } from '../lib.js';
 import { POS_KEYS } from './POS.jsx';
 import { PageHeader, Field, NumInput, Icon, useToast, ThemeSwitch } from '../components/ui.jsx';
-import { useSettings } from '../App.jsx';
+import { useSettings, useAuth } from '../App.jsx';
 import CatalogEditor from '../components/CatalogEditor.jsx';
 import DownloadReports from '../components/DownloadReports.jsx';
+import StockTake from '../components/StockTake.jsx';
 
 // The settings menu, grouped under headings
 const GROUPS = [
@@ -20,7 +21,9 @@ const GROUPS = [
     items: [
       { id: 'catalog', icon: 'layers', label: 'Categories & products', desc: 'Everything here feeds the Category, Products and Sizes choices on Receive Goods.' },
       { id: 'price', icon: 'tag', label: 'Price & billing', desc: 'How Receive Goods works out the expected selling price from the cost.' },
+      { id: 'costcode', icon: 'lock', label: 'Cost code', desc: 'The letters that hide the cost on the Stock list and New Sale — the code is of the cost + Rs 300.' },
       { id: 'pricing', icon: 'chart', label: 'Exchange rate', desc: 'The fixed rate all costs use, and the live INR rate for reference.' },
+      { id: 'stocktake', icon: 'box', super: true, label: 'Stock Take', desc: 'Count all the stock (once a year) and put the system right — short and extra pieces, with their value.' },
     ],
   },
   {
@@ -45,7 +48,9 @@ export default function Settings() {
   const { settings, reload } = useSettings();
   const toast = useToast();
   const [f, setF] = useState(settings);
-  const [section, setSection] = useState(readSection);
+  const superAdmin = isSuper(useAuth().user);   // Stock Take (and Start Fresh): the Super Admin's only
+  const [sectionPicked, setSection] = useState(readSection);
+  const section = sectionPicked === 'stocktake' && !superAdmin ? 'shop' : sectionPicked;
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v && v.target ? v.target.value : v }));
 
   const open = (id) => {
@@ -75,7 +80,7 @@ export default function Settings() {
           {GROUPS.map((g) => (
             <div key={g.heading} className="set-group">
               <div className="set-group-title">{g.heading}</div>
-              {g.items.map((i) => (
+              {g.items.filter((i) => !i.super || superAdmin).map((i) => (
                 <button key={i.id} type="button" className={`set-link ${section === i.id ? 'on' : ''}`} onClick={() => open(i.id)}>
                   <Icon name={i.icon} size={16} /> <span>{i.label}</span>
                 </button>
@@ -158,6 +163,9 @@ export default function Settings() {
             )}
 
             {section === 'reports' && <DownloadReports />}
+            {section === 'stocktake' && superAdmin && <StockTake />}
+
+            {section === 'costcode' && <CostCode f={f} set={set} SaveBar={SaveBar} />}
 
             {section === 'backup' && (
               <div className="set-form">
@@ -190,6 +198,41 @@ export default function Settings() {
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+/** Settings → Cost code: the code word, the repeat letter, the amount added — with the letters, a try-out and a check. */
+function CostCode({ f, set, SaveBar }) {
+  const [tryCost, setTryCost] = useState('1053');
+  const [check, setCheck] = useState('');
+  const word = String(f.cost_code_word || '').toUpperCase();
+  const rep = String(f.cost_code_repeat || '').toUpperCase();
+  const add = Number(f.cost_code_add ?? 300) || 0;
+  const problem = word.replace(/[^A-Z]/g, '').length !== 10 || new Set(word).size !== 10 ? 'The code word needs ten different letters.'
+    : rep.length !== 1 ? 'The repeat letter is one letter.' : word.includes(rep) ? `The repeat letter "${rep}" can't be one of the code word's letters.` : '';
+  const decoded = check ? costDecode(check, f) : null;
+  return (
+    <div className="stack set-form">
+      <p className="muted small">The ten letters stand for <b>1 to 9 and then 0</b>. A digit that repeats the one before it is written as the <b>repeat letter</b>, and the run starts again. Every product is coded at its <b>cost per piece + Rs {add}</b> — the real cost shown on the Stock list and New Sale stays as it is.</p>
+      <div className="grid grid-3">
+        <Field label="Code word (ten different letters)"><input className="input cc-input" value={f.cost_code_word || ''} maxLength={10} onChange={(e) => set('cost_code_word')(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))} /></Field>
+        <Field label="Repeat letter"><input className="input cc-input" value={f.cost_code_repeat || ''} maxLength={1} onChange={(e) => set('cost_code_repeat')(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))} /></Field>
+        <Field label="Code the cost + (Rs)" hint="Added to the cost per piece before coding"><NumInput value={f.cost_code_add} onChange={set('cost_code_add')} /></Field>
+      </div>
+      {problem && <div className="alert alert-red small"><Icon name="alert" size={16} /> {problem}</div>}
+      <div className="cc-map">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map((d) => <div key={d}><span>{d}</span><b>{word[(d + 9) % 10] || '?'}</b></div>)}
+        <div className="rep"><span>repeat</span><b>{rep || '?'}</b></div>
+      </div>
+      <div className="grid grid-3">
+        <Field label="Try it — a cost per piece (Rs)"><NumInput value={tryCost} onChange={setTryCost} /></Field>
+        <Field label={`Reads as (Rs ${Math.round(Number(tryCost) || 0) + add})`}><div className="cc-big">{problem ? '—' : costCode(tryCost, f)}</div></Field>
+        <Field label="Check a code" hint={check ? (decoded == null ? 'Not a code' : `= Rs ${decoded.toLocaleString()} → cost Rs ${(decoded - add).toLocaleString()}`) : 'Type a code to read it back'}>
+          <input className="input cc-input" value={check} onChange={(e) => setCheck(e.target.value.toUpperCase())} placeholder="e.g. KSBH" />
+        </Field>
+      </div>
+      <SaveBar keys={['cost_code_word', 'cost_code_repeat', 'cost_code_add']} />
     </div>
   );
 }

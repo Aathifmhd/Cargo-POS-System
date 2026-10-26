@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { find, findOne, insert, setById, deleteMany, fail, num, round2, sum, todayStr, inParallel } from '../db.js';
 import { customerLedgers, customerBills, summarizeCustomer, customerLabel, relabelCustomers } from '../services.js';
 import { guard } from '../auth.js';
+import { attention } from '../attention.js';
 import { cleanCheques, recordCheques } from '../cheques.js';
 
 const r = Router();
@@ -165,6 +166,27 @@ r.delete('/:id', async (req, res) => {
   if (history) await setById('customers', id, { deleted: 1, active: 0 });
   else { await deleteMany('customers', { id }); await deleteMany('customer_ids', { customer_id: id }); }
   res.json({ ok: true, kept_history: Boolean(history) });
+});
+
+/* ---------- bad debts: dues a customer will never pay (cheated, can't be found…) — written off as a loss ---------- */
+export const BAD_DEBT_REASONS = ['Not paying', "Can't be found", 'Cheated us', 'Business closed', 'Other'];
+r.post('/:id/bad-debts', async (req, res) => {
+  const c = await findOne('customers', { id: num(req.params.id) });
+  if (!c) fail('Customer not found', 404);
+  const saleId = req.body.sale_id ? num(req.body.sale_id) : null;
+  const bill = (await customerBills(c.id)).find((b) => (saleId ? b.id === saleId : b.id == null));
+  if (!bill) fail('That bill was not found');
+  if (!(bill.balance > 0.009)) fail(`${bill.invoice_no} has nothing left to collect`);
+  if (bill.cheque_pending > 0.009) fail(`A cheque of Rs ${bill.cheque_pending} is still waiting on ${bill.invoice_no} — pass it or mark it returned first`);
+  const reason = BAD_DEBT_REASONS.includes(req.body.reason) ? req.body.reason : 'Other';
+  const note = String(req.body.note || '').trim() || null;
+  if (reason === 'Other' && !note) fail('Type the reason');
+  await guard(req, `Mark as uncollectable: ${bill.invoice_no} of ${customerLabel(c)} — Rs ${bill.balance} (${reason}${note ? `: ${note}` : ''})`, 'superadmin', { always: true });
+  const d = await insert('bad_debts', {
+    customer_id: c.id, sale_id: saleId, invoice_no: bill.invoice_no, amount: bill.balance, date: todayStr(), reason, note, by: req.user.username,
+  });
+  await attention(`Uncollectable: ${customerLabel(c)} — ${bill.invoice_no}, Rs ${bill.balance} written off (${reason}${note ? `: ${note}` : ''}).`, { user: req.user });
+  res.json({ ...d, ...summarizeCustomer(await customerBills(c.id)) });
 });
 
 /* ---------- customer payments (collections) ---------- */

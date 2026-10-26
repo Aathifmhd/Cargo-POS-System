@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
-import { useApi, lkr, money, niceDate, int, margin, pct, niceTime } from '../lib.js';
+import { useApi, lkr, money, niceDate, int, margin, pct, niceTime, seesCost } from '../lib.js';
 import { PageHeader, Card, Icon, Loading, ErrorBox, Badge, StatusBadge, Modal } from '../components/ui.jsx';
+import { useAuth } from '../App.jsx';
 
 /** Loads one bill — shared by the page and the pop-up. */
 function useSale(id) {
@@ -17,6 +18,7 @@ const ReprintButton = ({ onClick }) => <button className="btn btn-primary" onCli
 
 /** The bill: items (per piece) and the summary. */
 function SaleDetails({ s }) {
+  const seeCost = seesCost(useAuth().user);
   return (
     <>
       {s.status === 'void' && <div className="alert alert-red mb"><Icon name="alert" /> This bill was cancelled and its stock returned. {s.notes}</div>}
@@ -24,7 +26,7 @@ function SaleDetails({ s }) {
         <Card title="Items" pad={false}>
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Product</th><th className="right">Qty</th><th className="right">Price</th><th className="right">Expected</th><th className="right">Cost</th><th className="right">Margin</th><th className="right">Amount</th></tr></thead>
+              <thead><tr><th>Product</th><th className="right">Qty</th><th className="right">Price</th><th className="right">Expected</th>{seeCost && <><th className="right">Cost</th><th className="right">Margin</th></>}<th className="right">Amount</th></tr></thead>
               <tbody>
                 {s.items.map((i) => (
                   <tr key={i.id}>
@@ -33,8 +35,8 @@ function SaleDetails({ s }) {
                     <td className="right nowrap">{int(i.pcs)} pcs</td>
                     <td className="right">{money(i.price / (i.pcs / i.qty || 1))}</td>
                     <td className="right muted">{money(i.expected_per_unit / (i.pcs / i.qty || 1))}</td>
-                    <td className="right muted">{money(i.cost_per_unit / (i.pcs / i.qty || 1))}</td>
-                    <td className={`right ${i.price < i.cost_per_unit ? 'text-red' : 'text-green'}`}>{pct(margin(i.price, i.cost_per_unit))}</td>
+                    {seeCost && <td className="right muted">{money(i.cost_per_unit / (i.pcs / i.qty || 1))}</td>}
+                    {seeCost && <td className={`right ${i.price < i.cost_per_unit ? 'text-red' : 'text-green'}`}>{pct(margin(i.price, i.cost_per_unit))}</td>}
                     <td className="right strong">{money(i.line_total)}</td>
                   </tr>
                 ))}
@@ -49,8 +51,8 @@ function SaleDetails({ s }) {
               <dt>Subtotal</dt><dd>{lkr(s.subtotal)}</dd>
               {s.discount > 0 && <><dt>Discount</dt><dd>- {lkr(s.discount)}</dd></>}
               <dt className="total">Total</dt><dd className="total">{lkr(s.total)}</dd>
-              <dt>Cost of goods</dt><dd>{lkr(s.cost_total)}</dd>
-              <dt>Profit</dt><dd className={s.profit < 0 ? 'text-red' : 'text-green'}>{lkr(s.profit)} ({pct(margin(s.total, s.cost_total))})</dd>
+              {seeCost && <><dt>Cost of goods</dt><dd>{lkr(s.cost_total)}</dd>
+              <dt>Profit</dt><dd className={s.profit < 0 ? 'text-red' : 'text-green'}>{lkr(s.profit)} ({pct(margin(s.total, s.cost_total))})</dd></>}
               {s.payment_type === 'credit' && <>
                 <dt>Paid at sale</dt><dd>{lkr(s.paid_at_sale)}</dd>
                 <dt>Due date</dt><dd>{niceDate(s.due_date)}</dd>

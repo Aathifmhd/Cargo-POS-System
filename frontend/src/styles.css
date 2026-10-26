@@ -1638,3 +1638,20 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
   .list-row { gap: 8px; }
   .list-row .badge { flex: none; }
 }
+
+/* phones: no top bar (Menu is in the tab bar at the bottom); New Sale keeps the tab bar, its Take Payment bar just above it */
+@media (max-width: 860px) {
+  .mobile-bar { display: none; }
+  .main { padding-top: 12px; }
+  .main.on-pos { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .pay-bar { bottom: calc(92px + env(safe-area-inset-bottom)); }
+  .till.has-lines { margin-bottom: calc(76px + env(safe-area-inset-bottom)); }
+}
+/* phones and tablets: tapping the calendar button taps the phone's own date box (invisible, over the button),
+   so the phone's date picker opens — a hidden 1px box can't be opened from a button on a phone */
+@media (pointer: coarse) {
+  .date-input > .input { padding-right: 48px; }
+  .date-input-btn { width: 40px; height: 40px; right: 2px; }
+  .date-input-native { right: 2px; top: 50%; bottom: auto; transform: translateY(-50%); width: 42px; height: 42px; opacity: 0; pointer-events: auto; z-index: 2; font-size: 16px; cursor: pointer; -webkit-appearance: none; appearance: none; }
+  .date-input-native::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+}

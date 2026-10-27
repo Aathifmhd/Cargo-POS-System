@@ -6,6 +6,7 @@ import { customerLedgers, supplierLedgers } from '../services.js';
 import { cargoLedgers } from '../cheques.js';
 import { profitLoss, stampDate } from './reports.js';
 import { sheet } from './exports.js';
+import { costCode } from '../costcode.js';
 
 /*
  * Settings → Stock Take: count all the stock (once a year, or whenever), item by item.
@@ -17,6 +18,54 @@ import { sheet } from './exports.js';
 const r = Router();
 /** The stock take and Start Fresh are the Super Admin's only. */
 const superOnly = (req) => { if (rankOf(req.user) < RANK.superadmin) fail('Only the Super Admin can do a stock take', 403); };
+
+/*
+ * The rows to count. A product whose stock is at one cost is one row (key: its id). A product with pieces at
+ * different costs (e.g. two GRNs at different prices) is one row for each cost — high cost, low cost — so each is
+ * counted on its own (by the cost code on the stickers) and the stock is valued at its real cost (key: "id:cents").
+ */
+const TIER_NAME = { low: 'Low cost', medium: 'Medium cost', high: 'High cost' };
+const cents = (v) => Math.round((Number(v) || 0) * 100);
+function tiersOf(costs) {
+  const list = [...new Set(costs)].sort((a, b) => a - b);
+  if (list.length < 2) return {};
+  const high = Math.max(1, Math.floor(list.length / 3));
+  const low = Math.ceil((list.length - high) / 2);
+  return Object.fromEntries(list.map((c, i) => [c, i < low ? 'low' : i < list.length - high ? 'medium' : 'high']));
+}
+async function countRows() {
+  const [products, batches, settings] = await Promise.all([
+    find('products', { active: { $ne: 0 } }, { project: { id: 1, code: 1, name: 1, category: 1, pcs_per_set: 1, stock_pcs: 1, cost_per_pcs: 1, damaged_pcs: 1 } }),
+    find('batches', {}, { project: { id: 1, product_id: 1, kind: 1, cost_per_pcs: 1, left_pcs: 1 } }),
+    getSettings(),
+  ]);
+  const byProduct = new Map();
+  for (const b of batches) { if (!byProduct.has(b.product_id)) byProduct.set(b.product_id, []); byProduct.get(b.product_id).push(b); }
+  products.sort((a, b) => String(a.category || '').localeCompare(String(b.category || '')) || a.name.localeCompare(b.name));
+  const rows = [];
+  for (const p of products) {
+    const list = byProduct.get(p.id) || [];
+    const groups = new Map();
+    for (const b of list.filter((x) => x.kind !== 'short' && x.left_pcs > 0)) {
+      const k = cents(b.cost_per_pcs);
+      if (!groups.has(k)) groups.set(k, { cost: k / 100, left: 0, ids: [] });
+      const g = groups.get(k); g.left += b.left_pcs; g.ids.push(b.id);
+    }
+    const base = { product_id: p.id, code: p.code, name: p.name, category: p.category, pcs_per_set: p.pcs_per_set, damaged_pcs: p.damaged_pcs || 0 };
+    // one cost (or pieces sold without stock still to make good): the product as one row
+    if (groups.size < 2 || list.some((x) => x.kind === 'short' && x.left_pcs < 0)) {
+      rows.push({ ...base, key: String(p.id), tier: null, stock_pcs: p.stock_pcs, cost_per_pcs: p.cost_per_pcs, cost_code: costCode(p.cost_per_pcs, settings), batch_ids: null });
+      continue;
+    }
+    const tiers = tiersOf([...groups.keys()]);
+    for (const [k, g] of [...groups.entries()].sort((a, b) => b[0] - a[0])) {   // dearest first
+      rows.push({ ...base, key: `${p.id}:${k}`, tier: tiers[k], stock_pcs: g.left, cost_per_pcs: g.cost, cost_code: costCode(g.cost, settings), batch_ids: g.ids });
+    }
+  }
+  return rows;
+}
+/** "High cost · KIHI" — how a row's cost is written on the count sheet (empty for a product at one cost). */
+const costLabel = (row) => (row.tier ? `${TIER_NAME[row.tier]} · ${row.cost_code}` : '');
 
 r.get('/stocktakes', async (req, res) => {
   superOnly(req);
@@ -31,29 +80,29 @@ r.get('/stocktakes/:id', async (req, res) => {
   if (!st) fail('Stock take not found', 404);
   if (st.status === 'closed') return res.json(st);
   const products = await find('products', { active: { $ne: 0 } }, { project: { id: 1, code: 1, name: 1, category: 1, pcs_per_set: 1, stock_pcs: 1, cost_per_pcs: 1, damaged_pcs: 1 }, sort: { name: 1 } });
-  res.json({ ...st, products });
+  res.json({ ...st, products, rows: await countRows() });
 });
 
-/** The count sheet (Excel): Product code, Product, System stock, Actual count (empty — to fill in on paper). */
+/** The count sheet (Excel): Product code, Product, Cost (high / low, for a product at more than one cost), System stock, Actual count (empty — to fill in on paper). */
 r.get('/stocktakes/:id/sheet', async (req, res) => {
   superOnly(req);
   const st = await findOne('stocktakes', { id: num(req.params.id) });
   if (!st) fail('Stock take not found', 404);
-  const products = await find('products', { active: { $ne: 0 } }, { project: { code: 1, name: 1, category: 1, stock_pcs: 1, pcs_per_set: 1 } });
-  products.sort((a, b) => String(a.category || '').localeCompare(String(b.category || '')) || a.name.localeCompare(b.name));
+  const rows = await countRows();
   const book = new ExcelJS.Workbook();
   const ws = book.addWorksheet('Count sheet', { views: [{ state: 'frozen', ySplit: 3 }], pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '3:3' } });
-  ws.columns = [{ width: 14 }, { width: 46 }, { width: 20 }, { width: 20 }];
+  ws.columns = [{ width: 14 }, { width: 46 }, { width: 20 }, { width: 20 }, { width: 20 }];
   ws.addRow([`${st.no} — ${st.title}`]).font = { bold: true, size: 14 };
   ws.addRow([`Count date ${st.date.slice(8, 10)}/${st.date.slice(5, 7)}/${st.date.slice(0, 4)} · counted by: ______________________`]).font = { color: { argb: 'FF475569' } };
-  const head = ws.addRow(['Product Code', 'Product', 'System Stock Count', 'Actual Count']);
+  const head = ws.addRow(['Product Code', 'Product', 'Cost', 'System Stock Count', 'Actual Count']);
   head.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   head.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }; c.alignment = { vertical: 'middle', horizontal: 'center' }; });
   const thin = { style: 'thin', color: { argb: 'FF94A3B8' } };
-  for (const p of products) {
-    const row = ws.addRow([p.code, p.name, p.stock_pcs, '']);
+  for (const p of rows) {
+    const row = ws.addRow([p.code, p.name, costLabel(p), p.stock_pcs, '']);
     row.height = 22;
     row.eachCell({ includeEmpty: true }, (c, i) => { c.border = { top: thin, bottom: thin, left: thin, right: thin }; c.alignment = { vertical: 'middle', horizontal: i >= 3 ? 'center' : 'left' }; });
+    if (p.tier) row.getCell(3).font = { bold: true, color: { argb: p.tier === 'high' ? 'FFB91C1C' : p.tier === 'low' ? 'FF15803D' : 'FFB45309' } };
   }
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${st.no}-count-sheet.xlsx"`);
@@ -76,19 +125,25 @@ r.post('/stocktakes/:id/upload', async (req, res) => {
   if (!ws) fail('The Excel file is empty');
   // the header row: "Product Code" and "Actual Count"
   const text = (c) => { const v = c?.value; return String(v && typeof v === 'object' ? v.result ?? v.text ?? (v.richText || []).map((x) => x.text).join('') : v ?? '').trim(); };
-  let headRow = 0; let codeCol = 0; let countCol = 0;
+  let headRow = 0; let codeCol = 0; let countCol = 0; let costCol = 0;
   ws.eachRow((row, i) => {
     if (headRow) return;
     row.eachCell((c, col) => {
       const t = text(c).toLowerCase();
       if (t === 'product code') codeCol = col;
       if (t === 'actual count') countCol = col;
+      if (t === 'cost') costCol = col;
     });
-    if (codeCol && countCol) headRow = i; else { codeCol = 0; countCol = 0; }
+    if (codeCol && countCol) headRow = i; else { codeCol = 0; countCol = 0; costCol = 0; }
   });
   if (!headRow) fail('Can\'t find the "Product Code" and "Actual Count" columns — use the count sheet downloaded from this stock take');
-  const products = await find('products', { active: { $ne: 0 } }, { project: { id: 1, code: 1 } });
-  const byCode = new Map(products.map((p) => [String(p.code).trim().toLowerCase(), p.id]));
+  // a product's rows by its code; a product at more than one cost is told apart by the Cost column
+  const byCode = new Map();
+  for (const row of await countRows()) {
+    const c = String(row.code).trim().toLowerCase();
+    if (!byCode.has(c)) byCode.set(c, []);
+    byCode.get(c).push(row);
+  }
   const counts = { ...(st.counts || {}) };
   const unknown = []; const bad = [];
   let set = 0; let empty = 0;
@@ -98,11 +153,14 @@ r.post('/stocktakes/:id/upload', async (req, res) => {
     if (!code) continue;
     const raw = text(row.getCell(countCol));
     if (raw === '') { empty++; continue; }
-    const pid = byCode.get(code.toLowerCase());
-    if (!pid) { unknown.push(code); continue; }
+    const options = byCode.get(code.toLowerCase());
+    if (!options) { unknown.push(code); continue; }
+    const cost = costCol ? text(row.getCell(costCol)).toLowerCase() : '';
+    const hit = options.length === 1 ? options[0] : options.find((o) => costLabel(o).toLowerCase() === cost);
+    if (!hit) { unknown.push(`${code}${cost ? ` (${cost})` : ''}`); continue; }
     const n = Number(raw.replace(/,/g, ''));
     if (!Number.isFinite(n) || n < 0) { bad.push(`${code} (${raw})`); continue; }
-    counts[pid] = { pcs: Math.round(n), by: req.user.username, at: stamp(), from: 'excel' };
+    counts[hit.key] = { pcs: Math.round(n), by: req.user.username, at: stamp(), from: 'excel' };
     set++;
   }
   await setById('stocktakes', st.id, { counts });
@@ -119,20 +177,21 @@ r.post('/stocktakes', async (req, res) => {
   res.json(st);
 });
 
-/** Save one item's count (pieces); an empty count clears it. */
+/** Save one row's count (pieces); an empty count clears it. key: the row (a product id, or "id:cents" for one of its costs). */
 r.put('/stocktakes/:id/count', async (req, res) => {
   superOnly(req);
   const st = await findOne('stocktakes', { id: num(req.params.id) });
   if (!st || st.status !== 'open') fail('This stock take is not open');
-  const pid = num(req.body?.product_id);
-  if (!(await findOne('products', { id: pid }, { project: { id: 1 } }))) fail('Product not found', 404);
+  const key = String(req.body?.key ?? req.body?.product_id ?? '');
+  if (!/^\d+(:\d+)?$/.test(key)) fail('Choose a product to count');
+  if (!(await findOne('products', { id: num(key.split(':')[0]) }, { project: { id: 1 } }))) fail('Product not found', 404);
   const v = req.body?.counted;
   const counts = { ...(st.counts || {}) };
-  if (v === '' || v === null || v === undefined) delete counts[pid];
+  if (v === '' || v === null || v === undefined) delete counts[key];
   else {
     const n = Math.round(num(v, -1));
     if (n < 0) fail('The count can\'t be below 0');
-    counts[pid] = { pcs: n, by: req.user.username, at: stamp() };
+    counts[key] = { pcs: n, by: req.user.username, at: stamp() };
   }
   await setById('stocktakes', st.id, { counts });
   res.json({ ok: true, counted: Object.keys(counts).length });
@@ -153,34 +212,37 @@ r.post('/stocktakes/:id/close', async (req, res) => {
   superOnly(req);
   const st = await findOne('stocktakes', { id: num(req.params.id) });
   if (!st || st.status !== 'open') fail('This stock take is not open');
-  const ids = Object.keys(st.counts || {}).map(Number);
-  if (!ids.length) fail('Nothing has been counted yet');
-  const todo = await find('products', { active: { $ne: 0 }, id: { $nin: ids } }, { project: { id: 1 } });
-  if (todo.length) fail(`${todo.length} product${todo.length === 1 ? ' is' : 's are'} not counted yet — type a count for every product (0 when there is none)`);
-  const products = await find('products', { id: { $in: ids } });
-  const diffs = products.map((p) => ({ p, counted: st.counts[p.id].pcs, d: st.counts[p.id].pcs - p.stock_pcs })).filter((x) => x.d !== 0);
-  await guard(req, `Close stock take ${st.no} (${st.title}): ${ids.length} items counted, ${diffs.length} differ`, 'superadmin', { always: true });
+  const counts = st.counts || {};
+  if (!Object.keys(counts).length) fail('Nothing has been counted yet');
+  const rows = await countRows();
+  const todo = rows.filter((x) => !counts[x.key]);
+  if (todo.length) fail(`${todo.length} row${todo.length === 1 ? ' is' : 's are'} not counted yet — type a count for every product${todo.some((x) => x.tier) ? ' and each of its costs' : ''} (0 when there is none)`);
+  const counted = rows.map((x) => ({ x, counted: counts[x.key].pcs, d: counts[x.key].pcs - x.stock_pcs }));
+  const diffs = counted.filter((c) => c.d !== 0);
+  const items = new Set(rows.map((x) => x.product_id)).size;
+  await guard(req, `Close stock take ${st.no} (${st.title}): ${items} items counted, ${diffs.length} differ`, 'superadmin', { always: true });
   const note = String(req.body?.note || '').trim() || null;
   const lines = [];
   await tx(async () => {
-    for (const { p, counted, d } of diffs) {
+    for (const { x, counted: pcs, d } of diffs) {
+      const at = x.tier ? ` (${TIER_NAME[x.tier].toLowerCase()} ${x.cost_code})` : '';
       let cost;
       if (d < 0) {
-        // short on the floor: off the stock (oldest batches first), at their cost
-        const taken = await moveStock(p.id, d, 'stocktake', st.no, `Stock take — short ${-d} pcs`, todayStr(), { reasonCode: 'stocktake' });
+        // short on the floor: off the stock at their cost — from that cost's batches when the product is at more than one cost
+        const taken = await moveStock(x.product_id, d, 'stocktake', st.no, `Stock take — short ${-d} pcs${at}`, todayStr(), { reasonCode: 'stocktake', ...(x.batch_ids ? { batchIds: x.batch_ids } : {}) });
         cost = sum(taken, (t) => Math.abs(t.pcs) * t.cost_per_pcs) / -d;
       } else {
-        // more than the system: into a "Stock Take" batch at the last GRN cost (no GRN batch is touched)
-        cost = await lastGrnCost(p);
-        await moveStock(p.id, d, 'stocktake', st.no, `Stock take — ${d} pcs more`, todayStr(), { newBatch: { kind: 'count', ref: st.no, cost_per_pcs: cost }, reasonCode: 'stocktake' });
+        // more than the system: into a "Stock Take" batch — at that cost, or at the last GRN cost (no GRN batch is touched)
+        cost = x.tier ? x.cost_per_pcs : await lastGrnCost(await findOne('products', { id: x.product_id }));
+        await moveStock(x.product_id, d, 'stocktake', st.no, `Stock take — ${d} pcs more${at}`, todayStr(), { newBatch: { kind: 'count', ref: st.no, cost_per_pcs: cost }, reasonCode: 'stocktake' });
       }
-      lines.push({ product_id: p.id, code: p.code, name: p.name, category: p.category, was: p.stock_pcs, counted, diff: d, cost_per_pcs: round2(cost), value: round2(Math.abs(d) * cost) });
+      lines.push({ key: x.key, product_id: x.product_id, code: x.code, name: x.name, category: x.category, tier: x.tier, cost_code: x.cost_code, was: x.stock_pcs, counted: pcs, diff: d, cost_per_pcs: round2(cost), value: round2(Math.abs(d) * cost) });
     }
-    const agreed = products.filter((p) => st.counts[p.id].pcs === p.stock_pcs).map((p) => ({ product_id: p.id, code: p.code, name: p.name, category: p.category, was: p.stock_pcs, counted: p.stock_pcs, diff: 0, cost_per_pcs: p.cost_per_pcs, value: 0 }));
+    const agreed = counted.filter((c) => c.d === 0).map(({ x }) => ({ key: x.key, product_id: x.product_id, code: x.code, name: x.name, category: x.category, tier: x.tier, cost_code: x.cost_code, was: x.stock_pcs, counted: x.stock_pcs, diff: 0, cost_per_pcs: round2(x.cost_per_pcs), value: 0 }));
     await setById('stocktakes', st.id, {
       status: 'closed', closed_at: stamp(), closed_by: req.user.username, note, lines: [...lines, ...agreed],
       period_from: (await getSettings()).fresh_start_at || null,   // this period began at the last Start Fresh (or the start)
-      items_counted: ids.length, items_differ: lines.length,
+      items_counted: items, items_differ: lines.length,
       short_value: round2(sum(lines.filter((l) => l.diff < 0), (l) => l.value)), over_value: round2(sum(lines.filter((l) => l.diff > 0), (l) => l.value)),
     });
   });
@@ -285,11 +347,11 @@ r.get('/stocktakes/:id/report', async (req, res) => {
     { h: 'Pcs', k: 'pcs', w: 7, total: true }, { h: 'Profit (Rs)', k: 'amount', money: true, total: true, w: 14 }, { h: 'Details', k: 'note', w: 36 },
   ], pl.gains);
   sheet(book, 'Stock after the count', `Stock after the count — ${st.no}`, `Counted and finished ${dmy(stampDate(st.closed_at))} by ${st.closed_by}${st.note ? ` · ${st.note}` : ''}`, [
-    { h: 'Product Code', k: 'code', w: 13 }, { h: 'Product', k: 'name', w: 32 }, { h: 'Category', k: 'category', w: 14 },
+    { h: 'Product Code', k: 'code', w: 13 }, { h: 'Product', k: 'name', w: 32 }, { h: 'Category', k: 'category', w: 14 }, { h: 'Cost', k: (l) => costLabel(l), w: 18 },
     { h: 'System said', k: 'was', w: 12, total: true }, { h: 'Counted', k: 'counted', w: 10, total: true }, { h: 'Difference', k: 'diff', w: 11, total: true },
     { h: 'Cost / pc (Rs)', k: 'cost_per_pcs', money: true, w: 14 }, { h: 'Stock value (Rs)', k: (l) => round2(l.counted * (l.cost_per_pcs || 0)), money: true, total: true, w: 16 },
     { h: 'Difference value (Rs)', k: (l) => (l.diff < 0 ? -l.value : l.value), money: true, total: true, w: 18 },
-  ], (st.lines || []).slice().sort((a, b) => String(a.category || '').localeCompare(String(b.category || '')) || a.name.localeCompare(b.name)));
+  ], (st.lines || []).slice().sort((a, b) => String(a.category || '').localeCompare(String(b.category || '')) || a.name.localeCompare(b.name) || (b.cost_per_pcs || 0) - (a.cost_per_pcs || 0)));
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${st.no}-profit-loss-and-stock.xlsx"`);
   res.send(Buffer.from(await book.xlsx.writeBuffer()));

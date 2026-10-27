@@ -1,12 +1,14 @@
 import { useMemo, useRef, useState } from 'react';
 import { api, useApi, lkr, inr, money, int, n, niceDate, niceDateTime, today, stockText, downloadFile, isSuper } from '../lib.js';
 import { useAuth } from '../App.jsx';
-import { Card, Icon, Loading, ErrorBox, Empty, Stat, Field, NumInput, DateInput, Segmented, Badge, Modal, useToast } from './ui.jsx';
+import { Card, Icon, Loading, ErrorBox, Empty, Stat, Field, NumInput, DateInput, Segmented, Badge, Modal, CostBadge, useToast } from './ui.jsx';
 
 /*
  * Settings → Stock Take: count every product (once a year), type in what is really there, and close it —
  * then the system's stock is put right: short pieces off the stock (a loss), extra pieces in at the last GRN cost (a gain).
  * The counts are saved as they are typed, so a count can go on over days; nothing changes in the stock until it is closed.
+ * A product with pieces at different costs is counted cost by cost (high cost, low cost — by the cost code on the
+ * stickers), so the stock is valued at what each piece really cost.
  */
 export default function StockTake() {
   const { data, error, loading, reload } = useApi('/stocktakes');
@@ -82,7 +84,7 @@ function StartForm({ onStarted }) {
 function Counting({ id, onDone }) {
   const toast = useToast();
   const { data: st, error, reload } = useApi(`/stocktakes/${id}`);
-  const [counts, setCounts] = useState(null);   // product id → typed value (as typed)
+  const [counts, setCounts] = useState(null);   // row key (product id, or "id:cents" for one of its costs) → typed value
   const [q, setQ] = useState('');
   const [show, setShow] = useState('all');
   const [closing, setClosing] = useState(false);
@@ -94,36 +96,40 @@ function Counting({ id, onDone }) {
   if (st && counts === null) setCounts(Object.fromEntries(Object.entries(st.counts || {}).map(([k, x]) => [k, String(x.pcs)])));
 
   const products = st?.products || [];
+  const rows = st?.rows || [];
   const typed = counts || {};
-  const isCounted = (p) => typed[p.id] !== undefined && typed[p.id] !== '';
-  const diff = (p) => (isCounted(p) ? Math.round(Number(typed[p.id])) - p.stock_pcs : null);
+  const isCounted = (r) => typed[r.key] !== undefined && typed[r.key] !== '';
+  const diff = (r) => (isCounted(r) ? Math.round(Number(typed[r.key])) - r.stock_pcs : null);
   const list = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return products.filter((p) => (!s || `${p.code} ${p.name} ${p.category || ''}`.toLowerCase().includes(s))
-      && (show === 'all' || (show === 'todo' ? !isCounted(p) : show === 'differ' ? isCounted(p) && diff(p) !== 0 : isCounted(p))));
-  }, [products, q, show, counts]); // eslint-disable-line
+    return rows.filter((r) => (!s || `${r.code} ${r.name} ${r.category || ''} ${r.tier ? `${r.tier} cost ${r.cost_code}` : ''}`.toLowerCase().includes(s))
+      && (show === 'all' || (show === 'todo' ? !isCounted(r) : show === 'differ' ? isCounted(r) && diff(r) !== 0 : isCounted(r))));
+  }, [rows, q, show, counts]); // eslint-disable-line
   if (error) return <ErrorBox error={error} onRetry={reload} />;
   if (!st || counts === null) return <Card><Loading /></Card>;
 
-  const counted = products.filter(isCounted);
-  const short = counted.filter((p) => diff(p) < 0);
-  const more = counted.filter((p) => diff(p) > 0);
-  const left = products.length - counted.length;   // every product needs a count (0 when there is none) before closing
-  const shortValue = short.reduce((t, p) => t + -diff(p) * p.cost_per_pcs, 0);
-  const moreValue = more.reduce((t, p) => t + diff(p) * p.cost_per_pcs, 0);
+  const counted = rows.filter(isCounted);
+  const short = counted.filter((r) => diff(r) < 0);
+  const more = counted.filter((r) => diff(r) > 0);
+  const left = rows.length - counted.length;   // every row needs a count (0 when there is none) before closing
+  const shortValue = short.reduce((t, r) => t + -diff(r) * r.cost_per_pcs, 0);
+  const moreValue = more.reduce((t, r) => t + diff(r) * r.cost_per_pcs, 0);
+  // the stock as counted, each piece at its own cost (high and low cost pieces apart)
+  const countedValue = counted.reduce((t, r) => t + Math.round(Number(typed[r.key])) * r.cost_per_pcs, 0);
+  const split = new Set(rows.filter((r) => r.tier).map((r) => r.product_id)).size;
 
-  const save = async (p, value) => {
-    const was = st.counts?.[p.id]?.pcs;
+  const save = async (r, value) => {
+    const was = st.counts?.[r.key]?.pcs;
     if (String(value) === String(was ?? '')) return;
     try {
-      await api.put(`/stocktakes/${id}/count`, { product_id: p.id, counted: value === '' ? null : value });
-      st.counts = { ...(st.counts || {}), [p.id]: value === '' ? undefined : { pcs: Number(value) } };
+      await api.put(`/stocktakes/${id}/count`, { key: r.key, counted: value === '' ? null : value });
+      st.counts = { ...(st.counts || {}), [r.key]: value === '' ? undefined : { pcs: Number(value) } };
     } catch (err) { toast(err.message, 'error'); }
   };
-  const next = (p) => {
-    const i = list.findIndex((x) => x.id === p.id);
+  const next = (r) => {
+    const i = list.findIndex((x) => x.key === r.key);
     const n = list[i + 1];
-    if (n) { inputs.current[n.id]?.focus(); inputs.current[n.id]?.select(); }
+    if (n) { inputs.current[n.key]?.focus(); inputs.current[n.key]?.select(); }
   };
   const close = async () => {
     setBusy(true);
@@ -162,9 +168,11 @@ function Counting({ id, onDone }) {
           <button className="btn btn-sm btn-primary" onClick={() => (left ? (toast(`${left} product${left === 1 ? '' : 's'} not counted yet — type 0 when there is none`, 'error'), setShow('todo')) : setClosing(true))}
             title={left ? `${left} still to count` : 'Finish and put the stock right'}><Icon name="check" size={14} /> Finish the stock count{left ? ` (${left} to count)` : ''}</button></>}>
         <p className="muted small">Started {niceDate(st.date)} by {st.started_by}. Type what is really there in pieces — <b>Enter</b> goes to the next item. Counts are saved as you go; the stock only changes when you finish the stock count. <b>Every product needs a count before finishing — type 0 when there is none.</b></p>
+        {split > 0 && <p className="muted small mt-s"><CostBadge tier="high" /> <CostBadge tier="low" /> {split} product{split === 1 ? ' has' : 's have'} pieces at different costs — count each cost on its own line, by the <b>cost code on the stickers</b>, so the stock is valued at its real cost.</p>}
       </Card>
       <div className="stats">
-        <Stat icon="box" tone="blue" label="Items counted" value={`${int(counted.length)} of ${int(products.length)}`} sub={`${int(products.length - counted.length)} still to count`} onClick={() => setShow('todo')} />
+        <Stat icon="box" tone="blue" label="Lines counted" value={`${int(counted.length)} of ${int(rows.length)}`} sub={`${int(left)} still to count`} onClick={() => setShow('todo')} />
+        <Stat icon="layers" tone="violet" label="Stock value counted" value={lkr(countedValue)} sub="each piece at its own cost" onClick={() => setShow('counted')} />
         <Stat icon="alert" tone={short.length ? 'red' : 'green'} label="Short (less than the system)" value={lkr(shortValue)} sub={`${short.length} item${short.length === 1 ? '' : 's'}`} onClick={() => setShow('differ')} />
         <Stat icon="plus" tone="green" label="More than the system" value={lkr(moreValue)} sub={`${more.length} item${more.length === 1 ? '' : 's'}`} onClick={() => setShow('differ')} />
         <Stat icon="chart" tone={moreValue - shortValue < 0 ? 'red' : 'green'} label="Net" value={lkr(moreValue - shortValue)} sub="when you finish the stock count" />
@@ -185,22 +193,24 @@ function Counting({ id, onDone }) {
       <Card pad={false}>
         {!list.length ? <Empty icon="box" title="Nothing here" text={show === 'todo' ? 'Every product is counted.' : 'Change the search or the filter.'} /> : (
           <div className="table-wrap" style={{ maxHeight: 620 }}><table className="table st-table">
-            <thead><tr><th>Code</th><th>Product</th><th className="right">System says</th><th className="right">Counted (pcs)</th><th className="right">Difference</th><th className="right">At cost</th></tr></thead>
-            <tbody>{list.map((p) => {
-              const d = diff(p);
+            <thead><tr><th>Code</th><th>Product</th><th className="right">Cost / pc</th><th className="right">System says</th><th className="right">Counted (pcs)</th><th className="right">Difference</th><th className="right">At cost</th></tr></thead>
+            <tbody>{list.map((r) => {
+              const d = diff(r);
               return (
-                <tr key={p.id} className={d == null ? '' : d === 0 ? 'st-ok' : d < 0 ? 'st-short' : 'st-more'}>
-                  <td className="muted strong">{p.code}</td>
-                  <td><b>{p.name}</b><div className="sub">{p.category || '—'} · {p.pcs_per_set} pcs/set{p.damaged_pcs > 0 ? ` · ${p.damaged_pcs} damaged (not counted here)` : ''}</div></td>
-                  <td className="right nowrap">{int(p.stock_pcs)} pcs<div className="sub">{stockText(p.stock_pcs, p.pcs_per_set)}</div></td>
+                <tr key={r.key} className={`${d == null ? '' : d === 0 ? 'st-ok' : d < 0 ? 'st-short' : 'st-more'} ${r.tier ? 'st-split' : ''}`}>
+                  <td className="muted strong">{r.code}</td>
+                  <td><b>{r.name}</b>{r.tier && <> <CostBadge tier={r.tier} /></>}
+                    <div className="sub">{r.category || '—'} · {r.pcs_per_set} pcs/set{r.tier ? <> · code <span className="cost-code">{r.cost_code}</span></> : ''}{r.damaged_pcs > 0 && !r.tier ? ` · ${r.damaged_pcs} damaged (not counted here)` : ''}</div></td>
+                  <td className="right nowrap">{money(r.cost_per_pcs)}</td>
+                  <td className="right nowrap">{int(r.stock_pcs)} pcs<div className="sub">{stockText(r.stock_pcs, r.pcs_per_set)}</div></td>
                   <td className="right">
-                    <input ref={(el) => { inputs.current[p.id] = el; }} className="input st-input" inputMode="numeric" value={typed[p.id] ?? ''} placeholder="—"
-                      onChange={(e) => setCounts({ ...typed, [p.id]: e.target.value.replace(/[^\d]/g, '') })}
-                      onBlur={(e) => save(p, e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(p, e.target.value); next(p); } }} />
+                    <input ref={(el) => { inputs.current[r.key] = el; }} className="input st-input" inputMode="numeric" value={typed[r.key] ?? ''} placeholder="—"
+                      onChange={(e) => setCounts({ ...typed, [r.key]: e.target.value.replace(/[^\d]/g, '') })}
+                      onBlur={(e) => save(r, e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(r, e.target.value); next(r); } }} />
                   </td>
                   <td className="right nowrap">{d == null ? <span className="muted">—</span> : d === 0 ? <span className="badge badge-green">agrees</span> : <b className={d < 0 ? 'text-red' : 'text-green'}>{d > 0 ? '+' : ''}{int(d)} pcs</b>}</td>
-                  <td className="right">{d ? money(Math.abs(d) * p.cost_per_pcs) : <span className="muted">—</span>}</td>
+                  <td className="right">{d ? money(Math.abs(d) * r.cost_per_pcs) : <span className="muted">—</span>}</td>
                 </tr>
               );
             })}</tbody>
@@ -209,8 +219,8 @@ function Counting({ id, onDone }) {
       </Card>
       {adding && <NewProduct products={products} onClose={() => setAdding(false)} onAdded={async (p, count) => {
         setAdding(false);
-        await api.put(`/stocktakes/${id}/count`, { product_id: p.id, counted: count });
-        setCounts({ ...typed, [p.id]: String(count) });
+        await api.put(`/stocktakes/${id}/count`, { key: String(p.id), counted: count });
+        setCounts({ ...typed, [String(p.id)]: String(count) });
         reload();
         toast(`${p.name} (${p.code}) added — counted ${count} pcs`);
       }} />}
@@ -220,14 +230,15 @@ function Counting({ id, onDone }) {
             <button className="btn btn-primary" onClick={close} disabled={busy}><Icon name="check" size={15} /> {busy ? 'Finishing…' : 'Yes, finish and put the stock right'}</button></>}>
           <div className="stack">
             <div className="chq-ask">
-              <div><span>Counted</span><b>{int(counted.length)} items</b></div>
-              <div><span>Differ</span><b>{int(short.length + more.length)} items</b></div>
+              <div><span>Counted</span><b>{int(counted.length)} lines</b></div>
+              <div><span>Differ</span><b>{int(short.length + more.length)} lines</b></div>
+              <div><span>Stock value</span><b>{lkr(countedValue)}</b></div>
               <div><span>Short</span><b className="text-red">{lkr(shortValue)}</b></div>
               <div><span>More</span><b className="text-green">{lkr(moreValue)}</b></div>
             </div>
             <div className="st-close-rules">
-              <div className="st-rule short"><Icon name="minus" size={16} /><span><b>Short pieces</b> come off the stock at their cost, as a <b>loss</b>.{short.length ? ` (${short.length} item${short.length === 1 ? '' : 's'} · ${lkr(shortValue)})` : ''}</span></div>
-              <div className="st-rule more"><Icon name="plus" size={16} /><span><b>Extra pieces</b> go into their own <b>"{st.no}"</b> batch at the last GRN cost, as a <b>gain</b>. <b>No GRN is touched.</b>{more.length ? ` (${more.length} item${more.length === 1 ? '' : 's'} · ${lkr(moreValue)})` : ''}</span></div>
+              <div className="st-rule short"><Icon name="minus" size={16} /><span><b>Short pieces</b> come off the stock at their cost (high or low cost pieces, as counted), as a <b>loss</b>.{short.length ? ` (${short.length} item${short.length === 1 ? '' : 's'} · ${lkr(shortValue)})` : ''}</span></div>
+              <div className="st-rule more"><Icon name="plus" size={16} /><span><b>Extra pieces</b> go into their own <b>"{st.no}"</b> batch — at the cost they were counted at, or the last GRN cost — as a <b>gain</b>. <b>No GRN is touched.</b>{more.length ? ` (${more.length} item${more.length === 1 ? '' : 's'} · ${lkr(moreValue)})` : ''}</span></div>
             </div>
             <p className="muted small">Both show in Sales &amp; Profit → Profit &amp; loss.</p>
             <Field label="A note about this count"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. who counted, anything unusual" /></Field>
@@ -350,8 +361,8 @@ function ClosedView({ id, onClose }) {
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Code</th><th>Product</th><th className="right">System said</th><th className="right">Counted</th><th className="right">Difference</th><th className="right">Cost / pc</th><th className="right">Value</th></tr></thead>
             <tbody>{lines.map((l) => (
-              <tr key={l.product_id}>
-                <td className="muted strong">{l.code}</td><td><b>{l.name}</b><div className="sub">{l.category || '—'}</div></td>
+              <tr key={l.key || l.product_id}>
+                <td className="muted strong">{l.code}</td><td><b>{l.name}</b>{l.tier && <> <CostBadge tier={l.tier} /></>}<div className="sub">{l.category || '—'}{l.tier ? <> · code <span className="cost-code">{l.cost_code}</span></> : ''}</div></td>
                 <td className="right">{int(l.was)}</td><td className="right">{int(l.counted)}</td>
                 <td className="right">{l.diff === 0 ? <span className="badge badge-green">agreed</span> : <b className={l.diff < 0 ? 'text-red' : 'text-green'}>{l.diff > 0 ? '+' : ''}{int(l.diff)}</b>}</td>
                 <td className="right">{money(l.cost_per_pcs)}</td>

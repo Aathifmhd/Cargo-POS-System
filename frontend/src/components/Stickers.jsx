@@ -20,7 +20,6 @@ export const STICKER_DEFAULT = {
   name: 8,               // product name size, pt
   info: 9,               // pieces and cost code size, pt
   show_name: true, show_pcs: true, show_cc: true, show_sizes: true, show_sup: true,
-  cc_of: 'pcs',          // the cost code of: 'pcs' (one piece) or 'set'
   border: false,         // a thin line round each sticker (for trying out on plain paper)
 };
 export const stickerDesign = (settings) => {
@@ -103,8 +102,8 @@ export function printStickers(stickers, d) {
     });
 }
 
-/** A GRN line's cost code for its sticker (of one piece, or of the set). */
-export const stickerCC = (it, d, settings) => codeOf(null, d.cc_of === 'set' ? it.landed_per_pcs_lkr * (it.pcs_per_set || 1) : it.landed_per_pcs_lkr, settings);
+/** A GRN line's cost code for its sticker (of one piece, as on Stock and New Sale). */
+export const stickerCC = (it, d, settings) => codeOf(null, it.landed_per_pcs_lkr, settings);
 
 /**
  * What to print for a GRN: one sticker for every set, each with the pieces per set.
@@ -188,12 +187,6 @@ export function StickerDesign({ f, set, SaveBar, settings }) {
         {tick('show_sizes', 'Sizes')}
         {tick('border', 'Line round each sticker (for a test on plain paper)')}
       </div>
-      <Field label="Cost code on the sticker is of">
-        <select className="input" value={d.cc_of} onChange={(e) => put({ cc_of: e.target.value })} style={{ maxWidth: 260 }}>
-          <option value="pcs">One piece (as on Stock and New Sale)</option>
-          <option value="set">The whole set</option>
-        </select>
-      </Field>
       <div className="sticker-preview">
         <div className="muted small">Preview — one row of the roll</div>
         <StickerSheet d={{ ...safe, border: true }} stickers={Array.from({ length: safe.cols }, () => sample)} />
@@ -231,7 +224,7 @@ export function ManualStickerModal({ onClose }) {
       const t = String(code).trim().toLowerCase();   // still typing a code: no warning yet
       return upd(r.key, { code, found: t && !(products || []).some((x) => String(x.code).toLowerCase().startsWith(t)) ? false : null });
     }
-    const cc = p.cost_code && d.cc_of !== 'set' ? p.cost_code : stickerCC({ landed_per_pcs_lkr: p.cost_per_pcs || 0, pcs_per_set: p.pcs_per_set }, d, settings);
+    const cc = p.cost_code ? p.cost_code : stickerCC({ landed_per_pcs_lkr: p.cost_per_pcs || 0, pcs_per_set: p.pcs_per_set }, d, settings);
     upd(r.key, { code: p.code, name: p.name, cc, sup: supNo(p.supplier_code), pcs: p.pcs_per_set || 1, sizes: sizesText(p.sizes), found: true });
   };
   const addRow = () => {

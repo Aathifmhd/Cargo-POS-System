@@ -53,7 +53,7 @@ export function Sticker({ d, code, name, pcs, cc, sizes, sup }) {
           {(d.show_cc || showSup) && (
             <span className="st-right" style={{ fontSize: `${d.info}pt` }}>
               {d.show_cc && <b className="st-cc">{cc}</b>}
-              {showSup && <b className="st-sup">{supNo(sup)}</b>}
+              {showSup && <span className="st-sup">{supNo(sup)}</span>}
             </span>
           )}
         </div>

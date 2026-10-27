@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { find, findOne, insert, setById, deleteMany, fail, num, round2, sum, todayStr, inParallel } from '../db.js';
-import { customerLedgers, customerBills, summarizeCustomer, customerLabel, relabelCustomers } from '../services.js';
+import { customerLedgers, customerBills, summarizeCustomer, customerLabel, relabelCustomers, nextPartyCode } from '../services.js';
 import { guard } from '../auth.js';
 import { attention } from '../attention.js';
 import { cleanCheques, recordCheques } from '../cheques.js';
@@ -107,7 +107,7 @@ r.post('/', async (req, res) => {
   const photos = photosOf(req.body);
   // adding, editing or deleting a customer always needs the Super Admin's password
   await guard(req, `New customer ${customerLabel(d)} (credit limit Rs ${d.credit_limit}, old balance Rs ${d.opening_balance})`, 'superadmin', { always: true });
-  const c = await insert('customers', Object.fromEntries(FIELDS.map((f) => [f, d[f]])));
+  const c = await insert('customers', { ...Object.fromEntries(FIELDS.map((f) => [f, d[f]])), code: await nextPartyCode('customers') });
   await savePhotos(c.id, photos);
   res.json({ ...c, ...(await photoFlags(c.id)), balance: d.opening_balance, overdue: 0 });
 });

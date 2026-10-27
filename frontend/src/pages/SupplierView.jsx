@@ -34,7 +34,7 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
     } catch (e) { toast(e.message, 'error'); }
   };
   const openBills = s.bills.filter((b) => b.balance > 0);
-  const subtitle = [s.contact_person, s.city, s.state, s.phone].filter(Boolean).join(' · ');
+  const subtitle = [s.code, s.contact_person, s.city, s.state, s.phone].filter(Boolean).join(' · ');
 
   const actions = <>
     {/* only a supplier with nothing due can be deleted (Super Admin) */}
@@ -104,6 +104,7 @@ function SupplierScreen({ id, modal, onClose, onChanged }) {
       <div className="stack">
         <Card title="Supplier details">
           <dl className="info-list">
+            <dt>Supplier code</dt><dd><b>{s.code || '—'}</b></dd>
             <dt>Contact</dt><dd>{s.contact_person || '—'}</dd>
             <dt>Phone</dt><dd>{s.phone || '—'}</dd>
             <dt>WhatsApp</dt><dd>{s.whatsapp ? <a href={`https://wa.me/${s.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noreferrer">{s.whatsapp}</a> : '—'}</dd>

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { find, findOne, insert, setById, updateMany, deleteMany, fail, num, round2, sum, todayStr, inParallel } from '../db.js';
-import { supplierLedgers, supplierBills, summarizeSupplier, revalueGrns, costingRate, isLocal } from '../services.js';
+import { supplierLedgers, supplierBills, summarizeSupplier, revalueGrns, costingRate, isLocal, nextPartyCode } from '../services.js';
 import { guard } from '../auth.js';
 import { cleanCheques, recordCheques } from '../cheques.js';
 import { supplierPaidSms, supplierChequesSms } from '../sms.js';
@@ -59,7 +59,7 @@ r.post('/', async (req, res) => {
   const d = clean(req.body);
   // adding, editing or deleting a supplier always needs the Super Admin's password
   await guard(req, `New supplier ${d.name}${d.opening_balance_inr > 0 ? ` (old balance ₹${d.opening_balance_inr})` : ''}`, 'superadmin', { always: true });
-  res.json(await insert('suppliers', Object.fromEntries(FIELDS.map((f) => [f, d[f]]))));
+  res.json(await insert('suppliers', { ...Object.fromEntries(FIELDS.map((f) => [f, d[f]])), code: await nextPartyCode('suppliers') }));
 });
 
 r.put('/:id', async (req, res) => {

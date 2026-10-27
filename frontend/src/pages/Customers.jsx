@@ -12,7 +12,7 @@ export default function Customers() {
   const [adding, setAdding] = useState(false);
   const rows = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return (data || []).filter((c) => (!onlyOwing || c.balance > 0) && (!s || `${c.name} ${c.shop_name || ''} ${c.city || ''} ${c.phone || ''}`.toLowerCase().includes(s)));
+    return (data || []).filter((c) => (!onlyOwing || c.balance > 0) && (!s || `${c.code || ''} ${c.name} ${c.shop_name || ''} ${c.city || ''} ${c.phone || ''}`.toLowerCase().includes(s)));
   }, [data, q, onlyOwing]);
   const owed = (data || []).reduce((a, b) => a + b.balance, 0);
   const overdue = (data || []).reduce((a, b) => a + b.overdue, 0);

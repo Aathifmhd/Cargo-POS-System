@@ -19,7 +19,7 @@ export const STICKER_DEFAULT = {
   code: 28,              // product code size, pt
   name: 8,               // product name size, pt
   info: 9,               // pieces and cost code size, pt
-  show_name: true, show_pcs: true, show_cc: true, show_sizes: true,
+  show_name: true, show_pcs: true, show_cc: true, show_sizes: true, show_sup: true,
   cc_of: 'pcs',          // the cost code of: 'pcs' (one piece) or 'set'
   border: false,         // a thin line round each sticker (for trying out on plain paper)
 };
@@ -29,24 +29,36 @@ export const stickerDesign = (settings) => {
   return { ...STICKER_DEFAULT, ...d };
 };
 
+/** The product code as printed on a sticker: the number only (P0016 → 0016). */
+export const labelCode = (code) => String(code ?? '').trim().replace(/^P(?=\d)/i, '');
+/** The supplier's number on a sticker: SU-0003 → 0003. */
+export const supNo = (code) => String(code ?? '').trim().replace(/^SU-?/i, '');
+
 /** A GRN line's sizes as one short line: "XL, L, M". */
 export const sizesText = (s) => (Array.isArray(s) ? s : String(s || '').split(/[,/]/)).map((x) => String(x).trim()).filter(Boolean).join(', ');
 
 /**
  * One sticker:  product name ............ cost code
- *               P0016  (big)
+ *                                         supplier no.
+ *               0016  (big)
  *               5 pieces/set ............ XL, L, M
  */
-export function Sticker({ d, code, name, pcs, cc, sizes }) {
+export function Sticker({ d, code, name, pcs, cc, sizes, sup }) {
+  const showSup = d.show_sup && String(sup || '').trim();
   return (
     <div className={`sticker ${d.border ? 'sticker-line' : ''}`} style={{ width: `${d.w}mm`, height: `${d.h}mm`, padding: `${d.pad}mm` }}>
-      {(d.show_name || d.show_cc) && (
-        <div className="st-top" style={{ fontSize: `${d.name}pt` }}>
+      {(d.show_name || d.show_cc || showSup) && (
+        <div className={`st-top ${showSup ? 'with-sup' : ''}`} style={{ fontSize: `${d.name}pt` }}>
           <span className="st-name">{d.show_name ? name : ''}</span>
-          {d.show_cc && <b className="st-cc" style={{ fontSize: `${d.info}pt` }}>{cc}</b>}
+          {(d.show_cc || showSup) && (
+            <span className="st-right" style={{ fontSize: `${d.info}pt` }}>
+              {d.show_cc && <b className="st-cc">{cc}</b>}
+              {showSup && <b className="st-sup">{supNo(sup)}</b>}
+            </span>
+          )}
         </div>
       )}
-      <div className="st-code" style={{ fontSize: `${d.code}pt` }}>{code}</div>
+      <div className="st-code" style={{ fontSize: `${d.code}pt` }}>{labelCode(code)}</div>
       {(d.show_pcs || d.show_sizes) && (
         <div className="st-info" style={{ fontSize: `${d.info}pt` }}>
           <span>{d.show_pcs ? `${int(pcs)} ${Number(pcs) === 1 ? 'piece' : 'pieces'}/set` : ''}</span>
@@ -76,12 +88,12 @@ export const stickerPageCss = (d) => `@page { size: ${d.cols * d.w + (d.cols - 1
 
 /**
  * Print stickers on this page (no print page), with the labels animation.
- * stickers: [{ code, name, pcs, sizes, cc }] — one entry a sticker.
+ * stickers: [{ code, name, pcs, sizes, cc, sup }] — one entry a sticker (sup: the supplier code).
  */
 export function printStickers(stickers, d) {
   const list = stickers.slice(0, 5000);
   if (!list.length) return Promise.resolve();
-  return withPrinting({ kind: 'label', title: `${list.length} sticker${list.length === 1 ? '' : 's'}`, sub: `${Math.ceil(list.length / d.cols)} row${Math.ceil(list.length / d.cols) === 1 ? '' : 's'} on the roll`, code: list[0].code },
+  return withPrinting({ kind: 'label', title: `${list.length} sticker${list.length === 1 ? '' : 's'}`, sub: `${Math.ceil(list.length / d.cols)} row${Math.ceil(list.length / d.cols) === 1 ? '' : 's'} on the roll`, code: labelCode(list[0].code) },
     async () => {
       const { win, cleanup } = await printFrame({
         title: 'Stickers', width: `${d.cols * d.w + (d.cols - 1) * d.gap}mm`, height: `${d.h}mm`, css: stickerPageCss(d),
@@ -111,7 +123,7 @@ export function StickerModal({ grn, onClose, asked }) {
     const d = stickerDesign(settings);
     const stickers = [];
     for (const l of lines.filter((x) => n(x.count) > 0 && n(x.pcs) > 0)) {
-      const one = { code: l.item.code, name: l.item.name, pcs: Math.round(n(l.pcs)), sizes: sizesText(l.item.sizes), cc: stickerCC(l.item, d, settings) };
+      const one = { code: l.item.code, name: l.item.name, pcs: Math.round(n(l.pcs)), sizes: sizesText(l.item.sizes), cc: stickerCC(l.item, d, settings), sup: grn.supplier_code };
       for (let k = 0; k < Math.min(Math.round(n(l.count)), 5000); k++) stickers.push(one);
     }
     if (!stickers.length) return;
@@ -151,7 +163,7 @@ export function StickerDesign({ f, set, SaveBar, settings }) {
   const tick = (k, label) => (
     <label className="check"><input type="checkbox" checked={!!d[k]} onChange={(e) => put({ [k]: e.target.checked })} /> {label}</label>
   );
-  const sample = { code: 'P0016', name: 'Denim Baggy Jeans', pcs: 5, sizes: 'XL, L, M', cc: codeOf(null, 1053, { ...settings, ...f }) };
+  const sample = { code: 'P0016', name: 'Denim Baggy Jeans', pcs: 5, sizes: 'XL, L, M', cc: codeOf(null, 1053, { ...settings, ...f }), sup: 'SU-0003' };
   const safe = { ...d, w: n(d.w) || 50, h: n(d.h) || 25, cols: Math.max(1, Math.round(n(d.cols)) || 1) };
   const testPrint = () => printStickers(Array.from({ length: safe.cols * 2 }, () => sample), { ...safe, gap: n(d.gap) || 0 });
   return (
@@ -166,12 +178,13 @@ export function StickerDesign({ f, set, SaveBar, settings }) {
         {num('left', 'Move left / right (mm)', 'To line up with the roll: + right, − left')}
         {num('code', 'Product code size (pt)', 'Printed the biggest')}
         {num('name', 'Product name size (pt)')}
-        {num('info', 'Cost code, pieces & sizes size (pt)')}
+        {num('info', 'Cost code, supplier code, pieces & sizes size (pt)')}
       </div>
       <div className="row gap wrap">
         {tick('show_name', 'Product name')}
         {tick('show_pcs', 'Number of pieces')}
         {tick('show_cc', 'Cost code')}
+        {tick('show_sup', 'Supplier code (under the cost code)')}
         {tick('show_sizes', 'Sizes')}
         {tick('border', 'Line round each sticker (for a test on plain paper)')}
       </div>
@@ -207,7 +220,7 @@ export function ManualStickerModal({ onClose }) {
   const d = stickerDesign(settings);
   const { data: products } = useApi('/products?active=all');
   const narrow = useNarrow();   // a phone: one card a sticker instead of the table
-  const blank = () => ({ key: Date.now() + Math.random(), code: '', name: '', cc: '', pcs: '', sizes: '', count: 1, found: null });
+  const blank = () => ({ key: Date.now() + Math.random(), code: '', name: '', cc: '', sup: '', pcs: '', sizes: '', count: 1, found: null });
   const [rows, setRows] = useState(() => [blank()]);
   const [openKey, setOpenKey] = useState(null);   // phone: the sticker card that is open (the others are folded); null = the last one
   const upd = (key, patch) => setRows((l) => l.map((x) => (x.key === key ? { ...x, ...patch } : x)));
@@ -219,7 +232,7 @@ export function ManualStickerModal({ onClose }) {
       return upd(r.key, { code, found: t && !(products || []).some((x) => String(x.code).toLowerCase().startsWith(t)) ? false : null });
     }
     const cc = p.cost_code && d.cc_of !== 'set' ? p.cost_code : stickerCC({ landed_per_pcs_lkr: p.cost_per_pcs || 0, pcs_per_set: p.pcs_per_set }, d, settings);
-    upd(r.key, { code: p.code, name: p.name, cc, pcs: p.pcs_per_set || 1, sizes: sizesText(p.sizes), found: true });
+    upd(r.key, { code: p.code, name: p.name, cc, sup: supNo(p.supplier_code), pcs: p.pcs_per_set || 1, sizes: sizesText(p.sizes), found: true });
   };
   const addRow = () => {
     const row = blank();
@@ -233,13 +246,13 @@ export function ManualStickerModal({ onClose }) {
     if (!total) return;
     const stickers = [];
     for (const r of filled) {
-      const one = { code: String(r.code).trim(), name: r.name, cc: r.cc, pcs: Math.round(n(r.pcs)), sizes: r.sizes };
+      const one = { code: String(r.code).trim(), name: r.name, cc: r.cc, sup: r.sup, pcs: Math.round(n(r.pcs)), sizes: r.sizes };
       for (let k = 0; k < Math.min(5000, Math.round(n(r.count))); k++) stickers.push(one);
     }
     printStickers(stickers, d);
   };
-  const cols = [d.show_name && 'name', d.show_cc && 'cc', d.show_pcs && 'pcs', d.show_sizes && 'sizes'].filter(Boolean);
-  const head = { name: 'Product name', cc: 'Cost code', pcs: 'Pieces / set', sizes: 'Sizes' };
+  const cols = [d.show_name && 'name', d.show_cc && 'cc', d.show_sup && 'sup', d.show_pcs && 'pcs', d.show_sizes && 'sizes'].filter(Boolean);
+  const head = { name: 'Product name', cc: 'Cost code', sup: 'Supplier no.', pcs: 'Pieces / set', sizes: 'Sizes' };
   // phone: products matching what is typed in a code box, to tap instead of typing the whole code
   const matches = (r) => {
     const t = String(r.code).trim().toLowerCase();
@@ -287,6 +300,7 @@ export function ManualStickerModal({ onClose }) {
               <div className="msk-grid">
                 {cols.includes('name') && <Field label="Product name" className="msk-wide"><input className="input" value={r.name} onChange={(e) => upd(r.key, { name: e.target.value })} /></Field>}
                 {cols.includes('cc') && <Field label="Cost code"><input className="input cc-input" value={r.cc} autoCapitalize="characters" onChange={(e) => upd(r.key, { cc: e.target.value.toUpperCase() })} /></Field>}
+                {cols.includes('sup') && <Field label="Supplier no."><input className="input cc-input" value={r.sup} inputMode="numeric" onChange={(e) => upd(r.key, { sup: supNo(e.target.value) })} /></Field>}
                 {cols.includes('pcs') && <Field label="Pieces / set"><NumInput value={r.pcs} inputMode="numeric" enterKeyHint="done" onChange={(v) => upd(r.key, { pcs: v })} /></Field>}
                 {cols.includes('sizes') && <Field label="Sizes" className="msk-wide"><input className="input" value={r.sizes} placeholder="e.g. XL, L, M" onChange={(e) => upd(r.key, { sizes: e.target.value })} /></Field>}
               </div>
@@ -300,7 +314,7 @@ export function ManualStickerModal({ onClose }) {
               </div>
               {String(r.code).trim() && (
                 <div className="msk-preview">
-                  <Sticker d={{ ...d, border: true }} code={String(r.code).trim()} name={r.name} pcs={r.pcs} cc={r.cc} sizes={r.sizes} />
+                  <Sticker d={{ ...d, border: true }} code={String(r.code).trim()} name={r.name} pcs={r.pcs} cc={r.cc} sup={r.sup} sizes={r.sizes} />
                 </div>
               )}
             </div>
@@ -329,6 +343,7 @@ export function ManualStickerModal({ onClose }) {
               </td>
               {cols.includes('name') && <td><input className="input" value={r.name} onChange={(e) => upd(r.key, { name: e.target.value })} /></td>}
               {cols.includes('cc') && <td style={{ width: 95 }}><input className="input cc-input" value={r.cc} onChange={(e) => upd(r.key, { cc: e.target.value.toUpperCase() })} /></td>}
+              {cols.includes('sup') && <td style={{ width: 90 }}><input className="input cc-input" value={r.sup} inputMode="numeric" onChange={(e) => upd(r.key, { sup: supNo(e.target.value) })} /></td>}
               {cols.includes('pcs') && <td style={{ width: 80 }}><NumInput value={r.pcs} onChange={(v) => upd(r.key, { pcs: v })} /></td>}
               {cols.includes('sizes') && <td style={{ width: 140 }}><input className="input" value={r.sizes} onChange={(e) => upd(r.key, { sizes: e.target.value })} /></td>}
               <td style={{ width: 80 }}>

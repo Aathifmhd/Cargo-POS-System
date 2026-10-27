@@ -1,7 +1,7 @@
 import {
   find, findOne, insert, setById, updateOne, updateMany, deleteMany, tx, fail, round2, num, sum, todayStr, addDays, getSettings,
   nextNo, nextProductCode, allocate, dueStatus, moveStock, recomputeProductCost, grnItemPcs, byDateId, stamp, inParallel,
-  itemShortPcs, unbilledExtraInr, setSetting, syncGrnBatch, insertAll, productCostPc, supplierAdjustOf,
+  itemShortPcs, unbilledExtraInr, setSetting, syncGrnBatch, insertAll, productCostPc, supplierAdjustOf, distinct,
 } from './db.js';
 
 /* =========================================================
@@ -261,6 +261,27 @@ export async function setupCargos() {
   if (rebilled) await revalueGrns();
   if (added || rebilled) console.log(`Cargo list: ${added} added · supplier bills without extras: ${rebilled}`);
   return { added, rebilled };
+}
+
+/*
+ * Supplier and customer codes: SU-0001… (Indian and local suppliers alike) and CU-0016… (the shop's book already
+ * had customers 1–15). Shown on the details pop-ups and the GRN; the supplier's number (without SU-) on the stickers.
+ */
+export const PARTY_CODES = { suppliers: { prefix: 'SU-', after: 0 }, customers: { prefix: 'CU-', after: 15 } };
+/** The next free code: one more than the highest given (never below the starting number). */
+export async function nextPartyCode(name) {
+  const { prefix, after } = PARTY_CODES[name];
+  const codes = await distinct(name, 'code', { code: { $regex: new RegExp(`^${prefix}[0-9]+$`) } });
+  const top = codes.reduce((m, c) => Math.max(m, parseInt(c.slice(prefix.length), 10) || 0), after);
+  return prefix + String(top + 1).padStart(4, '0');
+}
+/** Suppliers and customers without a code get one, oldest first (safe on every start). */
+export async function setupPartyCodes() {
+  for (const name of Object.keys(PARTY_CODES)) {
+    for (const x of await find(name, { $or: [{ code: null }, { code: { $exists: false } }] }, { sort: { id: 1 }, project: { id: 1 } })) {
+      await setById(name, x.id, { code: await nextPartyCode(name) });
+    }
+  }
 }
 
 export async function reorderProductNames() {
@@ -636,7 +657,7 @@ export async function getGrn(id) {
     () => supplierBills(g.supplier_id),
   );
   if (!s) fail('GRN not found', 404);
-  Object.assign(g, { supplier_name: s.name, supplier_phone: s.phone, supplier_city: s.city });
+  Object.assign(g, { supplier_name: s.name, supplier_code: s.code || null, supplier_phone: s.phone, supplier_city: s.city });
   const prods = await productsById(items.map((i) => i.product_id), { code: 1, category: 1, subtype: 1, pname: 1 });
   g.items = items.filter((i) => prods[i.product_id]).map((i) => {
     const p = prods[i.product_id];

@@ -11,7 +11,7 @@ export default function Suppliers() {
   const [adding, setAdding] = useState(false);
   const rows = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return (data || []).filter((x) => !s || `${x.name} ${x.city || ''} ${x.phone || ''} ${x.contact_person || ''}`.toLowerCase().includes(s));
+    return (data || []).filter((x) => !s || `${x.code || ''} ${x.name} ${x.city || ''} ${x.phone || ''} ${x.contact_person || ''}`.toLowerCase().includes(s));
   }, [data, q]);
   // Indian suppliers in ₹, local ones in Rs — kept apart
   const owe = bothMoney(data, (b) => b.balance_inr);

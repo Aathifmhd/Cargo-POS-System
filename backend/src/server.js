@@ -17,7 +17,7 @@ import authRoutes from './routes/auth.js';
 import { requireAuth, initAuth } from './auth.js';
 import fxRoutes from './routes/fx.js';
 import { setOnRateChange, startFxTimer } from './fx.js';
-import { revalueGrns, upgradeCosting, relabelCustomers, reorderProductNames, setupCargos } from './services.js';
+import { revalueGrns, upgradeCosting, relabelCustomers, reorderProductNames, setupCargos, setupPartyCodes } from './services.js';
 import cargos from './routes/cargos.js';
 import { setupBatches } from './db.js';
 import { autoPassSoon } from './cheques.js';
@@ -30,6 +30,7 @@ import { setupSms, dueRemindersSoon } from './sms.js';
 await setup();
 await initAuth();
 await setupSms();
+await setupPartyCodes();   // SU-0001… and CU-0016… for suppliers and customers without one
 
 const app = express();
 app.use(cors());

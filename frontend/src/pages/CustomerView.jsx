@@ -58,7 +58,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
   };
   const openBills = c.bills.filter((b) => b.balance > 0);
   const limitUsed = c.credit_limit > 0 ? Math.min(100, (c.balance / c.credit_limit) * 100) : 0;
-  const subtitle = [custPerson(c), c.city, c.phone].filter(Boolean).join(' · ');
+  const subtitle = [c.code, custPerson(c), c.city, c.phone].filter(Boolean).join(' · ');
 
   const actions = <>
     {/* only a customer who owes nothing can be deleted (Super Admin) */}
@@ -142,6 +142,7 @@ function CustomerScreen({ id, modal, onClose, onChanged }) {
       <div className="stack">
         <Card title="Customer details">
           <dl className="info-list">
+            <dt>Customer code</dt><dd><b>{c.code || '—'}</b></dd>
             <dt>Shop</dt><dd>{c.shop_name || '—'}</dd>
             <dt>Customer</dt><dd>{c.name}</dd>
             <dt>NIC</dt><dd>{c.nic_no || '—'}</dd>

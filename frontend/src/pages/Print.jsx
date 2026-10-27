@@ -87,7 +87,7 @@ function GrnDoc({ g, settings }) {
       <div className="print-page">
         <ShopHead title="GOODS RECEIVED NOTE" no={g.grn_no} date={g.date} settings={settings} />
         <div className="print-meta">
-          <div><div className="muted">Supplier</div><b>{g.supplier_name}</b><div>{g.supplier_city}</div><div>Invoice: {g.supplier_invoice_no || '—'}</div>{g.supplier_bill_date && <div>Billed: {niceDate(g.supplier_bill_date)}</div>}</div>
+          <div><div className="muted">Supplier</div><b>{g.supplier_name}</b>{g.supplier_code && <div>Code: {g.supplier_code}</div>}<div>{g.supplier_city}</div><div>Invoice: {g.supplier_invoice_no || '—'}</div>{g.supplier_bill_date && <div>Billed: {niceDate(g.supplier_bill_date)}</div>}</div>
           <div className="right"><div>Cargo: <b>{g.cargo_name || '—'}</b></div><div>{g.currency === 'LKR' ? <b>Local purchase · Rs</b> : <>Rate: <b>1 INR = Rs {g.exchange_rate}</b></>}</div></div>
         </div>
         <table>

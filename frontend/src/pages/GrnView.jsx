@@ -40,7 +40,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
   const expectedValue = g.items.reduce((s, i) => s + (i.expected_per_set / (i.pcs_per_set || 1)) * Math.max(0, (i.sets + i.extra_sets - i.short_sets) * i.pcs_per_set + (i.odd_pcs || 0) + i.extra_pcs - i.short_pcs), 0);
 
   const title = `${g.grn_no} — ${g.supplier_name}`;
-  const subtitle = <>Received {niceDate(g.date)} · <StatusBadge status={g.pay_status} /> {g.balance_inr > 0 && dueText(g.due_date)}</>;
+  const subtitle = <>{g.supplier_code ? `${g.supplier_code} · ` : ''}Received {niceDate(g.date)} · <StatusBadge status={g.pay_status} /> {g.balance_inr > 0 && dueText(g.due_date)}</>;
   const actions = <>
     <button className="btn btn-danger" onClick={del}><Icon name="trash" /> Delete</button>
     <button className="btn" onClick={() => navigate(`/grn/${g.id}/edit`)} title="Fix a GRN entered wrongly (Super Admin)"><Icon name="edit" /> Edit GRN</button>
@@ -134,6 +134,7 @@ function GrnScreen({ id, modal, onClose, onChanged }) {
           </Card>
           <Card title="Supplier account">
             <dl className="kv">
+              {g.supplier_code && <><dt>Supplier code</dt><dd><b>{g.supplier_code}</b></dd></>}
               <dt>Payable for this GRN</dt><dd>{cur(g.payable_inr)}</dd>
               <dt>Paid</dt><dd className="text-green">{cur(g.paid_inr)}</dd>
               <dt className="total">Balance</dt><dd className={`total ${g.balance_inr > 0 ? 'text-red' : ''}`}>{cur(g.balance_inr)}</dd>

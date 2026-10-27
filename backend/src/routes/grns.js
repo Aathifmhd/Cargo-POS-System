@@ -13,13 +13,14 @@ r.get('/', async (req, res) => {
   const filter = {};
   if (req.query.supplier_id) filter.supplier_id = num(req.query.supplier_id);
   if (req.query.from || req.query.to) filter.date = { ...(req.query.from && { $gte: req.query.from }), ...(req.query.to && { $lte: req.query.to }) };
-  const [found, supplierList] = await inParallel(() => find('grns', filter), () => find('suppliers', {}, { project: { id: 1, name: 1 } }));
+  const [found, supplierList] = await inParallel(() => find('grns', filter), () => find('suppliers', {}, { project: { id: 1, name: 1, code: 1 } }));
   const names = Object.fromEntries(supplierList.map((s) => [s.id, s.name]));
+  const codes = Object.fromEntries(supplierList.map((s) => [s.id, s.code || null]));
   let rows = found;
-  rows = rows.filter((g) => names[g.supplier_id] !== undefined).map((g) => ({ ...g, supplier_name: names[g.supplier_id] }));
+  rows = rows.filter((g) => names[g.supplier_id] !== undefined).map((g) => ({ ...g, supplier_name: names[g.supplier_id], supplier_code: codes[g.supplier_id] }));
   if (req.query.q) {
     const q = contains(req.query.q);
-    rows = rows.filter((g) => [g.grn_no, g.bale_no, g.lr_no, g.cargo_name, g.supplier_name, g.supplier_invoice_no].some((v) => v && q.test(v)));
+    rows = rows.filter((g) => [g.grn_no, g.bale_no, g.lr_no, g.cargo_name, g.supplier_name, g.supplier_code, g.supplier_invoice_no].some((v) => v && q.test(v)));
   }
   rows = rows.sort(newestFirst).slice(0, 500);
   // attach payment status

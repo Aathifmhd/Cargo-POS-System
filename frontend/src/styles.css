@@ -2038,3 +2038,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .sms-test { flex-direction: column; }
   .sms-tpl textarea { min-height: 112px; }
 }
+/* sticker: the cost code with the supplier's number under it (same size) */
+.sticker .st-top.with-sup { align-items: flex-start; }
+.sticker .st-right { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; flex: none; }
+.sticker .st-sup { font-weight: 800; letter-spacing: .06em; }

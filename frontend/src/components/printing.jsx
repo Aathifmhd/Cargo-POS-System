@@ -61,7 +61,7 @@ function LabelArt({ code }) {
       <div className="pa-track">
         <div className="pa-strip">
           {Array.from({ length: 6 }, (_, k) => (
-            <div key={k} className="pa-label"><i className="w70" /><b>{code || 'P0016'}</b><i className="w50" /></div>
+            <div key={k} className="pa-label"><i className="w70" /><b>{code || '0016'}</b><i className="w50" /></div>
           ))}
         </div>
       </div>

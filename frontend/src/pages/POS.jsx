@@ -24,7 +24,7 @@ export const POS_KEYS = [
   ['* in code box', 'List every product'],
   ['↓ (empty code box)', 'Go to the bill'],
   ['↑ ↓', 'Move on the bill'],
-  ['Space', 'Edit the line (qty · price)'],
+  ['Space', 'Edit the line (qty · price) — Space again to close'],
   ['← → (editing)', 'Move between qty and price'],
   ['Enter (editing)', 'Keep the change · Esc to cancel'],
   ['P', 'Edit the price on the line'],
@@ -281,7 +281,8 @@ export default function POS() {
     const el = e.target;
     const isInput = el.tagName === 'INPUT';
     const stop = () => { e.preventDefault(); e.stopPropagation(); };
-    if (e.key === 'Enter') { stop(); return saveEdit(); }
+    // Enter or Space (the key that opened it) keeps the change and closes the line
+    if (e.key === 'Enter' || e.key === ' ') { stop(); return e.repeat ? undefined : saveEdit(); }
     if (e.key === 'Escape') { stop(); return setEdit(null); }
     const atStart = !isInput || el.selectionStart === 0;
     const atEnd = !isInput || el.selectionEnd === el.value.length;
@@ -607,7 +608,7 @@ export default function POS() {
                   <td className={`n ds ${r.disc ? '' : 'no-disc'}`}>{r.disc ? <><b>{r.disc_pct}%</b><em>{money(r.disc)}</em></> : '—'}</td>
                   <td className="n am"><b>{money(r.amount)}</b></td>
                   <td className="x">{edit?.i === i ? <>
-                    <button className="ln-ok" onClick={saveEdit} title="Keep (Enter)">✓</button>
+                    <button className="ln-ok" onClick={saveEdit} title="Keep (Enter or Space)">✓</button>
                     <button className="ln-no" onClick={() => setEdit(null)} title="Cancel (Esc)">✕</button>
                   </> : <>
                     <button onClick={() => startEdit(i)} title="Edit qty / price (Space)">✎</button>

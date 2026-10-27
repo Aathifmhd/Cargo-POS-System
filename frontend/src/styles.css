@@ -2044,7 +2044,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .sticker .st-sup { font-weight: 400; letter-spacing: .06em; }
 /* New Sale: the STOCK column — the stock before this bill, on the line the cursor is on only */
 .till-tbl td.stk { color: var(--t-steel); }
-.till-tbl td.stk b { color: var(--t-green, var(--green)); font-weight: 800; }
+.till-tbl td.stk b { color: var(--t-green, var(--green)); font-weight: 400; }
 .till-tbl td.stk b.zero { color: var(--amber); }
 .till-tbl td.stk b.neg { color: var(--red); }
 @media (max-width: 860px) {

@@ -2042,7 +2042,13 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .sticker .st-top.with-sup { align-items: flex-start; }
 .sticker .st-right { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; flex: none; }
 .sticker .st-sup { font-weight: 400; letter-spacing: .06em; }
-/* New Sale: the selected line's stock in hand after the bill */
-.till-tbl .tag.inhand { display: inline-block; margin-top: 3px; margin-left: 4px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 800; letter-spacing: .03em; background: var(--green-soft); color: var(--green); }
-.till-tbl .tag.inhand.zero { background: var(--amber-soft); color: var(--amber); }
-.till-tbl .tag.inhand.neg { background: var(--red-soft); color: var(--red); }
+/* New Sale: the STOCK column — the stock before this bill, on the line the cursor is on only */
+.till-tbl td.stk { color: var(--t-steel); }
+.till-tbl td.stk b { color: var(--t-green, var(--green)); font-weight: 800; }
+.till-tbl td.stk b.zero { color: var(--amber); }
+.till-tbl td.stk b.neg { color: var(--red); }
+@media (max-width: 860px) {
+  .till-tbl td.stk { display: none; }
+  .till-tbl tr.on td.stk { display: flex; gap: 6px; align-items: baseline; grid-column: 1 / -1; }
+  .till-tbl tr.on td.stk::before { content: attr(data-label); font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--t-steel); }
+}

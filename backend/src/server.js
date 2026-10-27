@@ -23,16 +23,20 @@ import { setupBatches } from './db.js';
 import { autoPassSoon } from './cheques.js';
 import { attentionSoon } from './attention.js';
 import { hideCosts, checkPaths } from './costcode.js';
+import smsRoutes, { smsCron } from './routes/sms.js';
+import { setupSms, dueRemindersSoon } from './sms.js';
 
 // Connect to MongoDB, create indexes / default settings / default logins (safe on every start).
 await setup();
 await initAuth();
+await setupSms();
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get('/api/sms/cron', smsCron);   // the daily due-reminder job (Vercel Cron)
 app.use('/api', authRoutes);        // login is public; the rest of its routes check the session themselves
 app.use('/api', requireAuth);       // everything below needs a logged-in user
 app.use('/api', hideCosts);         // without "see costs": no costs or profit in any answer (the cost code instead)
@@ -41,6 +45,8 @@ app.use('/api', checkPaths);        // GRNs, suppliers, reports, Payment Portal,
 app.use('/api', (req, res, next) => { autoPassSoon().then(() => next(), next); });
 // Action Center → Attention: overdue bills, cheques on hold, supplier bills due, GRN shorts (checked every half hour)
 app.use('/api', (req, res, next) => { attentionSoon(); next(); });
+// SMS due reminders: once a day from 10:00 AM (Sri Lanka), while the app is used — and by Vercel's daily job
+app.use('/api', (req, res, next) => { dueRemindersSoon(); next(); });
 app.use('/api/fx', fxRoutes);
 app.use('/api/suppliers', suppliers);
 app.use('/api/customers', customers);
@@ -53,6 +59,7 @@ app.use('/api', money);           // cargo payable, cheques
 app.use('/api', exportsRoute);     // Reports → Download reports (Excel)
 app.use('/api', stocktake);        // Settings → Stock Take
 app.use('/api', held);             // held bills and held GRNs, shared by every user
+app.use('/api', smsRoutes);        // Settings → SMS messages, Cheque Desk → inform the customer
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
@@ -83,4 +90,4 @@ relabelCustomers().catch((e) => console.error('Customer names on bills failed:',
 reorderProductNames().catch((e) => console.error('Product names failed:', e.message));
 setupCargos().catch((e) => console.error('Cargo list failed:', e.message));   // the cargo names in use → the Cargo list   // {product name} - {product} - {category}
 if (!process.env.VERCEL) startFxTimer();   // on Vercel the rate is refreshed when the dashboard asks for it
-if (!process.env.VERCEL) { setInterval(autoPassSoon, 60_000); setInterval(attentionSoon, 5 * 60_000); }   // on Vercel it runs with the requests
+if (!process.env.VERCEL) { setInterval(autoPassSoon, 60_000); setInterval(attentionSoon, 5 * 60_000); setInterval(dueRemindersSoon, 10 * 60_000); }   // on Vercel it runs with the requests

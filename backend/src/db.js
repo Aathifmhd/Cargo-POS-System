@@ -107,6 +107,7 @@ const DEFAULTS = {
   users: { role: 'cashier', active: 1, last_login: null, token_version: 0 },
   audit_log: { user_id: null, username: null, role: null, approved_by: null, level: null, key: null },
   fx_rates: { source: null },
+  sms_log: { name: null, ref: null, key: null, by: null, error: null, pages: null },
 };
 
 /* ---------------- query helpers (documents come back without MongoDB's _id) ---------------- */
@@ -157,7 +158,7 @@ export const bumpCounter = (name, n) => col('counters').updateOne({ _id: name },
 
 export const COLLECTIONS = ['settings', 'suppliers', 'customers', 'products', 'grns', 'grn_expenses', 'grn_items', 'supplier_payments',
   'sales', 'sale_items', 'customer_payments', 'stock_moves', 'users', 'audit_log', 'fx_rates', 'batches',
-  'cargo_payments', 'cheques', 'customer_ids', 'damaged', 'stocktakes', 'bad_debts', 'held', 'cargos'];
+  'cargo_payments', 'cheques', 'customer_ids', 'damaged', 'stocktakes', 'bad_debts', 'held', 'cargos', 'sms_log'];
 
 /* ---------------- errors & small helpers ---------------- */
 export class HttpError extends Error {
@@ -250,6 +251,7 @@ export async function setup() {
     ix('grn_expenses', { grn_id: 1 }),
     ix('sales', { invoice_no: 1 }, { unique: true }),
     ix('sales', { date: 1 }),
+    ix('sms_log', { key: 1 }),
     ix('sales', { customer_id: 1 }),
     ix('sale_items', { sale_id: 1 }),
     ix('sale_items', { product_id: 1 }),

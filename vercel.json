@@ -3,6 +3,16 @@
   "regions": [
     "bom1"
   ],
+  "crons": [
+    {
+      "path": "/api/sms/cron",
+      "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/sms/cron?run=2",
+      "schedule": "0 6 * * *"
+    }
+  ],
   "services": {
     "backend": {
       "root": "backend",

@@ -3,6 +3,7 @@ import { find, aggregate, num, contains, nextNo, getSettings, round2 } from '../
 import { createSale, getSale, voidSale, deleteSale, customerLedgers } from '../services.js';
 import { guard, audit } from '../auth.js';
 import { billChecks } from '../attention.js';
+import { billThanks } from '../sms.js';
 
 /** A product this far below zero (pieces sold without stock) is flagged in the Action Center → Attention. */
 export const ATTENTION_STOCK = -10;
@@ -90,6 +91,7 @@ r.post('/', async (req, res) => {
     }
   }
   await billChecks(sale, req.user);   // below cost, a big discount, a large cash refund → Attention
+  await billThanks(sale, req.user);   // a registered customer: thank-you SMS (with the credit and balance)
   res.json(sale);
 });
 r.post('/:id/void', async (req, res) => {

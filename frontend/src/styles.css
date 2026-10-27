@@ -1998,3 +1998,43 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 @keyframes pa-spin { to { transform: rotate(360deg); } }
 @keyframes pa-run { from { transform: translateX(-196px); } to { transform: translateX(0); } }
 @media (prefers-reduced-motion: reduce) { .pa-bill, .pa-roll, .pa-strip, .pa-light { animation: none; clip-path: none; } }
+
+/* Settings → SMS messages */
+.sms-set .set-sub { margin: 6px 0 0; }
+.sms-switch { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 4px 12px 4px 4px; font: inherit; font-size: 13px; font-weight: 650; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.sms-knob { width: 34px; height: 20px; border-radius: 999px; background: var(--surface-3); position: relative; transition: background .15s; flex: none; }
+.sms-knob::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s; }
+.sms-switch.on { color: var(--text); border-color: var(--green); }
+.sms-switch.on .sms-knob { background: var(--green); }
+.sms-switch.on .sms-knob::after { transform: translateX(14px); }
+.sms-acc-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.sms-acc-grid > div { background: var(--surface-3); border-radius: var(--radius-s); padding: 9px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sms-acc-grid span { font-size: 11px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.sms-acc-grid b { overflow-wrap: anywhere; text-transform: capitalize; }
+.sms-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); }
+.sms-card.off .sms-tpl, .sms-card.off .sms-due { opacity: .55; }
+.sms-card-head { display: flex; gap: 10px; align-items: flex-start; }
+.sms-card-head .grow { flex: 1; min-width: 0; }
+.sms-card-head p { margin: 2px 0 0; }
+.sms-card-icon { width: 30px; height: 30px; border-radius: 8px; background: var(--surface-3); display: grid; place-items: center; flex: none; color: var(--text-2); }
+.sms-tpl { display: flex; flex-direction: column; gap: 6px; }
+.sms-tpl-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.sms-tpl textarea { min-height: 70px; resize: vertical; }
+.sms-words { display: flex; flex-wrap: wrap; gap: 5px; }
+.sms-word { border: 1px dashed var(--border); background: var(--surface-3); color: var(--text-2); border-radius: 6px; padding: 2px 7px; font: 600 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; }
+.sms-word:hover { border-style: solid; color: var(--text); }
+.sms-preview { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; background: var(--surface-3); border-radius: 12px 12px 12px 3px; padding: 9px 12px; color: var(--text); }
+.sms-preview svg { flex: none; margin-top: 2px; color: var(--muted); }
+.sms-test { display: flex; gap: 8px; }
+.sms-test .input { flex: 1; min-width: 0; }
+.sms-log-head { display: flex; align-items: center; justify-content: space-between; }
+.sms-log { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.sms-log-row { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+.sms-log-row:first-child { border-top: 0; }
+.sms-log-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sms-log-msg { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+@media (max-width: 860px) {
+  .sms-acc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sms-test { flex-direction: column; }
+  .sms-tpl textarea { min-height: 112px; }
+}

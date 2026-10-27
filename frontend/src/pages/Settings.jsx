@@ -8,6 +8,7 @@ import StockTake from '../components/StockTake.jsx';
 import { Rules as ApprovalRules } from './Users.jsx';
 import { StickerDesign } from '../components/Stickers.jsx';
 import { BillDesign, PrinterSettings } from '../components/Bill.jsx';
+import SmsSettings from '../components/SmsSettings.jsx';
 
 // The settings menu, grouped under headings
 const GROUPS = [
@@ -18,6 +19,7 @@ const GROUPS = [
       { id: 'bills', icon: 'receipt', label: 'Bills & numbering', desc: 'Bill and GRN number prefixes, and the message at the bottom of bills.' },
       { id: 'billdesign', icon: 'receipt', label: 'Bill design', desc: 'The printed bill — A5 landscape (usual) and the 80 mm receipt: what is printed and how big.' },
       { id: 'printers', icon: 'print', label: 'Printers', desc: 'How this computer prints bills — A5 and 80 mm printers.' },
+      { id: 'sms', icon: 'phone', label: 'SMS messages', desc: 'Automatic SMS (smslenz.lk): thank-you after bills, due reminders, returned cheques and local supplier payments — switch each on or off and arrange the wording.' },
     ],
   },
   {
@@ -131,6 +133,7 @@ export default function Settings() {
 
             {section === 'billdesign' && <BillDesign f={f} set={set} SaveBar={SaveBar} />}
             {section === 'printers' && <PrinterSettings />}
+            {section === 'sms' && <SmsSettings f={f} set={set} SaveBar={SaveBar} settings={settings} />}
             {section === 'stickers' && <StickerDesign f={f} set={set} SaveBar={SaveBar} settings={settings} />}
             {section === 'catalog' && <CatalogEditor />}
 

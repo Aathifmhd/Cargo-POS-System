@@ -3,6 +3,7 @@ import { find, findOne, insert, setById, updateMany, deleteMany, fail, num, roun
 import { supplierLedgers, supplierBills, summarizeSupplier, revalueGrns, costingRate, isLocal } from '../services.js';
 import { guard } from '../auth.js';
 import { cleanCheques, recordCheques } from '../cheques.js';
+import { supplierPaidSms, supplierChequesSms } from '../sms.js';
 
 const r = Router();
 
@@ -111,6 +112,7 @@ r.post('/:id/payments', async (req, res) => {
     if (grnId && !(await findOne('grns', { id: grnId, supplier_id: s.id }))) fail('That GRN does not belong to this supplier');
     const cheques = await recordCheques({ direction: 'out', party: 'supplier', partyId: s.id, partyName: s.name, billId: grnId,
       cheques: cleanCheques(req.body.cheques), givenOn: req.body.date, notes: req.body.notes || null, user: req.user });
+    await supplierChequesSms(s.id, cheques, req.user);   // a local supplier: cheque issued SMS
     return res.json({ cheques });
   }
   const amount = round2(num(req.body.amount_inr));
@@ -124,6 +126,7 @@ r.post('/:id/payments', async (req, res) => {
     amount_lkr: round2(amount * rate), method: req.body.method || null, reference: req.body.reference || null, notes: req.body.notes || null,
   });
   await revalueGrns();   // notes when the bill becomes fully paid
+  await supplierPaidSms(s.id, p, req.user);   // a local supplier: payment SMS
   res.json(p);
 });
 

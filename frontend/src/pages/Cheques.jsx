@@ -172,6 +172,16 @@ export default function Cheques() {
       setVersion((v) => v + 1);
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(null); }
   };
+  // a customer's returned cheque: tell them by SMS (Settings → SMS messages → Returned cheque)
+  const canInform = (c) => c.status === 'returned' && c.direction === 'in' && c.party === 'customer';
+  const inform = async (c) => {
+    setBusy(c.id);
+    try {
+      const r = await api.post(`/cheques/${c.id}/inform`);
+      toast(`SMS sent to ${c.party_name} (${r.to})`);
+      setVersion((v) => v + 1);
+    } catch (e) { toast(e.message, 'error'); } finally { setBusy(null); }
+  };
   const S = SIDES.find((s) => s.value === side);
   // the ⋯ menu: what else can be done with the cheque where it is now
   const menu = (c) => {
@@ -240,10 +250,13 @@ export default function Cheques() {
                       <div className="sub">{PARTY[c.party]}{c.bill_no ? ` · ${c.bill_no}` : ''}{c.notes ? ` · ${c.notes}` : ''}</div></td>
                     <td className="right nowrap"><b className={c.direction === 'in' ? 'text-green' : 'text-amber'}>{money(c)(c.amount)}</b></td>
                     <td><Badge tone={STATUS[c.status].tone}>{STATUS[c.status].label}</Badge>
-                      {c.status === 'passed' && <div className="sub">{niceDate(c.passed_on)}{(c.history || []).at(-1)?.by === 'Auto' ? ' · automatically' : ''}</div>}</td>
+                      {c.status === 'passed' && <div className="sub">{niceDate(c.passed_on)}{(c.history || []).at(-1)?.by === 'Auto' ? ' · automatically' : ''}</div>}
+                      {canInform(c) && <div className="sub">{c.informed_at ? `SMS sent ${niceDateTime(c.informed_at)}` : 'Customer not informed yet'}</div>}</td>
                     <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
                       {open(c) && <button className="btn btn-sm btn-receive" disabled={busy === c.id} onClick={() => mark(c, 'passed')}><Icon name="check" size={13} /> Passed</button>}
                       {c.status === 'passed' && <button className="btn btn-sm btn-danger" disabled={busy === c.id} onClick={() => mark(c, 'returned')}><Icon name="back" size={13} /> Returned</button>}
+                      {canInform(c) && <button className="btn btn-sm" disabled={busy === c.id} title="Send the customer an SMS that the cheque was returned" onClick={() => inform(c)}>
+                        <Icon name="phone" size={13} /> {busy === c.id ? 'Sending…' : c.informed_at ? 'Inform again' : 'Send message to inform'}</button>}
                       <MoreMenu disabled={busy === c.id} items={menu(c)} />
                     </td>
                   </tr>,

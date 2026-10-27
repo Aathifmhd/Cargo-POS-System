@@ -64,6 +64,15 @@ const lineCalc = (l) => {
   return { gross, disc, amount: r2(gross - disc), net: n(l.qty) ? (gross - disc) / n(l.qty) : n(l.price) };
 };
 const pcsText = (pcs) => `${int(pcs)} pcs`;
+/** The selected bill line: the stock left in hand once this bill is saved (all of this product's lines counted). */
+function InHand({ left, batch, damaged }) {
+  const t = (v) => (v < 0 ? `−${pcsText(-v)}` : v === 0 ? 'none' : pcsText(v));
+  return (
+    <span className={`tag inhand ${left < 0 ? 'neg' : left === 0 ? 'zero' : ''}`} title="Stock in hand after this bill">
+      {damaged ? 'DAMAGED LEFT' : 'IN HAND AFTER BILL'} · {t(left)}{batch != null ? ` · this cost ${t(batch)}` : ''}
+    </span>
+  );
+}
 const blankEntry = { q: '', pid: null, bid: null, damaged: false, unit: 'pcs', qty: '1', price: '', disc_pct: '' };   // damaged: selling damaged pieces   // sold by the piece only; bid = the stock batch
 // one click in a box selects all of it, ready to type over (the mouse coming up would otherwise drop the selection)
 const selectAll = {
@@ -589,6 +598,8 @@ export default function POS() {
                     {!r.back && r.damaged && <span className="tag damaged">DAMAGED · cost written off</span>}
                     {r.noStock > 0 && <span className="tag nostock" title="More than the stock shows — kept at the last GRN cost; the Super Admin is told">SOLD WITHOUT STOCK · {pcsText(r.noStock)}</span>}
                     {showCost && r.under && <span className="tag bad">under cost</span>}
+                    {i === sel && <InHand left={r.damaged ? (r.p.damaged?.pcs || 0) - inBillDamaged(r.p.id) : r.p.stock_pcs - inBillPcs(r.p.id)}
+                      batch={!r.damaged && r.b && groupsOf(r.p).length > 1 ? r.b.left_pcs - inBillPcs(r.p.id, -1, r.b.id) : null} damaged={r.damaged} />}
                   </td>
                   <td className="n q">{edit?.i === i
                     ? <input id="lnQty" className="ln-in" inputMode="decimal" enterKeyHint="enter" value={edit.qty} onChange={(e) => setEdit({ ...edit, qty: e.target.value })} onKeyDown={editKey} {...selectAll} />

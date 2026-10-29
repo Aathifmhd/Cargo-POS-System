@@ -4,6 +4,7 @@ import { Icon, ThemeSwitch, Modal, useToast } from './ui.jsx';
 import { ChangePasswordModal } from './auth.jsx';
 import OfflineBar from './OfflineBar.jsx';
 import { api, isAdmin, isSuper, can, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime, tapSettings } from '../lib.js';
+import { MLogo } from './brand.jsx';
 import { useAuth, useFx, useSettings } from '../App.jsx';
 import { useTableLabels, useKeyboardOpen, usePullToRefresh, PULL_TRIGGER } from './mobile.js';
 
@@ -147,7 +148,7 @@ export default function Layout() {
     <div className={`shell ${open ? 'nav-open' : ''} ${user.discreet ? 'discreet' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-logo"><img src="/brand/m.png" alt="" /></div>
+          <div className="brand-logo"><MLogo /></div>
           <div>
             <div className="brand-name">{settings.shop_name || 'Cargo POS'}</div>
             <div className="brand-sub">EzyPOS · Wholesale</div>
@@ -200,7 +201,7 @@ export default function Layout() {
         style={pull > 0 || refreshing ? { transform: `translateY(${Math.round(Math.min(pull, 1) * PULL_TRIGGER)}px)` } : undefined}>
         <div className="mobile-bar">
           <button className="btn btn-icon btn-ghost" onClick={() => setOpen(true)} aria-label="Menu"><Icon name="menu" /></button>
-          <span className="mobile-m" aria-hidden="true" />
+          <MLogo className="mobile-m" />
           <b>{settings.shop_name}</b>
         </div>
         <OfflineBar user={user} />

@@ -4,6 +4,7 @@ import { Field, NumInput, Icon, Modal, useToast } from './ui.jsx';
 import { useSettings } from '../App.jsx';
 import { usePhone } from './mobile.js';
 import { printFrame, withPrinting } from './printing.jsx';
+import { MLogo } from './brand.jsx';
 
 /*
  * Printed bills, in two sizes: A5 landscape (the usual one) and an 80 mm receipt.
@@ -18,6 +19,7 @@ export const BILL_DEFAULT = {
   show_code: true,       // product codes under the item names
   show_balance: true,    // a credit bill: paid, this bill's balance and the customer's total outstanding
   show_sign: true,       // A5: customer signature and "For {shop}"
+  show_logo: true,       // the logo's M: beside the shop's name (A5), above it (80 mm)
   font_a5: 10,           // pt
   font_80: 9,            // pt
   title: '',             // a line under the shop name, e.g. "Wholesale clothing" (optional)
@@ -46,11 +48,14 @@ function BillA5({ s, d, settings }) {
   return (
     <div className="bill bill-a5" style={{ fontSize: `${d.font_a5}pt` }}>
       <div className="b-head">
-        <div>
-          <div className="b-shop">{settings.shop_name}</div>
-          {d.title && <div className="b-tag">{d.title}</div>}
-          {d.show_address && settings.shop_address && <div>{settings.shop_address}</div>}
-          {d.show_phone && settings.shop_phone && <div>Tel: {settings.shop_phone}</div>}
+        <div className="b-from">
+          {d.show_logo && <MLogo className="b-logo" fit="tight" />}
+          <div>
+            <div className="b-shop">{settings.shop_name}</div>
+            {d.title && <div className="b-tag">{d.title}</div>}
+            {d.show_address && settings.shop_address && <div>{settings.shop_address}</div>}
+            {d.show_phone && settings.shop_phone && <div>Tel: {settings.shop_phone}</div>}
+          </div>
         </div>
         <div className="right">
           <div className="b-title">{billTitle(s)}</div>
@@ -96,6 +101,7 @@ function Bill80({ s, d, settings }) {
   return (
     <div className="bill bill-80" style={{ fontSize: `${d.font_80}pt` }}>
       <div className="center">
+        {d.show_logo && <MLogo className="b-logo" />}
         <div className="b-shop">{settings.shop_name}</div>
         {d.title && <div>{d.title}</div>}
         {d.show_address && settings.shop_address && <div>{settings.shop_address}</div>}
@@ -248,6 +254,7 @@ export function BillDesign({ f, set, SaveBar }) {
         {tick('show_code', 'Product codes')}
         {tick('show_balance', 'Paid, balance and outstanding (credit bills)')}
         {tick('show_sign', 'Signature lines (A5)')}
+        {tick('show_logo', 'Logo (the M)')}
       </div>
       <div className="bill-preview">
         <div className="row gap">

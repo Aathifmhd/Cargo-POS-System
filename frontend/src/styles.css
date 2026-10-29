@@ -130,9 +130,9 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
 .brand { display: flex; gap: 10px; align-items: center; padding: 18px 16px 14px; }
-/* the logo's M (public/brand/m.png: its square in the middle of the picture, the tick reaching out to the right) */
+/* the logo's M (components/brand.jsx — white here, the colour of the menu's text) */
 .brand-logo { width: 36px; height: 36px; display: grid; place-items: center; flex-shrink: 0; }
-.brand-logo img { width: 32px; max-width: none; height: auto; display: block; }
+.brand-logo svg { width: 38px; height: auto; aspect-ratio: 410 / 284; display: block; color: #fff; }
 .brand-name { color: #fff; font-weight: 700; font-size: 14.5px; line-height: 1.2; }
 .brand-sub { font-size: 11.5px; opacity: .7; }
 .sidebar nav { padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
@@ -1430,11 +1430,14 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .bill .center { text-align: center; }
 .bill .b-muted { color: #555; }
 .bill .b-shop { font-size: 1.6em; font-weight: 800; }
+.bill .b-logo { display: block; flex: none; height: auto; color: #000; }   /* the logo's M (components/brand.jsx) */
 .bill .b-tag { font-weight: 600; }
 .bill .b-title { font-weight: 800; letter-spacing: .04em; }
 .bill-a5 { width: 100%; min-height: 134mm; display: flex; flex-direction: column; }
 .bill-a5 .b-fill { flex: 1; min-height: 3mm; }
 .bill-a5 .b-head { display: flex; justify-content: space-between; gap: 6mm; border-bottom: 0.5mm solid #000; padding-bottom: 2mm; }
+.bill-a5 .b-from { display: flex; align-items: center; gap: 3.5mm; }
+.bill-a5 .b-logo { width: 15mm; aspect-ratio: 345 / 280; }
 .bill-a5 .b-title { font-size: 1.25em; }
 .bill-a5 .b-meta { display: flex; justify-content: space-between; gap: 6mm; margin: 2mm 0; }
 .bill-a5 .b-items { width: 100%; border-collapse: collapse; }
@@ -1450,6 +1453,7 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .bill-a5 .b-grand { font-size: 1.3em; font-weight: 800; border-top: 0.4mm solid #000; padding-top: 1.2mm !important; }
 .bill-80 { width: 80mm; padding: 3mm 4mm; }
 .bill-80 .b-shop { font-size: 1.4em; }
+.bill-80 .b-logo { width: 16mm; aspect-ratio: 410 / 284; margin: 0 auto 1.2mm; }
 .bill-80 .b-title { margin: 1.5mm 0; }
 .bill-80 .b-row { display: flex; justify-content: space-between; gap: 2mm; }
 .bill-80 .b-rule { border-top: 0.3mm dashed #000; margin: 1.5mm 0; }
@@ -1523,9 +1527,8 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
   .main.on-pos { padding-bottom: 16px; }
   .mobile-bar { position: sticky; top: 0; z-index: 40; margin: 0 -12px 12px; padding: 8px 12px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
   .mobile-bar b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* the logo's M before the shop's name: dark on the light theme, white on the dark one */
-  .mobile-m { flex: none; width: 26px; aspect-ratio: 410 / 284; background: url(/brand/m-ink.png) center / contain no-repeat; }
-  :root[data-theme="dark"] .mobile-m { background-image: url(/brand/m.png); }
+  /* the logo's M before the shop's name, in the text's colour (dark on the light theme, light on the dark one) */
+  .mobile-m { flex: none; width: 30px; height: auto; aspect-ratio: 410 / 284; color: var(--text); }
 
   /* bottom tab bar */
   .bottom-nav { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -6px 20px rgba(15, 23, 42, .08); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }

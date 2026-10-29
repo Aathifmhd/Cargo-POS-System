@@ -977,7 +977,7 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
    Login
    ========================================================= */
 /* Plain white behind a centred card, whatever theme the rest of the system uses (the light theme's colours inside,
-   even when the system is set to dark); the system's dark blue, and the logo in it (brand/logo-navy.png) */
+   even when the system is set to dark); the system's dark blue, and the logo in it with a deeper red (brand/logo-login.png) */
 .login {
   position: relative; height: 100vh; overflow: hidden; background: #fff; color: var(--text); color-scheme: light;
   --text: #0B0F19; --text-2: #334155; --muted: #64748b; --border: #e3e8ef; --border-strong: #cbd5e1; --surface: #fff; --surface-2: #f8fafc;
@@ -1047,8 +1047,8 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .login-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .login-bg::before { content: ""; position: absolute; inset: -40px; background-image: radial-gradient(rgba(27, 42, 78, .16) 1px, transparent 1.4px); background-size: 26px 26px; mask-image: radial-gradient(ellipse at 50% 45%, #000 20%, transparent 72%); -webkit-mask-image: radial-gradient(ellipse at 50% 45%, #000 20%, transparent 72%); animation: loginGrid 30s linear infinite; }
 .login-bg i { position: absolute; width: clamp(260px, 36vw, 480px); aspect-ratio: 1; border-radius: 50%; filter: blur(64px); will-change: transform; }
-.login-bg i:nth-child(1) { left: -8%; top: -12%; background: rgba(255, 49, 49, .22); animation: loginFloatA 18s ease-in-out infinite; }
-.login-bg i:nth-child(2) { right: -10%; bottom: -14%; background: rgba(255, 49, 49, .18); animation: loginFloatB 22s ease-in-out infinite; }
+.login-bg i:nth-child(1) { left: -8%; top: -12%; background: rgba(200, 16, 46, .20); animation: loginFloatA 18s ease-in-out infinite; }
+.login-bg i:nth-child(2) { right: -10%; bottom: -14%; background: rgba(200, 16, 46, .16); animation: loginFloatB 22s ease-in-out infinite; }
 .login-bg i:nth-child(3) { right: 14%; top: -6%; width: clamp(200px, 26vw, 360px); background: rgba(27, 42, 78, .14); animation: loginFloatC 26s ease-in-out infinite; }
 .login-bg i:nth-child(4) { left: 10%; bottom: -10%; width: clamp(180px, 22vw, 320px); background: rgba(27, 42, 78, .11); animation: loginFloatA 24s ease-in-out -8s infinite reverse; }
 @keyframes loginGrid { to { transform: translate(26px, 26px); } }

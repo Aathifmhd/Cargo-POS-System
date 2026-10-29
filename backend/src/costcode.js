@@ -4,7 +4,7 @@
  * they get the cost code instead (the shop's letters, of the cost per piece + the amount set). The other permissions
  * open the parts of the system (checkPaths).
  */
-import { getSettings } from './db.js';
+import { getSettings, findOne, setSetting } from './db.js';
 import { can } from './auth.js';
 
 /** The cost code (see Settings → Cost code): the code word's ten letters are 1…9, 0; a repeated digit is the repeat letter. */
@@ -47,15 +47,34 @@ function strip(v, settings, discreet = false) {
 
 export const seesCost = (user) => can(user, 'see_cost');
 
+/*
+ * The discreet view is one switch for the whole shop (settings.discreet_view): when someone turns it on, on any
+ * device, every user's screens become the counter view, and costs and supplier details leave every answer.
+ * Each answer says how it stands (X-View-State), so the other devices follow with their next call.
+ */
+let view = { on: false, at: 0 };
+export async function viewOn() {
+  if (Date.now() - view.at < 5000) return view.on;
+  const row = await findOne('settings', { key: 'discreet_view' });
+  view = { on: row?.value === '1', at: Date.now() };
+  return view.on;
+}
+export async function setView(on) {
+  await setSetting('discreet_view', on ? '1' : '0');
+  view = { on, at: Date.now() };
+}
+
 /** Express middleware (after the login check): for users who can't see costs, take them out of every answer. */
-export function hideCosts(req, res, next) {
-  const discreet = req.get('X-View') === '1';   // the discreet view: as for a cashier, whoever is logged in
-  if (!req.user || (seesCost(req.user) && !discreet)) return next();
-  getSettings().then((settings) => {
+export async function hideCosts(req, res, next) {
+  try {
+    const discreet = await viewOn();   // the discreet view: as for a cashier, whoever is logged in
+    res.set('X-View-State', discreet ? '1' : '0');
+    if (!req.user || (seesCost(req.user) && !discreet)) return next();
+    const settings = await getSettings();
     const json = res.json.bind(res);
     res.json = (body) => json(strip(body, settings, discreet));
     next();
-  }, next);
+  } catch (e) { next(e); }
 }
 
 /** A part of the system only users with this permission may open (see auth.js PERMS). */

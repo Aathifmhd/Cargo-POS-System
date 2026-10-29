@@ -103,16 +103,25 @@ export const can = (u, perm) => (u?.role === 'superadmin' ? true : Boolean((u?.p
 export const seesCost = (u) => can(u, 'see_cost');
 
 /*
- * The discreet view (on this device): the app shows only New Sale, Stock and Settings, as a counter login would —
+ * The discreet view (for the whole shop): the app shows only New Sale, Stock and Settings, as a counter login would —
  * no costs, profit, totals, suppliers, imports, dues or reports, and the server leaves them out of every answer too.
- * It is switched on and off by tapping Settings 5 times; nothing on the screen shows that it exists.
+ * Any user switches it on or off, for every device, by tapping Settings 5 times; nothing on the screen shows it exists.
  */
 const VIEW_KEY = 'cargo-pos-view';
 export const isDiscreet = () => { try { return localStorage.getItem(VIEW_KEY) === '1'; } catch { return false; } };
-export function toggleDiscreet() {
-  const on = !isDiscreet();
+/** The view as the shop has it now (from the server's answers): kept on this device, the screens follow. */
+export function applyView(on) {
+  if (on === isDiscreet()) return;
   try { on ? localStorage.setItem(VIEW_KEY, '1') : localStorage.removeItem(VIEW_KEY); } catch { /* private mode */ }
   window.dispatchEvent(new Event('cargo-pos-view'));
+}
+/** Switch it for the whole shop (every user, every device); this device changes at once. */
+let toggledAt = 0;   // answers already on their way when it was switched still carry the old state
+export function toggleDiscreet() {
+  const on = !isDiscreet();
+  toggledAt = Date.now();
+  applyView(on);
+  request('POST', '/view', { on }).catch(() => {});   // offline: this device only, until the next answer
   return on;
 }
 let taps = [];
@@ -153,7 +162,6 @@ async function request(method, url, body, approval, { timeout } = {}) {
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (approval) headers['X-Approval'] = approval;
-  if (isDiscreet()) headers['X-View'] = '1';
   // already known to be offline: straight to what was seen last
   if (method === 'GET' && !isOnline()) { const kept = await cacheGet(url); if (kept !== undefined) return kept; }
   let res;
@@ -171,6 +179,8 @@ async function request(method, url, body, approval, { timeout } = {}) {
     throw err;
   }
   noteOnline();
+  const state = res.headers.get('X-View-State');   // the shop's discreet view, as it is now
+  if (state !== null && Date.now() - toggledAt > 6000) applyView(state === '1');
   const data = await res.json().catch(() => ({}));
   if (method === 'GET' && res.ok) cacheSet(url, data);   // kept for when the internet is gone
   if (res.status === 401 && !url.startsWith('/auth/')) {

@@ -5,6 +5,7 @@ import {
 import { supplierLedgers, customerLedgers, revalueGrns, customerLabel, customerPerson } from '../services.js';
 import { guard, audit, rankOf, RANK, can } from '../auth.js';
 import { lankaNow } from '../cheques.js';
+import { setView } from '../costcode.js';
 
 /*
  * The money window. "Start Fresh" (after a stock take) saves the moment the new period starts (settings.fresh_start_at):
@@ -55,6 +56,15 @@ function cleanCatalog(raw) {
   }
   return JSON.stringify(out);
 }
+
+/* ---------------- the discreet view (5 taps on Settings, on any device, by any user) ---------------- */
+r.post('/view', async (req, res) => {
+  const on = Boolean(req.body?.on);
+  await setView(on);
+  await audit(req.user, `Discreet view switched ${on ? 'on' : 'off'} for every device`);
+  res.set('X-View-State', on ? '1' : '0');
+  res.json({ on });
+});
 
 /* ---------------- settings ---------------- */
 r.get('/settings', async (req, res) => res.json(await publicSettings()));

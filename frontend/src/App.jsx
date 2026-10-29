@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
-import { api, getToken, setToken, isAdmin, isSuper, can } from './lib.js';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { api, getToken, setToken, isAdmin, isSuper, can, isDiscreet, discreetUser } from './lib.js';
 import { ToastProvider, Loading } from './components/ui.jsx';
 import { Login, ApprovalProvider } from './components/auth.jsx';
 import Layout from './components/Layout.jsx';
@@ -68,6 +68,14 @@ export default function App() {
     return () => window.removeEventListener('cargo-pos-logout', out);
   }, []);
 
+  // the discreet view: every screen sees a counter user (switched by tapping Settings 5 times)
+  const [discreet, setDiscreet] = useState(isDiscreet);
+  useEffect(() => {
+    const on = () => setDiscreet(isDiscreet());
+    window.addEventListener('cargo-pos-view', on);
+    return () => window.removeEventListener('cargo-pos-view', on);
+  }, []);
+
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout'); } catch { /* already gone */ }
     setToken(null);
@@ -89,8 +97,10 @@ export default function App() {
   if (!user) return <Login onLoggedIn={setUser} />;
   if (!settings) return <Loading text="Loading your shop…" />;
 
+  // the user as the screens see them: in the discreet view, a counter user (New Sale, Stock, Settings only)
+  const shown = discreet ? discreetUser(user) : user;
   return (
-    <AuthCtx.Provider value={{ user, logout }}>
+    <AuthCtx.Provider value={{ user: shown, logout }}>
       <SettingsCtx.Provider value={{ settings, reload }}>
         <ToastProvider>
           <ApprovalProvider>
@@ -100,35 +110,44 @@ export default function App() {
                 <Route path="/print/sale/:id" element={<PrintSale />} />
                 <Route path="/print/grn/:id" element={<PrintGrn />} />
                 <Route path="/print/stickers/:id" element={<PrintStickers />} />
+                {discreet ? (
+                  <Route element={<Layout />}>
+                    <Route path="/pos" element={<POS />} />
+                    <Route path="/stock" element={<Stock />} />
+                    <Route path="/settings" element={<Settings />} />
+                    <Route path="*" element={<Navigate to="/pos" replace />} />
+                  </Route>
+                ) : (
                 <Route element={<Layout />}>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/pos" element={<POS />} />
                   <Route path="/sales" element={<Sales />} />
                   <Route path="/sales/:id" element={<SaleView />} />
-                  {can(user, 'receive_goods') && <>
+                  {can(shown, 'receive_goods') && <>
                     <Route path="/grn" element={<GrnList />} />
                     <Route path="/grn/new" element={<GrnForm />} />
                     <Route path="/grn/:id/edit" element={<GrnForm key="edit" />} />
                     <Route path="/grn/:id" element={<GrnView />} />
                     <Route path="/extra-short" element={<ExtraShort />} />
                   </>}
-                  {can(user, 'suppliers') && <>
+                  {can(shown, 'suppliers') && <>
                     <Route path="/suppliers" element={<Suppliers />} />
                     <Route path="/suppliers/:id" element={<SupplierView />} />
                     <Route path="/cargo" element={<Cargo />} />
                   </>}
-                  {can(user, 'reports') && <Route path="/reports" element={<Reports />} />}
+                  {can(shown, 'reports') && <Route path="/reports" element={<Reports />} />}
                   <Route path="/stock" element={<Stock />} />
                   <Route path="/customers" element={<Customers />} />
                   <Route path="/customers/:id" element={<CustomerView />} />
-                  {can(user, 'dues') && <Route path="/dues" element={<Dues />} />}
-                  {can(user, 'cheques') && <Route path="/cheques" element={<Cheques />} />}
-                  {can(user, 'settings') && <Route path="/settings" element={<Settings />} />}
-                  {isAdmin(user) && <Route path="/users" element={<Users />} />}
-                  {can(user, 'action_center') && <Route path="/action-center" element={<ActionCenter />} />}
-                  {isSuper(user) && <Route path="/sales-profit" element={<SalesProfit />} />}
+                  {can(shown, 'dues') && <Route path="/dues" element={<Dues />} />}
+                  {can(shown, 'cheques') && <Route path="/cheques" element={<Cheques />} />}
+                  {can(shown, 'settings') && <Route path="/settings" element={<Settings />} />}
+                  {isAdmin(shown) && <Route path="/users" element={<Users />} />}
+                  {can(shown, 'action_center') && <Route path="/action-center" element={<ActionCenter />} />}
+                  {isSuper(shown) && <Route path="/sales-profit" element={<SalesProfit />} />}
                   <Route path="*" element={<Dashboard />} />
                 </Route>
+                )}
               </Routes>
             </BrowserRouter>
           </FxProvider>

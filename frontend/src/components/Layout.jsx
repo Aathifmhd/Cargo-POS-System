@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon, ThemeSwitch, Modal, useToast } from './ui.jsx';
 import { ChangePasswordModal } from './auth.jsx';
 import OfflineBar from './OfflineBar.jsx';
-import { api, isAdmin, isSuper, can, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime } from '../lib.js';
+import { api, isAdmin, isSuper, can, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime, tapSettings } from '../lib.js';
 import { useAuth, useFx, useSettings } from '../App.jsx';
 import { useTableLabels, useKeyboardOpen, usePullToRefresh, PULL_TRIGGER } from './mobile.js';
 
@@ -148,11 +148,13 @@ export default function Layout() {
           </div>
         </div>
         <nav>
-          {NAV.filter((i) => (!i.admin || isAdmin(user)) && (!i.super || isSuper(user)) && (!i.perm || can(user, i.perm))).map((item, i) =>
+          {(user.discreet ? NAV.filter((i) => ['/pos', '/stock', '/settings'].includes(i.to))   // the discreet view: a counter's screens only
+            : NAV.filter((i) => (!i.admin || isAdmin(user)) && (!i.super || isSuper(user)) && (!i.perm || can(user, i.perm)))).map((item, i) =>
             item.group ? (
               <div key={i} className="nav-group">{item.group}</div>
             ) : (
-              <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''} ${item.primary ? 'primary' : ''}`}>
+              <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''} ${item.primary ? 'primary' : ''}`}
+                onClick={item.to === '/settings' ? (e) => { if (tapSettings()) { e.preventDefault(); navigate('/pos'); } } : undefined}>
                 <Icon name={item.icon} size={19} />
                 <span>{item.label}</span>
                 {item.hint && <kbd>{item.hint}</kbd>}
@@ -163,11 +165,11 @@ export default function Layout() {
             )
           )}
         </nav>
-        <div className="sidebar-foot">
+        {!user.discreet && <div className="sidebar-foot">
           <span className={`fx-dot ${fx?.mode === 'manual' ? 'off' : ''}`} />
           1 INR = <b>Rs {(fx?.rate ?? Number(settings.default_exchange_rate)).toFixed(4)}</b>
           <NavLink to="/" className="link-sm">{fx?.mode === 'manual' ? 'by hand' : 'live'}</NavLink>
-        </div>
+        </div>}
         <div className="user-chip" ref={menuRef}>
           <button className="user-btn" onClick={() => setMenu((m) => !m)}>
             <span className="avatar">{user.name.slice(0, 1).toUpperCase()}</span>
@@ -205,7 +207,7 @@ export default function Layout() {
       )}
       {/* phones: the daily jobs at the thumb; everything else is under Menu */}
       <nav className="bottom-nav" aria-label="Main">
-        {BOTTOM.map((i) => (!i.perm || can(user, i.perm) ? i : i.else)).filter(Boolean).map((i) => (
+        {(user.discreet ? BOTTOM.filter((i) => ['/pos', '/stock'].includes(i.to)) : BOTTOM.map((i) => (!i.perm || can(user, i.perm) ? i : i.else)).filter(Boolean)).map((i) => (
           <NavLink key={i.to} to={i.to} end={i.end} className={({ isActive }) => `bn-item ${isActive ? 'active' : ''} ${i.primary ? 'primary' : ''}`}>
             <Icon name={i.icon} size={i.primary ? 22 : 20} /><span>{i.label}</span>
           </NavLink>

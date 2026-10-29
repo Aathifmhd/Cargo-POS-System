@@ -29,15 +29,18 @@ const HIDDEN = new Set([
   'profit', 'gross_profit', 'net_profit', 'invoice_profit', 'damaged_cost', 'damage_sold_cost', 'cost_value', 'margin',
 ]);
 
-function strip(v, settings) {
-  if (Array.isArray(v)) return v.map((x) => strip(x, settings));
+/** In the discreet view (see frontend lib.js) also: who the goods came from, and the import rate. */
+const DISCREET_HIDDEN = new Set(['supplier_name', 'supplier_code', 'supplier_phone', 'supplier_city', 'exchange_rate', 'effective_rate']);
+
+function strip(v, settings, discreet = false) {
+  if (Array.isArray(v)) return v.map((x) => strip(x, settings, discreet));
   if (!v || typeof v !== 'object' || v instanceof Date || Buffer.isBuffer(v)) return v;
   const out = {};
   // a cost per piece becomes its cost code
   if (typeof v.cost_per_pcs === 'number' && v.cost_code === undefined) out.cost_code = costCode(v.cost_per_pcs, settings);
   for (const [k, x] of Object.entries(v)) {
-    if (HIDDEN.has(k)) continue;
-    out[k] = strip(x, settings);
+    if (HIDDEN.has(k) || (discreet && DISCREET_HIDDEN.has(k))) continue;
+    out[k] = strip(x, settings, discreet);
   }
   return out;
 }
@@ -46,10 +49,11 @@ export const seesCost = (user) => can(user, 'see_cost');
 
 /** Express middleware (after the login check): for users who can't see costs, take them out of every answer. */
 export function hideCosts(req, res, next) {
-  if (!req.user || seesCost(req.user)) return next();
+  const discreet = req.get('X-View') === '1';   // the discreet view: as for a cashier, whoever is logged in
+  if (!req.user || (seesCost(req.user) && !discreet)) return next();
   getSettings().then((settings) => {
     const json = res.json.bind(res);
-    res.json = (body) => json(strip(body, settings));
+    res.json = (body) => json(strip(body, settings, discreet));
     next();
   }, next);
 }

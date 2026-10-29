@@ -39,7 +39,7 @@ const idbAll = (store) => run(store, 'readonly', (s) => s.getAll()).catch(() => 
 
 /* ---------------- what each screen last saw ---------------- */
 // one user's data is not shown to another on a shared device: the cache is kept per login
-const userKey = () => { try { return localStorage.getItem('cargo-pos-user') || ''; } catch { return ''; } };
+const userKey = () => { try { return `${localStorage.getItem('cargo-pos-user') || ''}${localStorage.getItem('cargo-pos-view') === '1' ? ':v' : ''}`; } catch { return ''; } };
 export const cacheGet = (url) => idbGet('cache', `${userKey()}|${url}`);
 export const cacheSet = (url, data) => idbSet('cache', `${userKey()}|${url}`, data);
 /** Change what a screen last saw (e.g. the stock after an offline bill), so the next offline bill sees it too. */

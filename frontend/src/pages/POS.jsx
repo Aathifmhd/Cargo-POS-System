@@ -580,7 +580,7 @@ export default function POS() {
         <div className={`till-who ${customer ? 'named' : ''}`} role="button" onClick={() => { setAfter(null); setModal('customer'); }} title="Change customer (F4)">
           <b>{customer ? custName(customer).toUpperCase() : 'WALK-IN CUSTOMER'}</b>
           <em>{customer
-            ? <>{custPerson(customer) ? `${custPerson(customer)} · ` : ''}{customer.phone || 'no phone'} · due {money(owed)}{customer.credit_limit > 0 ? ` of ${money(customer.credit_limit)}` : ''}{overLimit ? ' · OVER LIMIT' : ''}</>
+            ? <>{custPerson(customer) ? `${custPerson(customer)} · ` : ''}{customer.phone || 'no phone'}{user.discreet ? '' : <> · due {money(owed)}{customer.credit_limit > 0 ? ` of ${money(customer.credit_limit)}` : ''}{overLimit ? ' · OVER LIMIT' : ''}</>}</>
             : narrow ? 'no account · tap to choose' : 'no account · press F4 to choose'}</em>
           <span>cashier <b>{user.name}</b></span>
           <span className="till-whobtn">{customer ? 'Change' : 'Choose'} customer <i>F4</i></span>
@@ -829,6 +829,7 @@ export function ReturnKind({ onChoose, onClose }) {
 
 /* ---------------- customer picker (F4) ---------------- */
 function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose }) {
+  const discreet = Boolean(useAuth().user.discreet);   // the discreet view: no dues shown
   const phone = usePhone();
   const [q, setQ] = useState('');
   const [hi, setHi] = useState(0);
@@ -858,7 +859,7 @@ function CustomerPicker({ customers, current, creditOnly, onPick, onNew, onClose
         {list.map((c, i) => (
           <button key={c.id ?? 'walk'} className={`pick-row ${i === hi ? 'on' : ''} ${c.id === current ? 'cur' : ''}`} onMouseEnter={() => setHi(i)} onClick={() => onPick(c.id)}>
             <span><b>{c.walk ? c.name : custName(c)}</b>{!c.walk && <small>{[custPerson(c), c.city, c.phone].filter(Boolean).join(' · ')}</small>}</span>
-            {!c.walk && <span className="right">{c.balance > 0 ? <b className="text-red">due {money(c.balance)}</b> : <small>no dues</small>}{c.credit_limit > 0 && <small>limit {money(c.credit_limit)}</small>}</span>}
+            {!c.walk && !discreet && <span className="right">{c.balance > 0 ? <b className="text-red">due {money(c.balance)}</b> : <small>no dues</small>}{c.credit_limit > 0 && <small>limit {money(c.credit_limit)}</small>}</span>}
           </button>
         ))}
       </div>

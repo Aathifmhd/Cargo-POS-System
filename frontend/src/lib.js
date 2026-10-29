@@ -102,6 +102,36 @@ export const can = (u, perm) => (u?.role === 'superadmin' ? true : Boolean((u?.p
 /** Product costs and profit: users with the "see costs" permission; the others see the cost code. */
 export const seesCost = (u) => can(u, 'see_cost');
 
+/*
+ * The discreet view (on this device): the app shows only New Sale, Stock and Settings, as a counter login would —
+ * no costs, profit, totals, suppliers, imports, dues or reports, and the server leaves them out of every answer too.
+ * It is switched on and off by tapping Settings 5 times; nothing on the screen shows that it exists.
+ */
+const VIEW_KEY = 'cargo-pos-view';
+export const isDiscreet = () => { try { return localStorage.getItem(VIEW_KEY) === '1'; } catch { return false; } };
+export function toggleDiscreet() {
+  const on = !isDiscreet();
+  try { on ? localStorage.setItem(VIEW_KEY, '1') : localStorage.removeItem(VIEW_KEY); } catch { /* private mode */ }
+  window.dispatchEvent(new Event('cargo-pos-view'));
+  return on;
+}
+let taps = [];
+/** A tap on Settings: the fifth within 8 seconds switches the discreet view on or off. Returns true when it switched. */
+export function tapSettings() {
+  const now = Date.now();
+  taps = [...taps.filter((t) => now - t < 8000), now];
+  if (taps.length < 5) return false;
+  taps = [];
+  toggleDiscreet();
+  try { navigator.vibrate?.(60); } catch { /* no vibration */ }
+  return true;
+}
+/** What the logged-in user may see in the discreet view: a counter user's screens, nothing more. */
+export const discreetUser = (u) => ({
+  ...u, role: 'cashier', discreet: true,
+  perms: { see_cost: false, receive_goods: false, suppliers: false, reports: false, dues: false, cheques: false, settings: true, action_center: false },
+});
+
 /* ---------------- session ---------------- */
 const TOKEN_KEY = 'cargo-pos-token';
 export const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
@@ -123,6 +153,7 @@ async function request(method, url, body, approval, { timeout } = {}) {
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (approval) headers['X-Approval'] = approval;
+  if (isDiscreet()) headers['X-View'] = '1';
   // already known to be offline: straight to what was seen last
   if (method === 'GET' && !isOnline()) { const kept = await cacheGet(url); if (kept !== undefined) return kept; }
   let res;

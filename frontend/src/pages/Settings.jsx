@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, downloadFile, today, lkr, priceRules, autoPrices, niceDateTime, costCode, costDecode, isSuper, isAdmin } from '../lib.js';
+import { api, downloadFile, today, lkr, priceRules, autoPrices, niceDateTime, costCode, costDecode, isSuper, isAdmin, tapSettings } from '../lib.js';
 import { POS_KEYS } from './POS.jsx';
 import { PageHeader, Field, NumInput, Icon, useToast, ThemeSwitch } from '../components/ui.jsx';
 import { useSettings, useAuth } from '../App.jsx';
@@ -88,7 +88,8 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Shop details, products, appearance and backups — arranged by section." />
+      {/* tapping the title counts as tapping Settings (handy on a phone, where the menu closes) */}
+      <div onClick={tapSettings}><PageHeader title="Settings" subtitle="Shop details, products, appearance and backups — arranged by section." /></div>
       <div className={`set-layout ${panel ? 'show-panel' : ''}`}>
         <nav className="set-nav">
           {GROUPS.filter((g) => g.items.some(visible)).map((g) => (

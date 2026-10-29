@@ -32,6 +32,7 @@ const ADD_REASONS = [
 export default function Stock() {
   const { settings } = useSettings();   // the cost code
   const seeCost = seesCost(useAuth().user);
+  const discreet = Boolean(useAuth().user.discreet);
   const manage = can(useAuth().user, 'receive_goods');   // add products, receive goods, Stock Count, edit (not cashiers)
   const [params] = useSearchParams();
   const [q, setQ] = useState('');
@@ -116,7 +117,7 @@ export default function Stock() {
                     const cost = src ? src.cost_per_pcs : p.cost_per_pcs;
                     const exp = src?.expected_per_pcs || p.expected_per_set / p.pcs_per_set;
                     return (
-                      <tr key={`${p.id}-${b?.id ?? 0}`} className={`click ${b ? 'multi-cost' : ''} ${b && k < lines.length - 1 ? 'multi-more' : ''}`} onClick={() => setOpen(p.id)}>
+                      <tr key={`${p.id}-${b?.id ?? 0}`} className={`click ${b ? 'multi-cost' : ''} ${b && k < lines.length - 1 ? 'multi-more' : ''}`} onClick={() => !discreet && setOpen(p.id)}>
                         <td className="muted strong m-sub">{p.code}</td>
                         <td className="m-title">
                           <b>{p.name}</b> {b && <CostBadge tier={tiers[b.id]} />}
@@ -136,7 +137,7 @@ export default function Stock() {
                       </tr>
                     );
                   }).concat(p.damaged?.pcs > 0 ? [
-                    <tr key={`${p.id}-dmg`} className="click damaged-row" onClick={() => setOpen(p.id)} title="Damaged returns — kept apart from the stock">
+                    <tr key={`${p.id}-dmg`} className="click damaged-row" onClick={() => !discreet && setOpen(p.id)} title="Damaged returns — kept apart from the stock">
                       <td className="muted strong">{p.code}</td>
                       <td><b>{p.name}</b> <span className="badge-damaged">Damaged</span>
                         <div className="sub">Damaged returns{p.damaged.refs?.length ? ` · ${p.damaged.refs.slice(0, 3).join(', ')}${p.damaged.refs.length > 3 ? '…' : ''}` : ''}</div></td>

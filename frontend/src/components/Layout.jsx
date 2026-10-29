@@ -17,6 +17,13 @@ const BOTTOM = [
   { to: '/stock', icon: 'box', label: 'Stock' },
 ];
 
+// the tab bar in the discreet view
+const DISCREET_BOTTOM = [
+  { to: '/stock', icon: 'box', label: 'Stock' },
+  { to: '/pos', icon: 'cart', label: 'New Sale', primary: true },
+  { to: '/settings', icon: 'settings', label: 'Settings' },
+];
+
 const NAV = [
   { to: '/action-center', icon: 'bell', label: 'Action Center', perm: 'action_center' },
   { group: 'Daily work' },
@@ -137,7 +144,7 @@ export default function Layout() {
   }, [location.pathname, navigate]);
 
   return (
-    <div className={`shell ${open ? 'nav-open' : ''}`}>
+    <div className={`shell ${open ? 'nav-open' : ''} ${user.discreet ? 'discreet' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-logo"><Icon name="box" size={20} /></div>
@@ -206,16 +213,20 @@ export default function Layout() {
         </div>
       )}
       {/* phones: the daily jobs at the thumb; everything else is under Menu */}
-      <nav className="bottom-nav" aria-label="Main">
-        {(user.discreet ? BOTTOM.filter((i) => ['/pos', '/stock'].includes(i.to)) : BOTTOM.map((i) => (!i.perm || can(user, i.perm) ? i : i.else)).filter(Boolean)).map((i) => (
-          <NavLink key={i.to} to={i.to} end={i.end} className={({ isActive }) => `bn-item ${isActive ? 'active' : ''} ${i.primary ? 'primary' : ''}`}>
+      {/* the discreet view: Stock · New Sale · Settings (Settings counts the 5 taps too); Menu moves to the top left */}
+      <nav className={`bottom-nav ${user.discreet ? 'three' : ''}`} aria-label="Main">
+        {(user.discreet ? DISCREET_BOTTOM : BOTTOM.map((i) => (!i.perm || can(user, i.perm) ? i : i.else)).filter(Boolean)).map((i) => (
+          <NavLink key={i.to} to={i.to} end={i.end} className={({ isActive }) => `bn-item ${isActive ? 'active' : ''} ${i.primary ? 'primary' : ''}`}
+            onClick={i.to === '/settings' ? (e) => { if (tapSettings()) { e.preventDefault(); navigate('/pos'); } } : undefined}>
             <Icon name={i.icon} size={i.primary ? 22 : 20} /><span>{i.label}</span>
           </NavLink>
         ))}
-        <button type="button" className="bn-item" onClick={() => setOpen(true)}>
-          <Icon name="menu" size={20} /><span>Menu</span>
-          {attn > 0 && <i className="bn-dot" />}
-        </button>
+        {!user.discreet && (
+          <button type="button" className="bn-item" onClick={() => setOpen(true)}>
+            <Icon name="menu" size={20} /><span>Menu</span>
+            {attn > 0 && <i className="bn-dot" />}
+          </button>
+        )}
       </nav>
       {pw && <ChangePasswordModal onClose={() => setPw(false)} />}
       {needBackup && (

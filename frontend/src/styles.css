@@ -2067,3 +2067,9 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .offline-item.failed { background: color-mix(in srgb, var(--red-soft) 50%, transparent); }
 .offline-top, .offline-fail { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .till-offline { display: inline-block; margin-top: 3px; font-style: normal; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; padding: 1px 8px; border-radius: 999px; background: var(--amber-soft); color: var(--amber); }
+/* phones, discreet view: three tabs (Stock · New Sale · Settings), and Menu at the top left */
+@media (max-width: 860px) {
+  .bottom-nav.three { grid-template-columns: repeat(3, 1fr); }
+  .bottom-nav.three .bn-item.primary::before { inset: -14px max(8px, calc(50% - 38px)) 14px; }
+  .shell.discreet .mobile-bar { display: flex; position: sticky; top: 0; z-index: 40; margin: -12px -12px 10px; padding: 8px 12px; }
+}

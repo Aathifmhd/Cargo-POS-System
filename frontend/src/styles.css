@@ -977,7 +977,7 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
    Login
    ========================================================= */
 /* Plain white behind a centred card, whatever theme the rest of the system uses (the light theme's colours inside,
-   even when the system is set to dark); the system's dark blue, and the logo in it with a deeper red (brand/logo-login.png) */
+   even when the system is set to dark); the system's dark blue, and the logo in it with a deeper red (brand/logo-login.svg) */
 .login {
   position: relative; height: 100vh; overflow: hidden; background: #fff; color: var(--text); color-scheme: light;
   --text: #0B0F19; --text-2: #334155; --muted: #64748b; --border: #e3e8ef; --border-strong: #cbd5e1; --surface: #fff; --surface-2: #f8fafc;

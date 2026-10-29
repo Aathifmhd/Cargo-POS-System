@@ -4,7 +4,7 @@ import { Icon, Modal, Field, RoleBadge, useToast } from './ui.jsx';
 
 /* ================= LOGIN ================= */
 /** The logo, coming in: its letters jump in one after another, then join up and CLOTHINGS opens out (styles.css). */
-const LOGO = '/brand/logo-login.png';
+const LOGO = '/brand/logo-login.svg';   // a drawing: clean outlines at any size
 // each letter: where it starts and how wide it is, in the logo's own units (1575 wide)
 const LETTERS = [[0, 349], [349, 147], [496, 231], [727, 255], [982, 295], [1277, 298]];
 function JumpLogo() {

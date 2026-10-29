@@ -59,12 +59,12 @@ export function cleanCheques(list) {
  * Record the cheques of a payment. direction 'out' (we pay a supplier or cargo) or 'in' (a customer pays us).
  * party: 'customer' | 'supplier' | 'cargo'; partyId (customer / supplier id) or the cargo company name.
  */
-export async function recordCheques({ direction, party, partyId = null, partyName, billId = null, cheques, givenOn, notes = null, user = null }) {
+export async function recordCheques({ direction, party, partyId = null, partyName, billId = null, cheques, givenOn, notes = null, user = null, clientId = null }) {
   const made = [];
   for (const c of cheques) {
     const ch = await insert('cheques', {
       direction, party, party_id: partyId, party_name: partyName, bill_id: billId, ...c, status: 'pending', given_on: givenOn || todayStr(),
-      notes, payment_id: null, history: [{ status: 'pending', at: stamp(), by: user?.username || null }],
+      notes, payment_id: null, history: [{ status: 'pending', at: stamp(), by: user?.username || null }], client_id: clientId,
     });
     await syncPayment(ch);
     made.push(ch);

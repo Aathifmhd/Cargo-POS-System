@@ -193,11 +193,16 @@ r.post('/:id/bad-debts', async (req, res) => {
 r.post('/:id/payments', async (req, res) => {
   const c = await findOne('customers', { id: num(req.params.id) });
   if (!c) fail('Customer not found', 404);
+  // sent again (offline, or the answer was lost): the payment already made is the answer
+  const clientId = req.body?.client_id ? String(req.body.client_id).slice(0, 64) : null;
+  if (clientId && (await findOne('customer_payments', { client_id: clientId }) || await findOne('cheques', { client_id: clientId }))) {
+    return res.json({ again: true, ...summarizeCustomer(await customerBills(c.id)) });
+  }
   if (req.body.method === 'Cheque') {
     const saleId = req.body.sale_id ? num(req.body.sale_id) : null;
     if (saleId && !(await findOne('sales', { id: saleId, customer_id: c.id }))) fail('That bill does not belong to this customer');
     const cheques = await recordCheques({ direction: 'in', party: 'customer', partyId: c.id, partyName: customerLabel(c), billId: saleId,
-      cheques: cleanCheques(req.body.cheques), givenOn: req.body.date, notes: req.body.notes || null, user: req.user });
+      cheques: cleanCheques(req.body.cheques), givenOn: req.body.date, notes: req.body.notes || null, user: req.user, clientId });
     return res.json({ cheques, pending: true, ...summarizeCustomer(await customerBills(c.id)) });
   }
   const amount = round2(num(req.body.amount));
@@ -206,7 +211,7 @@ r.post('/:id/payments', async (req, res) => {
   if (saleId && !(await findOne('sales', { id: saleId, customer_id: c.id }))) fail('That bill does not belong to this customer');
   const p = await insert('customer_payments', {
     customer_id: c.id, sale_id: saleId, date: req.body.date || todayStr(), amount, method: req.body.method || 'Cash',
-    reference: req.body.reference || null, notes: req.body.notes || null,
+    reference: req.body.reference || null, notes: req.body.notes || null, client_id: clientId,
   });
   res.json({ ...p, ...summarizeCustomer(await customerBills(c.id)) });
 });

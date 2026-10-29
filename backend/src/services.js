@@ -750,7 +750,12 @@ export async function deleteGrn(id) {
  * batch's cost), and it takes its amount off the bill. A bill that comes to less than zero is a refund: cash given
  * back, or (credit) money the customer has on account, which comes off what they owe.
  */
-export async function createSale(body, approve) {
+/**
+ * A bill. `offline`: made on a device without internet and sent now — it keeps the number and time it was printed
+ * with, and nothing stops it (it is already in the customer's hands): what would have needed an approval, or goes
+ * over the credit limit, is returned in `flags` for the Action Center.
+ */
+export async function createSale(body, approve, { offline = false } = {}) {
   const settings = await getSettings();
   const items = (body.items || []).filter((i) => num(i.qty) !== 0);
   if (!items.length) fail('The bill is empty');
@@ -759,8 +764,14 @@ export async function createSale(body, approve) {
   if (paymentType === 'credit' && !customer) fail('Choose a customer for a credit bill');
   const date = body.date || todayStr();
 
+  const offlineNo = offline && /^OFF\d+-\d{1,6}$/.test(String(body.offline_no || '')) ? String(body.offline_no) : null;
+  if (offline && !offlineNo) fail('An offline bill needs its offline number');
+  const offlineAt = offline && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(String(body.offline_at || '')) ? String(body.offline_at) : null;
+  const flags = [];
+
   return tx(async () => {
-    const invoice_no = await nextNo('sales', 'invoice_no', settings.invoice_prefix || 'INV-', 5);
+    if (offlineNo && await findOne('sales', { invoice_no: offlineNo })) fail(`Bill ${offlineNo} is already in the system`, 409);
+    const invoice_no = offlineNo || await nextNo('sales', 'invoice_no', settings.invoice_prefix || 'INV-', 5);
     // every product of the bill in one read (a product on the bill twice is read again: its stock has moved)
     const prods = new Map((await find('products', { id: { $in: [...new Set(items.map((i) => num(i.product_id)))] } })).map((x) => [x.id, x]));
     const used = new Set();
@@ -832,15 +843,19 @@ export async function createSale(body, approve) {
     if (paymentType === 'credit' && customer.credit_limit > 0) {
       const after = round2((await customerSummary(customer.id)).balance + total - paid);
       // not approvable here: the Super Admin has to raise the limit first, then the bill goes through
-      if (after > customer.credit_limit) {
+      if (after > customer.credit_limit && offline) flags.push(`over the credit limit: ${customerLabel(customer)} now owes Rs ${after} (limit Rs ${customer.credit_limit})`);
+      else if (after > customer.credit_limit) {
         fail(`${customerLabel(customer)} would owe Rs ${after}, over the credit limit of Rs ${customer.credit_limit}. Raise the credit limit first.`, 409);
       }
     }
-    if (reasons.length && approve) await approve(reasons.join(' · '));
+    if (reasons.length && offline) flags.push(...reasons);
+    else if (reasons.length && approve) await approve(reasons.join(' · '));
 
     const sale = await insert('sales', {
       invoice_no, date, customer_id: customer?.id ?? null, customer_name: customerLabel(customer) || (body.customer_name || '').trim() || 'Walk-in customer',
       payment_type: paymentType, subtotal, discount, total, paid_at_sale: paid, cost_total, due_date, notes: body.notes || null,
+      client_id: body.client_id ? String(body.client_id).slice(0, 64) : null,
+      ...(offline ? { offline_at: offlineAt, device: num(body.device) || null, ...(offlineAt ? { created_at: offlineAt } : {}) } : {}),
     });
     // the bill's lines, all in one go
     await insertAll('sale_items', lines.map((l) => ({
@@ -855,6 +870,7 @@ export async function createSale(body, approve) {
   }).then(async ({ id, short }) => {
     const s = await getSale(id);
     // what was sold without stock — the Action Center is told (see routes/sales.js)
+    s.offline_flags = flags;
     s.sold_without_stock = await Promise.all(short.map(async (l) => ({
       product_id: l.p.id, code: l.p.code, name: l.p.name, pcs: l.no_stock_pcs, before: l.stock_before,
       after: (await findOne('products', { id: l.p.id }, { project: { stock_pcs: 1 } }))?.stock_pcs ?? l.stock_before - l.pcs,

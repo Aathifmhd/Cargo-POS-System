@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { find, aggregate, num, contains, nextNo, getSettings, round2 } from '../db.js';
+import { find, findOne, insert, aggregate, num, contains, nextNo, getSettings, round2 } from '../db.js';
 import { createSale, getSale, voidSale, deleteSale, customerLedgers } from '../services.js';
 import { guard, audit } from '../auth.js';
 import { billChecks } from '../attention.js';
@@ -43,6 +43,11 @@ r.get('/', async (req, res) => {
   }));
 });
 
+/** Offline billing: each device gets its own number once (Device 1, 2, …) — its offline bills are OFF1-0001, OFF2-0001, … */
+r.post('/device', async (req, res) => {
+  const d = await insert('devices', { by: req.user.username, label: String(req.body?.label || '').slice(0, 80) || null });
+  res.json({ device: d.id });
+});
 r.get('/next-no', async (req, res) => res.json({ invoice_no: await nextNo('sales', 'invoice_no', (await getSettings()).invoice_prefix || 'INV-', 5) }));
 /** The newest lines (up to `max`) of a product on completed bills that match `saleFilter` — newest first. */
 async function soldAt(productId, saleFilter, max = 25) {
@@ -83,7 +88,17 @@ r.get('/price-history', async (req, res) => {
 });
 r.get('/:id', async (req, res) => res.json(await getSale(num(req.params.id))));
 r.post('/', async (req, res) => {
-  const sale = await createSale(req.body, (action) => guard(req, action));
+  // sent again (offline, or the answer was lost on a weak connection): the bill already made is the answer
+  if (req.body?.client_id) {
+    const made = await findOne('sales', { client_id: String(req.body.client_id) }, { project: { id: 1 } });
+    if (made) return res.json({ ...(await getSale(made.id)), sold_without_stock: [], again: true });
+  }
+  const offline = req.get('X-Offline') === '1' && Boolean(req.body?.offline_no);
+  const sale = await createSale(req.body, (action) => guard(req, action), { offline });
+  if (offline) {
+    await audit(req.user, `Offline bill ${sale.invoice_no} (${sale.customer_name}, Rs ${sale.total}) made without internet${sale.offline_at ? ` at ${sale.offline_at} UTC` : ''} and sent when it was back`, null, 'offline');
+    if (sale.offline_flags?.length) await audit(req.user, `Offline bill ${sale.invoice_no} (${sale.customer_name}) went through without approval: ${sale.offline_flags.join(' · ')}`, null, 'attention');
+  }
   for (const x of sale.sold_without_stock || []) {
     await audit(req.user, `Sold without stock: ${x.pcs} pcs of ${x.name} (${x.code}) on ${sale.invoice_no} — stock now ${x.after} pcs`, null, 'nostock');
     if (x.after <= ATTENTION_STOCK && x.before > ATTENTION_STOCK) {

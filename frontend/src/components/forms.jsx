@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import { api, n, r2, today, niceDate, lkr, inr, supMoney, custName, shrinkPhoto, isLocalSup, PAY_METHODS_CUSTOMER, PAY_METHODS_SUPPLIER, isAdmin, isSuper } from '../lib.js';
+import { cachePatch, settleRows } from '../offline.js';
 import { Modal, Field, NumInput, DateInput, useToast, Icon, Segmented } from './ui.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 
@@ -339,8 +340,13 @@ export function SupplierPaymentModal({ supplier, bills = [], defaultGrnId, onClo
   const complete = async () => {
     setBusy(true);
     try {
-      await api.post(`/suppliers/${supplier.id}/payments`, { ...f, grn_id: f.grn_id || null, ...(ch.cheque ? { cheques: ch.rows } : {}) });
-      toast(ch.cheque ? `${ch.rows.length} cheque${ch.rows.length === 1 ? '' : 's'} (${cur(ch.total)}) given to ${supplier.name} — see the Cheque Desk` : `Paid ${cur(f.amount_inr)} to ${supplier.name}`);
+      const r = await api.send(`/suppliers/${supplier.id}/payments`, { ...f, grn_id: Number(f.grn_id) > 0 ? f.grn_id : null, ...(ch.cheque ? { cheques: ch.rows } : {}) },
+        { kind: 'supplier-payment', label: `Paid ${supplier.name}${ch.cheque ? ' (cheque)' : ''}`, amount: ch.cheque ? ch.total : n(f.amount_inr), money: local ? 'LKR' : 'INR' });
+      if (r.queued) {
+        await cachePatch('/dues/payables', (rows) => settleRows(rows, 'supplier_id', supplier.id, Number(f.grn_id) || null, ch.cheque ? ch.total : n(f.amount_inr)));
+        toast(`No internet — the payment to ${supplier.name} is saved on this device and is sent by itself when the internet is back`);
+      }
+      else toast(ch.cheque ? `${ch.rows.length} cheque${ch.rows.length === 1 ? '' : 's'} (${cur(ch.total)}) given to ${supplier.name} — see the Cheque Desk` : `Paid ${cur(f.amount_inr)} to ${supplier.name}`);
       onSaved?.();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };
@@ -396,8 +402,17 @@ export function CustomerPaymentModal({ customer, bills = [], defaultSaleId, onCl
   const complete = async () => {
     setBusy(true);
     try {
-      await api.post(`/customers/${customer.id}/payments`, { ...f, sale_id: f.sale_id || null, ...(ch.cheque ? { cheques: ch.rows } : {}) });
-      toast(ch.cheque ? `Cheque${ch.rows.length === 1 ? '' : 's'} of ${lkr(ch.total)} from ${custName(customer)} recorded — their due comes down when it is passed` : `Received ${lkr(f.amount)} from ${custName(customer)}`);
+      const r = await api.send(`/customers/${customer.id}/payments`, { ...f, sale_id: Number(f.sale_id) > 0 ? f.sale_id : null, ...(ch.cheque ? { cheques: ch.rows } : {}) },
+        { kind: 'customer-payment', label: `Received from ${custName(customer)}${ch.cheque ? ' (cheque)' : ''}`, amount: ch.cheque ? ch.total : n(f.amount), money: 'LKR' });
+      if (r.queued) {
+        // cash and transfers bring the due down now; a cheque only once it is passed (as online)
+        if (!ch.cheque) {
+          await cachePatch('/dues/receivables', (rows) => settleRows(rows, 'customer_id', customer.id, Number(f.sale_id) || null, n(f.amount)));
+          await cachePatch('/customers', (list) => list.map((c) => (c.id === customer.id ? { ...c, balance: Math.max(0, (c.balance || 0) - n(f.amount)) } : c)));
+        }
+        toast(`No internet — ${lkr(ch.cheque ? ch.total : f.amount)} from ${custName(customer)} is saved on this device and is sent by itself when the internet is back`);
+      }
+      else toast(ch.cheque ? `Cheque${ch.rows.length === 1 ? '' : 's'} of ${lkr(ch.total)} from ${custName(customer)} recorded — their due comes down when it is passed` : `Received ${lkr(f.amount)} from ${custName(customer)}`);
       onSaved?.();
     } catch (err) { toast(err.message, 'error'); } finally { setBusy(false); }
   };

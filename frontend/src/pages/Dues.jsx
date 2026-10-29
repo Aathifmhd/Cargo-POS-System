@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, useApi, lkr, inr, supMoney, bothMoney, niceDate, dueText, niceTime, seesCost, can } from '../lib.js';
+import { isOnline } from '../offline.js';
 import { PageHeader, Card, Loading, ErrorBox, Empty, Stat, Tabs, Icon, Segmented, DateInput, Badge, Modal, Field, useToast } from '../components/ui.jsx';
 import { SupplierPaymentModal, CustomerPaymentModal, CargoPaymentModal, ChequeReturned } from '../components/forms.jsx';
 import { MoreMenu } from './Cheques.jsx';
@@ -285,8 +286,12 @@ export default function Dues() {
   const sumText = (k) => (isPay ? bothMoney(rows.filter((r) => !k || r.status === k), (b) => b.balance) : fmt(sum(k)));
 
   const openPay = async (b) => {
-    if (isPay) setModal({ type: 'sup', who: await api.get(`/suppliers/${b.supplier_id}`), id: b.id });
-    else setModal({ type: 'cus', who: await api.get(`/customers/${b.customer_id}`), id: b.id });
+    // offline, a supplier or customer never opened on this device: their bills from this list are enough to pay
+    const fromList = () => (isPay
+      ? { id: b.supplier_id, name: b.supplier_name, origin: b.currency === 'LKR' ? 'local' : 'india', bills: rows.filter((r) => r.supplier_id === b.supplier_id) }
+      : { id: b.customer_id, name: b.customer_person || b.customer_name, shop_name: b.customer_person ? b.customer_name : null, phone: b.customer_phone, bills: rows.filter((r) => r.customer_id === b.customer_id) });
+    const who = await api.get(isPay ? `/suppliers/${b.supplier_id}` : `/customers/${b.customer_id}`).catch((e) => { if (isOnline()) throw e; return fromList(); });
+    setModal({ type: isPay ? 'sup' : 'cus', who, id: b.id });
   };
   const done = () => { setModal(null); pay.reload(); rec.reload(); setVersion((v) => v + 1); };
 

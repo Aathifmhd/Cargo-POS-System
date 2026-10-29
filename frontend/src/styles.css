@@ -2052,3 +2052,18 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .till-tbl tr.on td.stk { display: flex; gap: 6px; align-items: baseline; grid-column: 1 / -1; }
   .till-tbl tr.on td.stk::before { content: attr(data-label); font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--t-steel); }
 }
+
+/* Working offline: the strip at the top, the waiting list, the OFFLINE mark on New Sale */
+.offline-bar { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; text-align: left; font: inherit; font-size: 13px; padding: 9px 14px; margin: 0 0 12px; border-radius: var(--radius-s); cursor: pointer; line-height: 1.4; }
+.offline-bar svg { flex: none; }
+.offline-bar span { flex: 1; min-width: 0; }
+.offline-bar em { font-style: normal; font-weight: 800; font-size: 12px; white-space: nowrap; padding: 2px 9px; border-radius: 999px; background: rgba(255,255,255,.55); }
+.offline-bar.off { background: var(--amber-soft); color: var(--amber); }
+.offline-bar.sync { background: var(--blue-soft, #E6F0FF); color: var(--blue); }
+.offline-bar.bad { background: var(--red-soft); color: var(--red); }
+.offline-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.offline-item { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 3px; }
+.offline-item:first-child { border-top: 0; }
+.offline-item.failed { background: color-mix(in srgb, var(--red-soft) 50%, transparent); }
+.offline-top, .offline-fail { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.till-offline { display: inline-block; margin-top: 3px; font-style: normal; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; padding: 1px 8px; border-radius: 999px; background: var(--amber-soft); color: var(--amber); }

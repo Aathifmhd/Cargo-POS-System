@@ -93,13 +93,13 @@ const DEFAULTS = {
   grn_expenses: { category: null, amount_lkr: 0 },
   grn_items: { category: null, cargo_lkr: 0, other_lkr: 0, cargo_per_pcs: null, other_per_pcs: null, short_status: null, short_date: null, short_note: null, short_amount: null, extra_status: null, extra_date: null, extra_note: null, extra_amount: null, pcs_per_set: 1, colors_count: 0, color_names: null, sizes: null, mrp_per_set: 0, expected_per_set: 0,
     extra_sets: 0, extra_pcs: 0, short_sets: 0, short_pcs: 0, odd_pcs: 0 },
-  supplier_payments: { grn_id: null, exchange_rate: 0, amount_lkr: 0, method: null, reference: null, notes: null, cheque_id: null },
+  supplier_payments: { grn_id: null, exchange_rate: 0, amount_lkr: 0, method: null, reference: null, notes: null, cheque_id: null, client_id: null },
   cargo_payments: { method: null, reference: null, notes: null, cheque_id: null },
   cargos: { contact: null, phone: null, address: null, notes: null, active: 1 },
-  cheques: { party_id: null, bill_id: null, owner: null, bank: null, no_auto: 0, notes: null, payment_id: null, passed_on: null, history: [] },
-  sales: { customer_id: null, customer_name: null, discount: 0, paid_at_sale: 0, cost_total: 0, due_date: null, notes: null, status: 'completed' },
+  cheques: { party_id: null, bill_id: null, owner: null, bank: null, no_auto: 0, notes: null, payment_id: null, passed_on: null, history: [], client_id: null },
+  sales: { customer_id: null, customer_name: null, discount: 0, paid_at_sale: 0, cost_total: 0, due_date: null, notes: null, status: 'completed', client_id: null, offline_at: null, device: null },
   sale_items: { batch_id: null, batches: [], no_stock_pcs: 0, damaged: false, damaged_cost: 0, damaged_takes: [], code: null, mrp_per_unit: 0, expected_per_unit: 0, cost_per_unit: 0, disc: 0, disc_pct: 0 },
-  customer_payments: { sale_id: null, method: null, reference: null, notes: null, cheque_id: null },
+  customer_payments: { sale_id: null, method: null, reference: null, notes: null, cheque_id: null, client_id: null },
   stock_moves: { ref: null, note: null, batch_id: null, reason_code: null },
   bad_debts: { sale_id: null, reason: null, note: null },
   damaged: { sale_id: null, ref: null, cost_per_pcs: 0, in_pcs: 0, left_pcs: 0 },
@@ -158,7 +158,7 @@ export const bumpCounter = (name, n) => col('counters').updateOne({ _id: name },
 
 export const COLLECTIONS = ['settings', 'suppliers', 'customers', 'products', 'grns', 'grn_expenses', 'grn_items', 'supplier_payments',
   'sales', 'sale_items', 'customer_payments', 'stock_moves', 'users', 'audit_log', 'fx_rates', 'batches',
-  'cargo_payments', 'cheques', 'customer_ids', 'damaged', 'stocktakes', 'bad_debts', 'held', 'cargos', 'sms_log'];
+  'cargo_payments', 'cheques', 'customer_ids', 'damaged', 'stocktakes', 'bad_debts', 'held', 'cargos', 'sms_log', 'devices'];
 
 /* ---------------- errors & small helpers ---------------- */
 export class HttpError extends Error {
@@ -252,6 +252,11 @@ export async function setup() {
     ix('sales', { invoice_no: 1 }, { unique: true }),
     ix('sales', { date: 1 }),
     ix('sms_log', { key: 1 }),
+    // a bill or payment sent again (offline, or after a lost answer) is found by the id the device gave it
+    ix('sales', { client_id: 1 }),
+    ix('customer_payments', { client_id: 1 }),
+    ix('supplier_payments', { client_id: 1 }),
+    ix('cheques', { client_id: 1 }),
     ix('sales', { customer_id: 1 }),
     ix('sale_items', { sale_id: 1 }),
     ix('sale_items', { product_id: 1 }),

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Icon, ThemeSwitch, Modal, useToast } from './ui.jsx';
 import { ChangePasswordModal } from './auth.jsx';
+import OfflineBar from './OfflineBar.jsx';
 import { api, isAdmin, isSuper, can, ROLE_NAME, downloadFile, today, fromStamp, niceDateTime } from '../lib.js';
 import { useAuth, useFx, useSettings } from '../App.jsx';
 import { useTableLabels, useKeyboardOpen, usePullToRefresh, PULL_TRIGGER } from './mobile.js';
@@ -192,6 +193,7 @@ export default function Layout() {
           <button className="btn btn-icon btn-ghost" onClick={() => setOpen(true)} aria-label="Menu"><Icon name="menu" /></button>
           <b>{settings.shop_name}</b>
         </div>
+        <OfflineBar user={user} />
         <div key={location.pathname} className="page-in"><Outlet /></div>
       </main>
       {/* phones: pull to refresh — the page comes down and the icon sits in the space above it, turning as it is pulled */}

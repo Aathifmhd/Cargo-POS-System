@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { cacheGet, cacheSet, noteOnline, noteOffline, isOnline, enqueue, newId, setTokenGetter } from './offline.js';
 
 /* ---------------- catalogue (Settings → Categories, products & sizes) ---------------- */
 /** [{ name, sizes: [], types: [] }] from settings.catalog */
@@ -105,20 +106,42 @@ export const seesCost = (u) => can(u, 'see_cost');
 const TOKEN_KEY = 'cargo-pos-token';
 export const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
 export const setToken = (t) => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ } };
+setTokenGetter(getToken);   // the offline outbox sends with the same login
 
 // Set by <ApprovalProvider>: shows the admin-credentials box and resolves to an approval token (or null if cancelled).
 let approvalHandler = null;
 export const setApprovalHandler = (fn) => { approvalHandler = fn; };
 
 /* ---------------- API ---------------- */
-async function request(method, url, body, approval) {
+/**
+ * One call to the server. Without internet (no answer, or none in time): a GET gets what this device saw last
+ * (see offline.js), anything else throws an OfflineError (err.offline) — New Sale and payments then keep it to send later.
+ */
+async function request(method, url, body, approval, { timeout } = {}) {
   const headers = {};
   if (body) headers['Content-Type'] = 'application/json';
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (approval) headers['X-Approval'] = approval;
-  const res = await fetch('/api' + url, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  // already known to be offline: straight to what was seen last
+  if (method === 'GET' && !isOnline()) { const kept = await cacheGet(url); if (kept !== undefined) return kept; }
+  let res;
+  try {
+    res = await fetch('/api' + url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeout ?? (method === 'GET' ? 25_000 : 60_000)) });
+  } catch {
+    noteOffline();
+    if (method === 'GET') {
+      const kept = await cacheGet(url);
+      if (kept !== undefined) return kept;
+      throw new Error('No internet — this page has not been opened on this device before. It opens when the internet is back.');
+    }
+    const err = new Error('No internet connection — this needs the internet. New Sale and payments still work offline.');
+    err.offline = true;
+    throw err;
+  }
+  noteOnline();
   const data = await res.json().catch(() => ({}));
+  if (method === 'GET' && res.ok) cacheSet(url, data);   // kept for when the internet is gone
   if (res.status === 401 && !url.startsWith('/auth/')) {
     setToken(null);
     window.dispatchEvent(new Event('cargo-pos-logout'));
@@ -135,7 +158,17 @@ async function request(method, url, body, approval) {
 
 export const api = {
   get: (url) => request('GET', url),
-  post: (url, body = {}) => request('POST', url, body),
+  post: (url, body = {}, opts) => request('POST', url, body, null, opts),
+  /**
+   * A payment that may be made offline: sent now, or — without internet — kept on this device and sent by itself
+   * later. Returns the server's answer, or { queued: true } when kept. q: { kind, label, amount } for the waiting list.
+   */
+  send: async (url, body, q) => {
+    const b = { ...body, client_id: body.client_id || newId() };
+    const keep = async () => ({ queued: true, item: await enqueue({ url, body: b, ...q }) });
+    if (!isOnline()) return keep();
+    try { return await request('POST', url, b, null, { timeout: 20_000 }); } catch (e) { if (e.offline) return keep(); throw e; }
+  },
   put: (url, body = {}) => request('PUT', url, body),
   del: (url) => request('DELETE', url),
 };

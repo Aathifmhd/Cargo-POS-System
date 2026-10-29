@@ -107,11 +107,14 @@ r.delete('/:id', async (req, res) => {
 r.post('/:id/payments', async (req, res) => {
   const s = await findOne('suppliers', { id: num(req.params.id) });
   if (!s) fail('Supplier not found', 404);
+  // sent again (offline, or the answer was lost): the payment already made is the answer
+  const clientId = req.body?.client_id ? String(req.body.client_id).slice(0, 64) : null;
+  if (clientId && (await findOne('supplier_payments', { client_id: clientId }) || await findOne('cheques', { client_id: clientId }))) return res.json({ again: true });
   if (req.body.method === 'Cheque') {
     const grnId = req.body.grn_id ? num(req.body.grn_id) : null;
     if (grnId && !(await findOne('grns', { id: grnId, supplier_id: s.id }))) fail('That GRN does not belong to this supplier');
     const cheques = await recordCheques({ direction: 'out', party: 'supplier', partyId: s.id, partyName: s.name, billId: grnId,
-      cheques: cleanCheques(req.body.cheques), givenOn: req.body.date, notes: req.body.notes || null, user: req.user });
+      cheques: cleanCheques(req.body.cheques), givenOn: req.body.date, notes: req.body.notes || null, user: req.user, clientId });
     await supplierChequesSms(s.id, cheques, req.user);   // a local supplier: cheque issued SMS
     return res.json({ cheques });
   }
@@ -124,6 +127,7 @@ r.post('/:id/payments', async (req, res) => {
   const p = await insert('supplier_payments', {
     supplier_id: s.id, grn_id: grnId, date: req.body.date || todayStr(), amount_inr: amount, exchange_rate: rate,
     amount_lkr: round2(amount * rate), method: req.body.method || null, reference: req.body.reference || null, notes: req.body.notes || null,
+    client_id: clientId,
   });
   await revalueGrns();   // notes when the bill becomes fully paid
   await supplierPaidSms(s.id, p, req.user);   // a local supplier: payment SMS

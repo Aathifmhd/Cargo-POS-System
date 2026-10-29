@@ -7,6 +7,7 @@ import { useNarrow, usePhone } from '../components/mobile.js';
 import { CustomerForm } from '../components/forms.jsx';
 import { useAuth, useSettings } from '../App.jsx';
 import { isAdmin, isSuper, custName, custPerson, niceTime, costCode } from '../lib.js';
+import { isOnline, useOffline, deviceNo, peekOfflineNo, takeOfflineNo, enqueue, newId, cachePatch, stampNow } from '../offline.js';
 
 const DRAFT_KEY = 'cargo-pos-draft';
 const HELD_KEY = 'cargo-pos-held';   // older: bills held on this computer only (moved to the shared list once)
@@ -122,8 +123,19 @@ export default function POS() {
 
   const loadProducts = () => api.get('/products').then(setProducts).catch((e) => toast(e.message, 'error'));
   const loadCustomers = () => api.get('/customers').then((c) => setCustomers(c.filter((x) => x.active))).catch(() => {});
-  const loadNo = () => api.get('/sales/next-no').then((d) => setNextNo(d.invoice_no)).catch(() => {});
+  // without internet the next bill gets this device's offline number (OFF1-0001 …)
+  const loadNo = () => (isOnline()
+    ? api.get('/sales/next-no').then((d) => setNextNo(isOnline() ? d.invoice_no : peekOfflineNo() || d.invoice_no)).catch(() => setNextNo(peekOfflineNo() || ''))
+    : Promise.resolve(setNextNo(peekOfflineNo() || '')));
   useEffect(() => { loadProducts(); loadCustomers(); loadNo(); }, []); // eslint-disable-line
+  // the internet came back (and the offline bills went in): the stock, dues and next number as they are now
+  const { online } = useOffline();
+  useEffect(() => { if (online) { loadProducts(); loadCustomers(); } loadNo(); }, [online]); // eslint-disable-line
+  useEffect(() => {
+    const again = () => { loadProducts(); loadCustomers(); loadNo(); };
+    window.addEventListener('cargo-pos-synced', again);
+    return () => window.removeEventListener('cargo-pos-synced', again);
+  }, []); // eslint-disable-line
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => { writeLS('pos-show-cost', showCostPref); }, [showCostPref]);
   const showCost = showCostPref && seeCost;
@@ -367,18 +379,71 @@ export default function POS() {
     if (isAdmin(user) && T.rows.some((r) => r?.under) && !confirm('Some lines are priced BELOW cost. Continue?')) return;
     setBusy(true);
     try {
-      const sale = await api.post('/sales', {
-        customer_id: customerId, payment_type: type, discount: T.billDisc,
+      // client_id: the bill's own id — sent twice (a lost answer, or offline and then online) it is still one bill
+      const body = {
+        client_id: newId(), customer_id: customerId, payment_type: type, discount: T.billDisc,
         paid_amount: type === 'credit' ? (T.net < 0 ? 0 : n(paid)) : T.net, due_date: type === 'credit' ? due : null,
         items: lines.map((l) => ({ product_id: l.product_id, batch_id: l.batch_id ?? null, batch_ids: batchOf(l.product_id, l.batch_id)?.ids || null, damaged: Boolean(l.damaged), unit: l.unit, qty: n(l.qty), price: n(l.price), disc_pct: n(l.disc_pct) })),
-      });
-      writeLS(LAST_KEY, sale.id);
+      };
+      let sale;
+      if (!isOnline()) sale = await saveOffline(body, type);
+      else {
+        try { sale = await api.post('/sales', body, { timeout: 25_000 }); } catch (e) { if (!e.offline) throw e; sale = await saveOffline(body, type); }
+      }
+      if (!sale) return;
+      writeLS(LAST_KEY, sale.offline ? { offline: sale } : sale.id);
       setDone({ sale, change: type === 'cash' && n(paid) > 0 ? r2(n(paid) - sale.total) : null });
       setModal(null);
       clearBill();
       localStorage.removeItem(DRAFT_KEY);
       loadProducts(); loadCustomers(); loadNo();
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+  };
+  /**
+   * No internet: the bill is kept on this device with the device's offline number and printed as usual; it is sent by
+   * itself when the internet is back. The stock and the customer's due on this device move with it straight away.
+   */
+  const saveOffline = async (body, type) => {
+    if (!deviceNo()) { toast('No internet — and this device is not set up for offline bills yet. Open the app once with internet, then it can bill offline.', 'error'); return null; }
+    const no = takeOfflineNo();
+    const at = stampNow();
+    const date = today();
+    const total = T.net;
+    const paidNow = type === 'cash' ? total : total < 0 ? 0 : Math.min(Math.max(0, n(body.paid_amount)), total);
+    const due = type === 'credit' ? body.due_date || addDays(date, customer?.credit_days || 30) : null;
+    const owesAfter = r2((customer?.balance || 0) + (type === 'credit' ? total - paidNow : 0));
+    const rows = T.rows.filter((r) => r && n(r.qty) !== 0);
+    const sale = {
+      offline: true, id: null, invoice_no: no, date, created_at: at, status: 'completed',
+      customer_id: customer?.id ?? null, customer_name: customer ? custName(customer) : 'Walk-in customer',
+      customer_phone: customer?.phone ?? null, customer_address: customer?.address ?? null, customer_person: customer ? custPerson(customer) : null,
+      payment_type: type, subtotal: r2(T.sub - T.lineDisc), discount: T.billDisc, total, paid_at_sale: paidNow, due_date: due,
+      balance: type === 'credit' ? r2(total - paidNow) : 0, customer_balance: customer ? owesAfter : undefined, payments: [],
+      items: rows.map((r, i) => ({
+        id: i + 1, product_id: r.p.id, code: r.p.code, name: r.p.name, unit: r.unit, qty: n(r.qty), pcs: n(r.qty) * r.u.per, price: n(r.price),
+        disc: r.disc, disc_pct: n(r.disc_pct), line_total: r.amount, mrp_per_unit: r.u.mrp, expected_per_unit: r.u.expected, damaged: Boolean(r.damaged),
+      })),
+    };
+    await enqueue({ url: '/sales', body: { ...body, due_date: due, offline_no: no, offline_at: at, date, device: deviceNo() }, kind: 'sale', label: `${no} · ${sale.customer_name}`, amount: total, money: 'LKR' });
+    // this device's stock and the customer's due, as they are after this bill
+    const sold = {};
+    for (const r of rows) if (!r.damaged) sold[r.p.id] = (sold[r.p.id] || 0) + n(r.qty) * r.u.per;
+    const less = (list) => list.map((p) => (sold[p.id] ? { ...p, stock_pcs: p.stock_pcs - sold[p.id] } : p));
+    setProducts((ps) => (ps ? less(ps) : ps));
+    await cachePatch('/products', less);
+    if (customer && type === 'credit') {
+      const owe = (list) => list.map((c) => (c.id === customer.id ? { ...c, balance: owesAfter } : c));
+      setCustomers((cs) => (cs ? owe(cs) : cs));
+      await cachePatch('/customers', owe);
+      const owing = r2(total - paidNow);
+      if (owing > 0.009) {
+        await cachePatch('/dues/receivables', (rows) => [...rows, {
+          id: -Date.now(), invoice_no: no, date, due_date: due, amount: owing, balance: owing, payment_type: 'credit', status: 'open',
+          customer_id: customer.id, customer_name: custName(customer), customer_person: custPerson(customer), customer_phone: customer.phone, offline: true,
+        }]);
+      }
+    }
+    return sale;
   };
   /** Take payment: first ask Cash or Credit (Cash is the default). */
   const openPay = () => {
@@ -403,12 +468,17 @@ export default function POS() {
       setCustomers((cs) => cs.map((x) => (x.id === c.id ? { ...x, ...c } : x)));
       toast(`Credit limit for ${custName(customer)} raised to ${lkr(newLimit)}`);
       await complete('credit', { paid, due });
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) {
+      // no internet: the limit can't be raised now — the bill is kept offline and the Super Admin is told it went over
+      if (e.offline) { toast('No internet — the bill is saved offline. The Super Admin is told it went over the credit limit.'); return complete('credit', { paid, due }); }
+      toast(e.message, 'error');
+    }
   };
   const [reprinting, setReprinting] = useState(null);   // the last bill, to print again
   const reprint = () => {
     const id = readLS(LAST_KEY, null);
     if (!id) return toast('No bill made on this computer yet', 'error');
+    if (typeof id === 'object' && id.offline) return setReprinting(id.offline);   // a bill made offline: as it was printed
     api.get(`/sales/${id}`).then(setReprinting).catch((e) => toast(e.message, 'error'));
   };
 
@@ -533,6 +603,7 @@ export default function POS() {
         <div className="till-no">
           <span>BILL NO</span>
           <b>{nextNo || '—'}</b>
+          {!online && <em className="till-offline" title="No internet — bills are kept on this device and sent when it is back">OFFLINE</em>}
           {seeCost && <button className={`till-gp ${showCost ? 'on' : ''}`} onClick={() => setShowCost((s) => !s)} title="Show / hide cost and profit ( ` key )">
             <Icon name={showCost ? 'eye' : 'eyeOff'} size={12} /> {showCost ? 'COST SHOWN' : 'COST HIDDEN'} <kbd>`</kbd>
           </button>}
@@ -1012,9 +1083,9 @@ export function DoneModal({ sale, change, onClose, onView }) {
     onClose();   // on to the next sale
   };
   return (
-    <Modal size="md" title="Bill saved ✔ — print it?" subtitle={`${sale.invoice_no} · ${sale.customer_name}`} onClose={onClose}
+    <Modal size="md" title={sale.offline ? 'Bill saved offline ✔ — print it?' : 'Bill saved ✔ — print it?'} subtitle={`${sale.invoice_no} · ${sale.customer_name}${sale.offline ? ' · sent by itself when the internet is back' : ''}`} onClose={onClose}
       footer={<>
-        <button className="btn" onClick={onView}>View bill</button>
+        {!sale.offline && <button className="btn" onClick={onView}>View bill</button>}
         <button className="btn" onClick={onClose}>{phone ? "Don't print" : "Don't print (Esc)"}</button>
         <span className="spacer" />
         {!phone && <button className="btn btn-primary" disabled={busy} onClick={() => print(size)}><Icon name="print" /> Print {size === '80' ? '80 mm' : 'A5'} (Enter)</button>}

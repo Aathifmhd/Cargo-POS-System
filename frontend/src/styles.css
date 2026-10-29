@@ -130,7 +130,9 @@ code { background: var(--surface-2); border: 1px solid var(--border); padding: 1
   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
 .brand { display: flex; gap: 10px; align-items: center; padding: 18px 16px 14px; }
-.brand-logo { width: 36px; height: 36px; border-radius: 10px; background: #E0A73A; color: #0B0F19; display: grid; place-items: center; }
+/* the logo's M (public/brand/m.png: its square in the middle of the picture, the tick reaching out to the right) */
+.brand-logo { width: 36px; height: 36px; display: grid; place-items: center; flex-shrink: 0; }
+.brand-logo img { width: 32px; max-width: none; height: auto; display: block; }
 .brand-name { color: #fff; font-weight: 700; font-size: 14.5px; line-height: 1.2; }
 .brand-sub { font-size: 11.5px; opacity: .7; }
 .sidebar nav { padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
@@ -580,7 +582,7 @@ button.list-row-btn:hover { background: var(--surface-2); }
 
   /* brand */
   .sidebar .brand { padding: 16px; gap: 12px; border-bottom: 1px solid rgba(255, 255, 255, .07); margin-bottom: 6px; white-space: nowrap; }
-  .sidebar .brand-logo { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; box-shadow: 0 6px 18px rgba(224, 167, 58, .35); }
+  .sidebar .brand-logo { width: 40px; height: 40px; }
   .sidebar .brand-name, .sidebar .brand-sub { overflow: hidden; text-overflow: ellipsis; }
 
   /* menu items: 44 × 44 tiles when closed, full rows when open */
@@ -974,22 +976,53 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 /* =========================================================
    Login
    ========================================================= */
-/* Plain light background, soft blurred colour shapes drifting slowly behind a centred card */
-.login { position: relative; height: 100vh; overflow: hidden; background: #f4f7f8; }
+/* Plain white behind a centred card, whatever theme the rest of the system uses (the light theme's colours inside,
+   even when the system is set to dark); the system's dark blue, and the logo in it (brand/logo-navy.png) */
+.login {
+  position: relative; height: 100vh; overflow: hidden; background: #fff; color: var(--text); color-scheme: light;
+  --text: #0B0F19; --text-2: #334155; --muted: #64748b; --border: #e3e8ef; --border-strong: #cbd5e1; --surface: #fff; --surface-2: #f8fafc;
+  --primary: #1B2A4E; --red: #dc2626; --blue: #1d4ed8; --blue-soft: #e9effd; --violet: #6d28d9; --violet-soft: #f1ebfd;
+}
 
-.login-center { position: relative; z-index: 1; height: 100%; overflow-y: auto; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 32px 16px; gap: 22px; }
-.login-brand { text-align: center; animation: fadeUp .6s both; }
-.login-brand h1 { font-size: 28px; margin-top: 12px; color: var(--text); }
-.login-brand p { color: var(--muted); margin-top: 4px; }
-.brand-logo.lg { width: 56px; height: 56px; border-radius: 16px; margin: 0 auto; box-shadow: 0 10px 30px rgba(224, 167, 58, .45); animation: float 3.5s ease-in-out infinite; }
-@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
-.login-card { width: 100%; max-width: 380px; background: rgba(255, 255, 255, .82); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, .9); border-radius: 18px; padding: 28px; box-shadow: 0 24px 60px rgba(15, 23, 42, .12); display: flex; flex-direction: column; gap: 12px; animation: fadeUp .6s .12s both; }
+.login-center { position: relative; z-index: 1; height: 100%; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: 32px 16px; gap: 22px; }
+/* centred while it fits; on a short screen it starts at the top and scrolls (centring would cut the logo off) */
+.login-center > :first-child { margin-top: auto; }
+.login-center > :last-child { margin-bottom: auto; }
+.login-brand { text-align: center; }
+.login-brand h1 { line-height: 0; }
+.login-brand p { color: var(--muted); margin-top: 12px; animation: fadeUp .6s .1s both; }
+/* The logo (auth.jsx JumpLogo): the letters jump in one after another, join up into the logo with a little bump, then
+   CLOTHINGS opens out from the middle. Each letter is a slice of the logo picture, placed in the logo's own units
+   (1575 × 430; the letters are the top 299) — --x / --w: where it starts and how wide it is, --i: its turn.
+   Before joining up, each sits a quarter further from the middle than in the logo. */
+.jump-logo { --W: min(170px, 48vw); position: relative; display: block; width: var(--W); aspect-ratio: 1575 / 430; margin: 0 auto; }
+.jump-logo .jl { position: absolute; top: 0; height: calc(299 / 430 * 100%); left: calc(var(--x) / 1575 * 100%); width: calc(var(--w) / 1575 * 100%);
+  transform: translateX(calc(var(--W) * (var(--x) + var(--w) / 2 - 787.5) * .26 / 1575)); }
+.jump-logo b, .jump-logo .jl-c { position: absolute; inset: 0; background: var(--logo) no-repeat; opacity: 0; }
+.jump-logo b { background-size: calc(1575 / var(--w) * 100%) calc(430 / 299 * 100%); background-position: calc(var(--x) / (1575 - var(--w)) * 100%) 0; transform-origin: 50% 100%; }
+.jump-logo .jl-c { top: auto; height: calc(77 / 430 * 100%); background-size: 100% calc(430 / 77 * 100%); background-position: 0 100%; }
+.jump-logo.go b { animation: jl-jump .56s calc(var(--i) * 85ms) both; }
+.jump-logo.go .jl { animation: jl-join .48s cubic-bezier(.55, -.05, .3, 1.35) .95s both; }
+.jump-logo.go { animation: jl-bump .4s ease-out 1.33s; }
+.jump-logo.go .jl-c { animation: jl-open .55s cubic-bezier(.2, .7, .2, 1) 1.3s both; }
+@keyframes jl-jump {
+  0% { opacity: 0; transform: translateY(90%) scale(.5); animation-timing-function: cubic-bezier(.2, .8, .4, 1); }
+  42% { opacity: 1; transform: translateY(-40%) scale(1.04); animation-timing-function: cubic-bezier(.6, 0, .9, .6); }
+  68% { opacity: 1; transform: translateY(0) scale(1.1, .86); animation-timing-function: cubic-bezier(.3, .8, .5, 1); }
+  84% { opacity: 1; transform: translateY(-6%) scale(.98, 1.03); animation-timing-function: ease-in; }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes jl-join { to { transform: none; } }
+@keyframes jl-bump { 40% { transform: scale(1.045); } }
+@keyframes jl-open { from { opacity: 0; clip-path: inset(0 50%); transform: translateY(35%); } to { opacity: 1; clip-path: inset(0 0); transform: none; } }
+.login-card { width: 100%; max-width: 380px; background: #fff; border: 1px solid #e6eaf0; border-radius: 18px; padding: 28px; box-shadow: 0 22px 56px rgba(15, 23, 42, .09), 0 2px 6px rgba(15, 23, 42, .04); display: flex; flex-direction: column; gap: 12px; animation: fadeUp .6s .12s both; }
 .login-card.shake { animation: shake .4s ease-in-out; }
 .login-card h2 { font-size: 21px; }
 .login-card > .muted { margin-top: -8px; margin-bottom: 6px; }
-.login-field { display: flex; align-items: center; gap: 10px; border: 1.5px solid var(--border-strong); border-radius: 11px; padding: 0 12px; height: 48px; color: var(--muted); transition: border-color .15s, box-shadow .15s, transform .15s; }
-.login-field:focus-within { border-color: var(--primary); box-shadow: 0 0 0 4px rgba(27, 42, 78, .14); color: var(--primary); transform: translateY(-1px); }
+.login-field { display: flex; align-items: center; gap: 10px; border: 1.5px solid var(--border-strong); border-radius: 11px; padding: 0 12px; height: 48px; color: #94a3b8; background: var(--surface-2); transition: border-color .15s, box-shadow .15s, transform .15s, background .15s; }
+.login-field:focus-within { border-color: var(--primary); box-shadow: 0 0 0 4px rgba(27, 42, 78, .14); color: var(--primary); background: #fff; transform: translateY(-1px); }
 .login-field input { flex: 1; border: 0; outline: none; font: inherit; font-size: 15px; color: var(--text); background: transparent; min-width: 0; }
+.login-field input::placeholder { color: #94a3b8; }
 .login-field .eye { border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; padding: 4px; }
 .login-error { min-height: 20px; color: var(--red); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; opacity: 0; transform: translateY(-4px); transition: opacity .2s, transform .2s; }
 .login-error.show { opacity: 1; transform: none; }
@@ -999,38 +1032,33 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .login-btn:hover .icon { transform: translateX(3px); }
 .login-foot { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); animation: fadeUp .6s .25s both; }
 .login-foot .maker { display: inline-flex; align-items: center; gap: 7px; letter-spacing: .02em; }
-.login-foot .maker b { font-weight: 700; color: #d5dbe7; letter-spacing: .04em; }
-.login-foot .maker-mark { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 10.5px; font-weight: 900; color: #0B0F19; background: linear-gradient(135deg, #f0c46a, #E0A73A); }
+.login-foot .maker b { font-weight: 700; color: var(--text-2); letter-spacing: .04em; }
+.login-foot .maker-mark { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; font-size: 10.5px; font-weight: 900; color: #fff; background: var(--primary); }
 .login-foot .maker-copy { font-size: 11px; opacity: .7; }
 .login.leaving .login-card { animation: zoomOut .5s forwards; }
 .login.leaving .login-brand { animation: fadeOut .5s forwards; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } }
 @keyframes zoomOut { to { opacity: 0; transform: scale(.94) translateY(-10px); } }
 @keyframes fadeOut { to { opacity: 0; } }
-/* Login — a soft dark navy look, whatever theme the rest of the system uses */
-.login { background: linear-gradient(125deg, #050d24 0%, #0a1838 30%, #07122d 55%, #0d1f48 80%, #050c22 100%); background-size: 260% 260%; animation: loginFlow 22s ease-in-out infinite; color-scheme: dark; }
-/* a faint dot grid that drifts slowly behind the card */
-.login::before { content: ""; position: absolute; inset: -40px; pointer-events: none; background-image: radial-gradient(rgba(255, 255, 255, .13) 1px, transparent 1.4px); background-size: 28px 28px; mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 75%); -webkit-mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 75%); animation: gridDrift 40s linear infinite; }
-@keyframes loginFlow { 0%, 100% { background-position: 0% 40%; } 50% { background-position: 100% 60%; } }
-@keyframes gridDrift { from { transform: translate(0, 0); } to { transform: translate(28px, 28px); } }
-.login .login-brand h1 { color: #f1f5f9; }
-.login .login-brand p, .login .login-foot { color: #b4bfd6; }
-.login .brand-logo.lg { box-shadow: 0 10px 30px rgba(224, 167, 58, .3); }
-.login .login-card { background: rgba(16, 32, 74, .6); border: 1px solid rgba(255, 255, 255, .14); box-shadow: 0 24px 60px rgba(8, 12, 28, .45); }
-.login .login-card h2 { color: #f1f5f9; }
-.login .login-card .muted { color: #b4bfd6; }
-.login .login-field { border-color: rgba(255, 255, 255, .2); color: #a3afc8; background: rgba(255, 255, 255, .08); }
-.login .login-field:focus-within { border-color: #E0A73A; color: #E0A73A; box-shadow: 0 0 0 4px rgba(224, 167, 58, .16); }
-.login .login-field input { color: #e8eef3; }
-.login .login-field input::placeholder { color: #95a2bd; }
-.login .login-field .eye { color: #a3afc8; }
-.login .login-error { color: #f87171; }
-.login .login-btn { background: #E0A73A; border-color: #E0A73A; color: #0B0F19; }
-.login .login-btn:not(:disabled):hover { background: #ebb54f; border-color: #ebb54f; box-shadow: 0 10px 24px rgba(224, 167, 58, .3); }
-.login .spinner.light { border-color: rgba(255, 255, 255, .3); border-top-color: #ffffff; }
+/* the Sign in button: the system's dark blue */
+.login .login-btn { background: var(--primary); border-color: var(--primary); color: #fff; }
+.login .login-btn:not(:disabled):hover { background: #14203C; border-color: #14203C; }
+/* behind the card: a faint dot grid drifting slowly, and soft glows in the logo's red and the dark blue floating about */
+.login-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.login-bg::before { content: ""; position: absolute; inset: -40px; background-image: radial-gradient(rgba(27, 42, 78, .16) 1px, transparent 1.4px); background-size: 26px 26px; mask-image: radial-gradient(ellipse at 50% 45%, #000 20%, transparent 72%); -webkit-mask-image: radial-gradient(ellipse at 50% 45%, #000 20%, transparent 72%); animation: loginGrid 30s linear infinite; }
+.login-bg i { position: absolute; width: clamp(260px, 36vw, 480px); aspect-ratio: 1; border-radius: 50%; filter: blur(64px); will-change: transform; }
+.login-bg i:nth-child(1) { left: -8%; top: -12%; background: rgba(255, 49, 49, .22); animation: loginFloatA 18s ease-in-out infinite; }
+.login-bg i:nth-child(2) { right: -10%; bottom: -14%; background: rgba(255, 49, 49, .18); animation: loginFloatB 22s ease-in-out infinite; }
+.login-bg i:nth-child(3) { right: 14%; top: -6%; width: clamp(200px, 26vw, 360px); background: rgba(27, 42, 78, .14); animation: loginFloatC 26s ease-in-out infinite; }
+.login-bg i:nth-child(4) { left: 10%; bottom: -10%; width: clamp(180px, 22vw, 320px); background: rgba(27, 42, 78, .11); animation: loginFloatA 24s ease-in-out -8s infinite reverse; }
+@keyframes loginGrid { to { transform: translate(26px, 26px); } }
+@keyframes loginFloatA { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(18vw, 14vh) scale(1.15); } }
+@keyframes loginFloatB { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(-20vw, -12vh) scale(1.1); } }
+@keyframes loginFloatC { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(-12vw, 22vh) scale(.9); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .login, .login::before, .brand-logo.lg, .lock-badge { animation: none; }
+  .lock-badge, .login-bg::before, .login-bg i { animation: none; }
+  .jump-logo, .jump-logo .jl, .jump-logo b, .jump-logo .jl-c { animation: none !important; transform: none !important; opacity: 1 !important; clip-path: none !important; }
 }
 
 /* =========================================================
@@ -1495,6 +1523,9 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
   .main.on-pos { padding-bottom: 16px; }
   .mobile-bar { position: sticky; top: 0; z-index: 40; margin: 0 -12px 12px; padding: 8px 12px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
   .mobile-bar b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* the logo's M before the shop's name: dark on the light theme, white on the dark one */
+  .mobile-m { flex: none; width: 26px; aspect-ratio: 410 / 284; background: url(/brand/m-ink.png) center / contain no-repeat; }
+  :root[data-theme="dark"] .mobile-m { background-image: url(/brand/m.png); }
 
   /* bottom tab bar */
   .bottom-nav { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; background: var(--surface); border-top: 1px solid var(--border); box-shadow: 0 -6px 20px rgba(15, 23, 42, .08); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }

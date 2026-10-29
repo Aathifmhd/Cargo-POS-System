@@ -1,10 +1,11 @@
 /*
  * Cargo POS service worker: the app itself opens without internet.
  * Pages: from the internet first (always the newest app), the copy kept here when there is none.
- * The app's files (/assets/…, icons): kept here once loaded — their names change with every new version.
+ * The app's files (/assets/…, icons, the logo): kept here once loaded. /assets/ names change with every new version;
+ * the icons and /brand/ pictures keep theirs, so CACHE gets a new number whenever one of them changes.
  * The API (/api/…) is never touched here: the app keeps its own offline data (src/offline.js).
  */
-const CACHE = 'cargo-pos-app-v1';
+const CACHE = 'cargo-pos-app-v2';
 
 async function keepApp() {
   const cache = await caches.open(CACHE);
@@ -23,7 +24,12 @@ async function keepApp() {
 }
 
 self.addEventListener('install', (e) => { e.waitUntil(keepApp().catch(() => {})); self.skipWaiting(); });
-self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });
+self.addEventListener('activate', (e) => {
+  e.waitUntil((async () => {
+    for (const k of await caches.keys()) if (k !== CACHE) await caches.delete(k);   // an older version's files (old icons, logo …)
+    await self.clients.claim();
+  })());
+});
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;

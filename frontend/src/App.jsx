@@ -86,14 +86,14 @@ export default function App() {
   if (error) {
     return (
       <div className="boot-error">
-        <h2>Cannot reach the Cargo POS server</h2>
+        <h2>Cannot reach the POS server</h2>
         <p>Start the backend first: open a terminal in <code>backend</code> and run <code>npm start</code>.</p>
         <p className="muted">{error}</p>
         <button className="btn btn-primary" onClick={() => window.location.reload()}>Try again</button>
       </div>
     );
   }
-  if (user === undefined) return <Loading text="Starting Cargo POS…" />;
+  if (user === undefined) return <Loading text="Starting…" />;
   if (!user) return <Login onLoggedIn={setUser} />;
   if (!settings) return <Loading text="Loading your shop…" />;
 

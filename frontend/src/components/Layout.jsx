@@ -147,11 +147,11 @@ export default function Layout() {
     <div className={`shell ${open ? 'nav-open' : ''} ${user.discreet ? 'discreet' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-logo"><Icon name="box" size={20} /></div>
+          <div className="brand-logo"><img src="/brand/m.png" alt="" /></div>
           <div>
             <div className="brand-name">{settings.shop_name || 'Cargo POS'}</div>
-            <div className="brand-sub">POS System · Wholesale</div>
-            <div className="brand-by" title="POS System by Zenatiq Solutions">by <b>Zenatiq Solutions</b></div>
+            <div className="brand-sub">EzyPOS · Wholesale</div>
+            <div className="brand-by" title="EzyPOS by Zenatiq Solutions">by <b>Zenatiq Solutions</b></div>
           </div>
         </div>
         <nav>
@@ -200,6 +200,7 @@ export default function Layout() {
         style={pull > 0 || refreshing ? { transform: `translateY(${Math.round(Math.min(pull, 1) * PULL_TRIGGER)}px)` } : undefined}>
         <div className="mobile-bar">
           <button className="btn btn-icon btn-ghost" onClick={() => setOpen(true)} aria-label="Menu"><Icon name="menu" /></button>
+          <span className="mobile-m" aria-hidden="true" />
           <b>{settings.shop_name}</b>
         </div>
         <OfflineBar user={user} />

@@ -5,7 +5,7 @@
  * the icons and /brand/ pictures keep theirs, so CACHE gets a new number whenever one of them changes.
  * The API (/api/…) is never touched here: the app keeps its own offline data (src/offline.js).
  */
-const CACHE = 'cargo-pos-app-v2';
+const CACHE = 'cargo-pos-app-v3';
 
 async function keepApp() {
   const cache = await caches.open(CACHE);

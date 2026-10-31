@@ -977,7 +977,7 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
    Login
    ========================================================= */
 /* Plain white behind a centred card, whatever theme the rest of the system uses (the light theme's colours inside,
-   even when the system is set to dark); the system's dark blue, and the logo in it with a deeper red (brand/logo-login.svg) */
+   even when the system is set to dark); the system's dark blue, and the logo in it with a deeper red (brand/mizdoo-clothing.svg) */
 .login {
   position: relative; height: 100vh; overflow: hidden; background: #fff; color: var(--text); color-scheme: light;
   --text: #0B0F19; --text-2: #334155; --muted: #64748b; --border: #e3e8ef; --border-strong: #cbd5e1; --surface: #fff; --surface-2: #f8fafc;
@@ -992,7 +992,7 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .login-brand h1 { line-height: 0; }
 .login-brand p { color: var(--muted); margin-top: 12px; animation: fadeUp .6s .1s both; }
 /* The logo (auth.jsx JumpLogo): the letters jump in one after another, join up into the logo with a little bump, then
-   CLOTHINGS opens out from the middle. Each letter is a slice of the logo picture, placed in the logo's own units
+   CLOTHING opens out from the middle. Each letter is a slice of the logo picture, placed in the logo's own units
    (1575 × 430; the letters are the top 299) — --x / --w: where it starts and how wide it is, --i: its turn.
    Before joining up, each sits a quarter further from the middle than in the logo. */
 .jump-logo { --W: min(170px, 48vw); position: relative; display: block; width: var(--W); aspect-ratio: 1575 / 430; margin: 0 auto; }

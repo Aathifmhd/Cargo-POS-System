@@ -41,31 +41,44 @@ const billTitle = (s) => (s.status === 'void' ? 'CANCELLED BILL'
   : s.total < 0 ? (s.payment_type === 'credit' ? 'RETURN · CREDIT NOTE' : 'RETURN · CASH REFUND')
     : s.payment_type === 'credit' ? 'CREDIT INVOICE' : 'CASH BILL');
 
-/** A5 landscape. */
+/**
+ * A5 landscape (format 2 of those the client chose from): the shop in a black band, the customer and the bill's
+ * details in two boxes, the items under black headings, the total in black. Black and white only.
+ */
 function BillA5({ s, d, settings }) {
   const hasDisc = s.items.some((i) => i.disc > 0);
   const credit = s.payment_type === 'credit' && s.total >= 0;
+  const contact = [d.show_address && settings.shop_address, d.show_phone && settings.shop_phone && `Tel: ${settings.shop_phone}`].filter(Boolean).join(' · ');
+  const person = [s.customer_person, s.customer_phone].filter(Boolean).join(' · ');
   return (
     <div className="bill bill-a5" style={{ fontSize: `${d.font_a5}pt` }}>
-      <div className="b-head">
+      <div className="b-band">
         <div className="b-from">
           {d.show_logo && <MLogo className="b-logo" fit="tight" />}
           <div>
             <div className="b-shop">{settings.shop_name}</div>
             {d.title && <div className="b-tag">{d.title}</div>}
-            {d.show_address && settings.shop_address && <div>{settings.shop_address}</div>}
-            {d.show_phone && settings.shop_phone && <div>Tel: {settings.shop_phone}</div>}
+            {contact && <div className="b-contact">{contact}</div>}
           </div>
         </div>
         <div className="right">
           <div className="b-title">{billTitle(s)}</div>
-          <div><b>{s.invoice_no}</b></div>
-          <div>{niceDate(s.date)}{d.show_time && s.created_at ? ` · ${niceTime(s.created_at)}` : ''}</div>
+          <div className="b-no">{s.invoice_no}</div>
         </div>
       </div>
-      <div className="b-meta">
-        <div><span className="b-muted">Bill to </span><b>{s.customer_name}</b>{s.customer_person ? ` · ${s.customer_person}` : ''}{s.customer_phone ? ` · ${s.customer_phone}` : ''}</div>
-        {credit && s.due_date && <div><span className="b-muted">Payment due </span><b>{niceDate(s.due_date)}</b></div>}
+      <div className="b-boxes">
+        <div className="b-box">
+          <div className="b-lbl">BILL TO</div>
+          <b>{s.customer_name}</b>
+          {person && <div>{person}</div>}
+        </div>
+        <div className="b-box">
+          <div className="b-lbl">DETAILS</div>
+          <div className="b-kv">
+            <span>Date</span><b>{niceDate(s.date)}{d.show_time && s.created_at ? ` · ${niceTime(s.created_at)}` : ''}</b>
+            <span>Payment</span><b>{s.payment_type === 'credit' ? 'Credit' : 'Cash'}{credit && s.due_date ? ` · due ${niceDate(s.due_date)}` : ''}</b>
+          </div>
+        </div>
       </div>
       <table className="b-items">
         <thead><tr><th>#</th><th>Item</th><th className="right">Qty</th><th className="right">Rate</th>{hasDisc && <th className="right">Dis</th>}<th className="right">Amount</th></tr></thead>
@@ -75,9 +88,10 @@ function BillA5({ s, d, settings }) {
             {hasDisc && <td className="right">{i.disc ? `${i.disc_pct}%` : '—'}</td>}<td className="right">{money(i.line_total)}</td></tr>
         ))}</tbody>
       </table>
-      {/* the foot of the page: totals, then the signature lines, then the thank-you message */}
+      {/* the foot of the page: the signature lines beside the totals, then the thank-you message */}
       <div className="b-fill" />
       <div className="b-bottom">
+        <div className="b-signs">{d.show_sign && <><div>Customer signature</div><div>For {settings.shop_name}</div></>}</div>
         <div className="b-totals">
           <div><span>Subtotal</span><span>{money(s.subtotal)}</span></div>
           {s.discount > 0 && <div><span>Discount</span><span>- {money(s.discount)}</span></div>}
@@ -88,9 +102,8 @@ function BillA5({ s, d, settings }) {
             {s.customer_balance != null && <div><span>Total outstanding</span><span>{lkr(s.customer_balance)}</span></div>}
           </>}
         </div>
-        {d.show_sign && <div className="b-signs"><div>Customer signature</div><div>For {settings.shop_name}</div></div>}
-        {settings.invoice_footer && <div className="b-thanks">{settings.invoice_footer}</div>}
       </div>
+      {settings.invoice_footer && <div className="b-thanks">{settings.invoice_footer}</div>}
     </div>
   );
 }

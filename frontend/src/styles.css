@@ -1461,14 +1461,18 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .bill-a5 .b-totals div { display: flex; justify-content: space-between; gap: 4mm; padding: .6mm 2mm; white-space: nowrap; }
 .bill-a5 .b-grand { background: #000; color: #fff; font-size: 1.15em; font-weight: 800; padding: 1.4mm 2mm !important; }
 .bill-a5 .b-thanks { margin-top: 2.5mm; text-align: center; font-size: .8em; break-inside: avoid; }
-.bill-80 { width: 80mm; padding: 3mm 4mm; }
-.bill-80 .b-shop { font-size: 1.4em; }
-.bill-80 .b-logo { width: 16mm; aspect-ratio: 410 / 284; margin: 0 auto 1.2mm; }
-.bill-80 .b-title { margin: 1.5mm 0; }
+/* 80 mm (format 1 of those the client chose from): centred at the top, dashed lines between the parts */
+.bill-80 { width: 80mm; padding: 4mm 4mm 5mm; }
+.bill-80 .b-logo { width: 14mm; aspect-ratio: 345 / 280; margin: 0 auto 1.5mm; }
+.bill-80 .b-shop { font-size: 1.56em; line-height: 1.2; }
+.bill-80 .b-small { font-size: .89em; }
+.bill-80 .b-title { font-size: 1.11em; letter-spacing: .12em; margin-bottom: 1.5mm; }
 .bill-80 .b-row { display: flex; justify-content: space-between; gap: 2mm; }
-.bill-80 .b-rule { border-top: 0.3mm dashed #000; margin: 1.5mm 0; }
-.bill-80 .b-line { margin-bottom: 1mm; }
-.bill-80 .b-grand { font-size: 1.3em; font-weight: 800; margin-top: 1mm; }
+.bill-80 .b-row > :last-child { text-align: right; white-space: nowrap; }
+.bill-80 .b-rule { border-top: 0.3mm dashed #000; margin: 2mm 0; }
+.bill-80 .b-line { margin-bottom: 1.4mm; }
+.bill-80 .b-grand { font-size: 1.39em; font-weight: 800; margin: 1mm 0; }
+.bill-80 .b-thanks { margin-top: 1mm; }
 /* on screen: the bill on its paper (Settings preview, /print/sale) */
 .bill-paper { flex: none; background: #fff; box-shadow: 0 4px 18px rgba(0,0,0,.12); border-radius: 4px; margin: 0 auto; overflow: hidden; }
 .bill-paper.paper-a5 { width: 210mm; min-height: 148mm; padding: 7mm; box-sizing: border-box; }

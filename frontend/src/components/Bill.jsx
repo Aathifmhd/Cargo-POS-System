@@ -108,25 +108,31 @@ function BillA5({ s, d, settings }) {
   );
 }
 
-/** 80 mm receipt. */
+/**
+ * 80 mm receipt (format 1 of those the client chose from): everything centred at the top, dashed lines between the
+ * parts — the bill, the items, the totals, the message. Black only (a receipt printer).
+ */
 function Bill80({ s, d, settings }) {
   const credit = s.payment_type === 'credit' && s.total >= 0;
+  const person = [s.customer_person, s.customer_phone].filter(Boolean).join(' · ');
   return (
     <div className="bill bill-80" style={{ fontSize: `${d.font_80}pt` }}>
       <div className="center">
-        {d.show_logo && <MLogo className="b-logo" />}
+        {d.show_logo && <MLogo className="b-logo" fit="tight" />}
         <div className="b-shop">{settings.shop_name}</div>
-        {d.title && <div>{d.title}</div>}
-        {d.show_address && settings.shop_address && <div>{settings.shop_address}</div>}
-        {d.show_phone && settings.shop_phone && <div>Tel: {settings.shop_phone}</div>}
-        <div className="b-title">{billTitle(s)}</div>
+        {d.title && <div className="b-tag">{d.title}</div>}
+        {d.show_address && settings.shop_address && <div className="b-small">{settings.shop_address}</div>}
+        {d.show_phone && settings.shop_phone && <div className="b-small">Tel: {settings.shop_phone}</div>}
       </div>
+      <div className="b-rule" />
+      <div className="b-title center">{billTitle(s)}</div>
       <div className="b-row"><span>{s.invoice_no}</span><span>{niceDate(s.date)}{d.show_time && s.created_at ? ` ${niceTime(s.created_at)}` : ''}</span></div>
-      <div>{s.customer_name}</div>
+      <div>Customer: <b>{s.customer_name}</b></div>
+      {person && <div>{person}</div>}
       <div className="b-rule" />
       {s.items.map((i, idx) => (
         <div key={i.id ?? idx} className="b-line">
-          <div>{i.name}{d.show_code && i.code ? ` (${i.code})` : ''}</div>
+          <div>{i.name}{d.show_code && i.code && <span className="b-small"> ({i.code})</span>}</div>
           <div className="b-row"><span>{int(i.pcs)} × {money(i.price)}{i.disc ? ` −${i.disc_pct}%` : ''}</span><span>{money(i.line_total)}</span></div>
         </div>
       ))}
@@ -136,11 +142,12 @@ function Bill80({ s, d, settings }) {
       <div className="b-row b-grand"><span>TOTAL</span><span>{lkr(s.total)}</span></div>
       {credit && d.show_balance && <>
         <div className="b-row"><span>Paid</span><span>{money(s.paid_at_sale)}</span></div>
-        <div className="b-row"><b>Balance</b><b>{money(s.total - s.paid_at_sale)}</b></div>
+        <div className="b-row"><b>Balance on this bill</b><b>{money(s.total - s.paid_at_sale)}</b></div>
         {s.customer_balance != null && <div className="b-row"><span>Total outstanding</span><span>{lkr(s.customer_balance)}</span></div>}
       </>}
       <div className="b-rule" />
-      {settings.invoice_footer && <div className="center">{settings.invoice_footer}</div>}
+      {credit && s.due_date && <div className="b-small center">Payment due <b>{niceDate(s.due_date)}</b></div>}
+      {settings.invoice_footer && <div className="b-small center b-thanks">{settings.invoice_footer}</div>}
     </div>
   );
 }

@@ -1435,13 +1435,13 @@ kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 1px 6px;
 .bill .b-logo { display: block; flex: none; height: auto; color: #000; }   /* the logo's M (components/brand.jsx) */
 .bill .b-tag { font-weight: 600; }
 .bill .b-title { font-weight: 800; letter-spacing: .04em; }
-/* A5 (format 2 of those the client chose from): the shop in a black band, two boxes (the customer, the bill's
+/* A5 (format 2 of those the client chose from): the shop in an outlined band (white, black letters), two boxes (the customer, the bill's
    details), the items under black headings, the total in black */
 .bill-a5 { width: 100%; min-height: 134mm; display: flex; flex-direction: column; }
 .bill-a5 .b-fill { flex: 1; min-height: 3mm; }
-.bill-a5 .b-band { display: flex; justify-content: space-between; align-items: center; gap: 6mm; background: #000; color: #fff; padding: 3mm 4mm; border-radius: 1.5mm; }
+.bill-a5 .b-band { display: flex; justify-content: space-between; align-items: center; gap: 6mm; background: #fff; color: #000; border: 0.3mm solid #000; padding: 3mm 4mm; border-radius: 1.5mm; }
 .bill-a5 .b-from { display: flex; align-items: center; gap: 3mm; }
-.bill-a5 .b-logo { width: 12mm; aspect-ratio: 345 / 280; color: #fff; }
+.bill-a5 .b-logo { width: 12mm; aspect-ratio: 345 / 280; color: #000; }
 .bill-a5 .b-shop { letter-spacing: .03em; line-height: 1.15; }
 .bill-a5 .b-contact { font-size: .82em; }
 .bill-a5 .b-title { font-size: 1.2em; letter-spacing: .14em; }

@@ -42,7 +42,7 @@ const billTitle = (s) => (s.status === 'void' ? 'CANCELLED BILL'
     : s.payment_type === 'credit' ? 'CREDIT INVOICE' : 'CASH BILL');
 
 /**
- * A5 landscape (format 2 of those the client chose from): the shop in a black band, the customer and the bill's
+ * A5 landscape (format 2 of those the client chose from): the shop in an outlined band, the customer and the bill's
  * details in two boxes, the items under black headings, the total in black. Black and white only.
  */
 function BillA5({ s, d, settings }) {
